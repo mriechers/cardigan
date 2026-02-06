@@ -15,6 +15,12 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+# Allow DATABASE_PATH env var to override the alembic.ini URL.
+# This is used in Docker where the DB lives on a mounted volume.
+db_path = os.getenv("DATABASE_PATH")
+if db_path:
+    config.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+
 target_metadata = None
 
 

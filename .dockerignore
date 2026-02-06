@@ -1,0 +1,46 @@
+# Git
+.git
+.github
+
+# Python
+__pycache__
+*.py[cod]
+venv/
+.env
+
+# Node
+node_modules/
+web/node_modules/
+web/dist/
+
+# Data (mounted as volumes, not baked into image)
+*.db
+OUTPUT/
+transcripts/
+logs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Planning & docs (not needed at runtime)
+planning/
+docs/
+*.md
+!web/README.md
+
+# Claude agent config (not needed in container)
+.claude/
+claude-desktop-project/
+
+# Tests (not needed in production image)
+tests/

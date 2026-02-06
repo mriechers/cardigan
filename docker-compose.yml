@@ -1,0 +1,58 @@
+# Editorial Assistant v3.0 - Docker Compose
+#
+# Usage:
+#   cp .env.example .env   # fill in your API keys
+#   docker compose up -d   # start all services
+#   docker compose logs -f  # tail logs
+#
+# Data is persisted in named volumes (survives container restarts).
+# To reset the database, remove the volume: docker compose down -v
+
+services:
+  # --- FastAPI backend ---
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      - DATABASE_PATH=/app/data/dashboard.db
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - AIRTABLE_API_KEY=${AIRTABLE_API_KEY}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    volumes:
+      - db-data:/app/data
+      - output-data:/app/OUTPUT
+      - transcript-data:/app/transcripts
+      - log-data:/app/logs
+      - ./config:/app/config:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+    restart: unless-stopped
+
+  # --- React dashboard (nginx) ---
+  web:
+    build:
+      context: ./web
+    ports:
+      - "${WEB_PORT:-3000}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  db-data:
+  output-data:
+  transcript-data:
+  log-data:
