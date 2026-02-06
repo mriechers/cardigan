@@ -139,7 +139,7 @@ class TestScanEndpoint:
         ):
 
             mock_config.return_value = MagicMock(
-                server_url="https://example.com",
+                server_url="https://mmingest.pbswi.wisc.edu",
                 directories=["/content"],
             )
 
@@ -177,7 +177,7 @@ class TestScanEndpoint:
         ):
 
             mock_config.return_value = MagicMock(
-                server_url="https://example.com",
+                server_url="https://mmingest.pbswi.wisc.edu",
                 directories=["/content"],
             )
 
@@ -306,7 +306,7 @@ class TestTranscriptEndpoints:
 
             # Mock config
             mock_config.return_value = MagicMock(
-                server_url="https://example.com",
+                server_url="https://mmingest.pbswi.wisc.edu",
                 directories=["/content"],
             )
 
