@@ -160,6 +160,32 @@ The system routes requests to cost-appropriate models:
 
 ---
 
+## Agent Definitions
+
+Each agent in the pipeline is defined by a system prompt document. These are the canonical references for agent behavior and capabilities.
+
+### Pipeline Agents
+
+| Agent | Definition | Role |
+|-------|------------|------|
+| Analyst | [`.claude/agents/analyst.md`](.claude/agents/analyst.md) | Extracts key themes, speakers, and metadata from raw transcripts |
+| Formatter | [`.claude/agents/formatter.md`](.claude/agents/formatter.md) | Transforms timecoded transcripts into clean, readable markdown |
+| SEO Specialist | [`.claude/agents/seo.md`](.claude/agents/seo.md) | Generates search-optimized titles, descriptions, tags, and keywords |
+| Timestamp | [`.claude/agents/timestamp.md`](.claude/agents/timestamp.md) | Creates chapter markers and timestamps for video content |
+| Manager (QA) | [`.claude/agents/manager.md`](.claude/agents/manager.md) | Final quality assurance checkpoint reviewing all agent outputs |
+| Copy Editor | [`.claude/agents/copy_editor.md`](.claude/agents/copy_editor.md) | Reviews and refines content for clarity, grammar, and PBS style |
+| AP Style Bot | [`.claude/agents/ap_style_bot.md`](.claude/agents/ap_style_bot.md) | Ensures UI text and interface copy follows AP Style Guidelines |
+
+### Claude Desktop / Cardigan
+
+| Document | Description |
+|----------|-------------|
+| [EDITOR_AGENT_INSTRUCTIONS.md](claude-desktop-project/EDITOR_AGENT_INSTRUCTIONS.md) | Canonical editor prompt — authoritative source for all editor agent behavior |
+| [GEMINI.md](claude-desktop-project/GEMINI.md) | Gemini substitute editor persona configuration |
+| [GEMINI_FULL_INSTRUCTIONS.md](claude-desktop-project/GEMINI_FULL_INSTRUCTIONS.md) | Extended Gemini-specific instructions layered on canonical source |
+
+---
+
 ## Accessibility
 
 The web dashboard implements accessibility features targeting **WCAG 2.1 Level AA** compliance.
