@@ -849,8 +849,14 @@ class LLMClient:
         """Make Google Gemini API call."""
         client = await self.get_client()
 
-        # Build endpoint with API key
-        endpoint = f"{config['endpoint']}?key={api_key}"
+        endpoint = config["endpoint"]
+
+        # Pass API key via header instead of URL query parameter
+        # to avoid key leakage in logs and error messages
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": api_key,
+        }
 
         # Convert messages to Gemini format
         contents = []
@@ -872,6 +878,7 @@ class LLMClient:
 
         response = await client.post(
             endpoint,
+            headers=headers,
             json=payload,
         )
         response.raise_for_status()

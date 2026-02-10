@@ -47,6 +47,23 @@ except ImportError:
         return None
 
 
+def _escape_airtable_formula_value(value: str) -> str:
+    """Escape a string for safe use in an Airtable filterByFormula.
+
+    Prevents formula injection by escaping single quotes and backslashes.
+
+    Args:
+        value: Raw string value to embed in a formula
+
+    Returns:
+        Escaped string safe for use inside single-quoted Airtable formula values
+    """
+    # Escape backslashes first, then single quotes
+    value = value.replace("\\", "\\\\")
+    value = value.replace("'", "\\'")
+    return value
+
+
 class AirtableClient:
     """
     READ-ONLY Airtable client for SST lookups.
@@ -100,7 +117,8 @@ class AirtableClient:
 
         # Use filterByFormula to search by Media ID field
         # Airtable formula: {Media ID} = 'value'
-        formula = f"{{{self.MEDIA_ID_FIELD}}} = '{media_id}'"
+        safe_media_id = _escape_airtable_formula_value(media_id)
+        formula = f"{{{self.MEDIA_ID_FIELD}}} = '{safe_media_id}'"
 
         params = {
             "filterByFormula": formula,
@@ -154,8 +172,8 @@ class AirtableClient:
             for i in range(0, len(media_ids), batch_size):
                 batch = media_ids[i : i + batch_size]
 
-                # Build OR formula for this batch
-                conditions = [f"{{{self.MEDIA_ID_FIELD}}}='{mid}'" for mid in batch]
+                # Build OR formula for this batch (with escaped values)
+                conditions = [f"{{{self.MEDIA_ID_FIELD}}}='{_escape_airtable_formula_value(mid)}'" for mid in batch]
                 formula = f"OR({','.join(conditions)})"
 
                 params = {

@@ -321,7 +321,9 @@ async def search_sst_by_media_id(media_id: str) -> Optional[dict]:
     # Use Airtable's filterByFormula to search by Media ID
     import urllib.parse
 
-    formula = f"{{Media ID}}='{media_id}'"
+    # Escape media_id to prevent formula injection
+    safe_media_id = media_id.replace("\\", "\\\\").replace("'", "\\'")
+    formula = f"{{Media ID}}='{safe_media_id}'"
     encoded_formula = urllib.parse.quote(formula)
     url = f"{AIRTABLE_API_BASE}/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}?filterByFormula={encoded_formula}"
 
