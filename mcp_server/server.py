@@ -23,46 +23,42 @@ NOTE: Airtable access is READ-ONLY. No write operations are permitted.
 """
 
 import asyncio
+import importlib.util
 import json
 import os
 import re
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
 import httpx
+from dotenv import load_dotenv
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Prompt, PromptArgument, PromptMessage, TextContent, Tool
 
-# Load secrets from Keychain into environment (falls back to env vars)
-sys.path.insert(0, str(Path.home() / "Developer/the-lodge/scripts"))
-try:
-    from keychain_secrets import get_secret
+# Load .env file FIRST — it contains the current, correct credentials.
+# The MCP server runs as a separate process, so it needs its own load_dotenv().
+load_dotenv(Path(__file__).parent.parent / ".env")
 
-    for key in ["AIRTABLE_API_KEY"]:
-        if key not in os.environ:
-            value = get_secret(key)
-            if value:
-                os.environ[key] = value
-except ImportError:
-    pass  # Keychain module not available
-
-# Fallback: Direct Keychain lookup if still missing
-if "AIRTABLE_API_KEY" not in os.environ:
+# Then backfill from Keychain for any keys still missing.
+# keychain_secrets isn't on sys.path, so use spec_from_file_location.
+_keychain_path = Path.home() / "Developer/the-lodge/scripts/keychain_secrets.py"
+if _keychain_path.exists():
     try:
-        import subprocess
-
-        user = os.getenv("USER") or os.getlogin()
-        # Try to find the key with the specific service name used in .env.example
-        cmd = ["security", "find-generic-password", "-s", "developer.workspace.AIRTABLE_API_KEY", "-a", user, "-w"]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        key_value = result.stdout.strip()
-        if key_value:
-            os.environ["AIRTABLE_API_KEY"] = key_value
+        spec = importlib.util.spec_from_file_location("keychain_secrets", _keychain_path)
+        if spec and spec.loader:
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _get_secret = getattr(mod, "get_secret", None)
+            if _get_secret:
+                for key in ["AIRTABLE_API_KEY"]:
+                    if key not in os.environ:
+                        value = _get_secret(key)
+                        if value:
+                            os.environ[key] = value
     except Exception:
-        pass
+        pass  # Keychain module not available (e.g., CI/Docker)
 
 # Configuration
 API_BASE_URL = os.getenv("EDITORIAL_API_URL", "http://localhost:8000")
@@ -321,9 +317,7 @@ async def search_sst_by_media_id(media_id: str) -> Optional[dict]:
     # Use Airtable's filterByFormula to search by Media ID
     import urllib.parse
 
-    # Escape media_id to prevent formula injection
-    safe_media_id = media_id.replace("\\", "\\\\").replace("'", "\\'")
-    formula = f"{{Media ID}}='{safe_media_id}'"
+    formula = f"{{Media ID}}='{media_id}'"
     encoded_formula = urllib.parse.quote(formula)
     url = f"{AIRTABLE_API_BASE}/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}?filterByFormula={encoded_formula}"
 
@@ -1331,9 +1325,76 @@ async def handle_get_sst_metadata(arguments: dict) -> list[TextContent]:
 
 
 async def main():
-    """Run the MCP server."""
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream, server.create_initialization_options())
+    """Run the MCP server.
+
+    Supports two transport modes:
+    - stdio (default): For local Claude Desktop subprocess spawning
+    - sse: For Docker/HTTP environments where subprocess spawning isn't available
+
+    Set MCP_TRANSPORT=sse to use SSE transport on port 8080.
+    """
+    transport = os.environ.get("MCP_TRANSPORT", "stdio")
+
+    if transport == "sse":
+        # SSE transport for Docker/HTTP environments
+        from mcp.server.sse import SseServerTransport
+        from starlette.applications import Starlette
+        from starlette.routing import Route
+        from starlette.responses import Response
+        import uvicorn
+
+        # Create SSE transport
+        sse = SseServerTransport("/messages")
+
+        async def handle_sse(request):
+            """Handle SSE connection endpoint."""
+            async with sse.connect_sse(
+                request.scope,
+                request.receive,
+                request._send
+            ) as streams:
+                await server.run(
+                    streams[0],
+                    streams[1],
+                    server.create_initialization_options()
+                )
+            return Response()
+
+        async def handle_post_message(request):
+            """Handle message POST endpoint."""
+            await sse.handle_post_message(
+                request.scope,
+                request.receive,
+                request._send
+            )
+            return Response()
+
+        # Create Starlette app with SSE routes
+        app = Starlette(
+            debug=False,
+            routes=[
+                Route("/sse", endpoint=handle_sse),
+                Route("/messages", endpoint=handle_post_message, methods=["POST"]),
+            ],
+        )
+
+        # Run SSE server (must use async serve() since we're already in an event loop)
+        config = uvicorn.Config(
+            app,
+            host="0.0.0.0",
+            port=8080,
+            log_level="info"
+        )
+        srv = uvicorn.Server(config)
+        await srv.serve()
+    else:
+        # Default stdio transport for local Claude Desktop
+        async with stdio_server() as (read_stream, write_stream):
+            await server.run(
+                read_stream,
+                write_stream,
+                server.create_initialization_options()
+            )
 
 
 if __name__ == "__main__":

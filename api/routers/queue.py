@@ -1,4 +1,4 @@
-"""Queue management router for Editorial Assistant v3.0 API.
+"""Queue management router for Cardigan API.
 
 Provides CRUD operations for the job queue.
 """
@@ -7,9 +7,10 @@ import logging
 import os
 from typing import List, Optional, Tuple
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from api.middleware.rate_limit import RATE_EXPENSIVE, limiter
 from api.models.job import Job, JobCreate, JobStatus, JobUpdate
 from api.services import database
 from api.services.airtable import AirtableClient
@@ -18,7 +19,7 @@ from api.services.utils import extract_media_id, get_srt_duration, parse_srt
 logger = logging.getLogger(__name__)
 
 # Base path for transcript files
-TRANSCRIPTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "transcripts")
+TRANSCRIPTS_DIR = os.getenv("TRANSCRIPTS_DIR", os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "transcripts"))
 
 
 def calculate_transcript_metrics_from_file(transcript_file: str) -> Tuple[Optional[float], Optional[int]]:
@@ -144,7 +145,9 @@ async def list_queue(
     status_code=201,
     responses={409: {"model": DuplicateJobResponse, "description": "Transcript already processed or in queue"}},
 )
+@limiter.limit(RATE_EXPENSIVE)
 async def add_to_queue(
+    request: Request,
     job_create: JobCreate,
     force: bool = Query(default=False, description="Force re-queue even if transcript was already processed"),
 ) -> Job:
@@ -223,6 +226,8 @@ async def add_to_queue(
 
     # Attempt to auto-link SST record from Airtable and store all metadata
     try:
+        if not media_id:
+            raise ValueError("No valid Media ID extracted from filename")
         # Try to lookup SST record if Airtable is configured
         airtable_client = AirtableClient()
         record = await airtable_client.search_sst_by_media_id(media_id)

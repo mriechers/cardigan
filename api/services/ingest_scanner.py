@@ -10,6 +10,7 @@ File type routing:
 """
 
 import logging
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -656,7 +657,7 @@ class IngestScanner:
             logger.info(f"Tracked new {remote_file.file_type}: {remote_file.filename}")
             return True
 
-    async def download_file(self, file_id: int, destination_dir: str = "transcripts") -> dict:
+    async def download_file(self, file_id: int, destination_dir: str = os.getenv("TRANSCRIPTS_DIR", "transcripts")) -> dict:
         """
         Download a file from the ingest server to a local directory.
 

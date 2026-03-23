@@ -1,4 +1,4 @@
-"""Utility functions for Editorial Assistant v3.0 API.
+"""Utility functions for Cardigan API.
 
 Provides timezone-aware datetime handling, SRT parsing, and common utilities.
 """
@@ -234,23 +234,18 @@ def calculate_transcript_metrics(
     }
 
 
-def extract_media_id(filename: str) -> str:
-    """Extract Media ID from transcript filename.
+def extract_media_id(filename: str) -> Optional[str]:
+    """Extract PBS Wisconsin Media ID from transcript filename using regex.
 
-    Removes processing suffixes and OS duplicate patterns, but PRESERVES
-    revision identifiers. Handles PBS Wisconsin naming conventions:
-    - _ForClaude suffix: Stripped (processing artifact)
-    - (1), - Copy, copy 2: Stripped (OS duplicate suffixes)
-    - _REV[date] suffix: PRESERVED (distinct Media ID for revised content)
-
-    Revised video files are denoted as original Media ID plus _REV followed by
-    the revision date (e.g., _REV20260102). This creates a new, distinct Media ID.
+    Searches the filename for a valid PBS Media ID pattern:
+    4 alphanumeric chars (program code) + 4 digits (episode) + optional letter suffix.
+    Returns None if no valid Media ID pattern is found.
 
     Args:
         filename: Transcript filename (with or without extension)
 
     Returns:
-        Extracted media ID (base filename without processing/duplicate suffixes)
+        Extracted media ID, or None if filename doesn't contain a valid pattern.
 
     Examples:
         >>> extract_media_id("2WLI1209HD_ForClaude.txt")
@@ -258,30 +253,21 @@ def extract_media_id(filename: str) -> str:
         >>> extract_media_id("9UNP2005HD.srt")
         '9UNP2005HD'
         >>> extract_media_id("2BUC0000HDWEB02_REV20251202.srt")
-        '2BUC0000HDWEB02_REV20251202'
-        >>> extract_media_id("Some_Project_Name.txt")
-        'Some_Project_Name'
-        >>> extract_media_id("2WLI1209HD_ForClaude_REV20251202.txt")
-        '2WLI1209HD_REV20251202'
-        >>> extract_media_id("2WLIComicArtistSM (1).srt")
-        '2WLIComicArtistSM'
-        >>> extract_media_id("2WLI1209HD - Copy.txt")
-        '2WLI1209HD'
+        '2BUC0000HDWEB02'
+        >>> extract_media_id("2WLI1210HD_midshow.srt")
+        '2WLI1210HD'
+        >>> extract_media_id("6GWQ2503_REV20251121.srt")
+        '6GWQ2503'
+        >>> extract_media_id("TLB CC IN WI.srt")
+        >>> extract_media_id("test_transcript.txt")
+        >>> extract_media_id("WC_S01_trailer.srt")
     """
-    # Get filename without path
-    base_name = Path(filename).name
+    stem = Path(filename).stem
 
-    # Remove extension
-    stem = Path(base_name).stem
-
-    # Remove only _ForClaude suffix (processing artifact)
-    # PRESERVE _REV[date] suffix as it denotes a distinct revised Media ID
-    stem = re.sub(r"_ForClaude", "", stem, flags=re.IGNORECASE)
-
-    # Remove OS duplicate patterns (1), - Copy, copy 2, etc.
-    stem, was_duplicate = sanitize_duplicate_filename(stem)
-
-    return stem
+    # PBS Media ID pattern: 4 alphanumeric + 4 digits + optional letter/digit suffix
+    # e.g., 2WLI1209HD, 6GWQ2503, 2BUC0000HDWEB02
+    match = re.search(r"([A-Z0-9]{4}\d{4}(?:[A-Z]+\d{0,2})?)", stem, re.IGNORECASE)
+    return match.group(1).upper() if match else None
 
 
 # =============================================================================

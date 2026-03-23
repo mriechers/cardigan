@@ -86,7 +86,6 @@ export default function Settings() {
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [restarting, setRestarting] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<TabId>('agents')
@@ -148,29 +147,6 @@ export default function Settings() {
     }
   }, [])
 
-  const handleComponentAction = async (component: 'worker' | 'watcher', action: 'start' | 'stop' | 'restart') => {
-    setRestarting(`${component}-${action}`)
-    setError(null)
-    setSuccess(null)
-
-    try {
-      const res = await fetch(`/api/system/${component}/${action}`, { method: 'POST' })
-      const data = await res.json()
-
-      if (res.ok && data.success) {
-        setSuccess(data.message)
-        // Refresh status after a short delay
-        setTimeout(() => fetchSystemStatus(), 1000)
-      } else {
-        setError(data.message || data.detail || `Failed to ${action} ${component}`)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : `Failed to ${action} ${component}`)
-    } finally {
-      setRestarting(null)
-      setTimeout(() => setSuccess(null), 5000)
-    }
-  }
 
   useEffect(() => {
     fetchConfig()
@@ -906,7 +882,7 @@ export default function Settings() {
             <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
               <h2 className="text-lg font-semibold text-white mb-4">System Components</h2>
               <p className="text-sm text-gray-400 mb-6">
-                Monitor and control the background processes that power The Metadata Neighborhood.
+                Monitor the containerized services that power The Metadata Neighborhood. Components are managed by Docker Compose.
               </p>
 
               <div className="space-y-4">
@@ -914,18 +890,16 @@ export default function Settings() {
                 <div className="p-4 bg-gray-900 rounded-lg">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
-                      <div className={`w-3 h-3 rounded-full ${systemStatus?.api.running ? 'bg-green-400' : 'bg-red-400'}`} />
+                      <div className="w-3 h-3 rounded-full bg-green-400" />
                       <div>
                         <div className="font-medium text-white">API Server</div>
                         <div className="text-sm text-gray-400">
-                          {systemStatus?.api.running
-                            ? `Running (PID ${systemStatus.api.pid})`
-                            : 'Not running'}
+                          Running - Managed by Docker
                         </div>
                       </div>
                     </div>
-                    <div className="text-xs text-gray-500">
-                      Restart via terminal
+                    <div className="px-3 py-1 text-xs bg-blue-600/20 text-blue-400 border border-blue-500/30 rounded">
+                      Container: cardigan-api
                     </div>
                   </div>
                 </div>
@@ -934,43 +908,18 @@ export default function Settings() {
                 <div className="p-4 bg-gray-900 rounded-lg">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
-                      <div className={`w-3 h-3 rounded-full ${systemStatus?.worker.running ? 'bg-green-400' : 'bg-red-400'}`} />
+                      <div className={`w-3 h-3 rounded-full ${systemStatus?.worker.running ? 'bg-green-400' : 'bg-yellow-400'}`} />
                       <div>
                         <div className="font-medium text-white">Worker</div>
                         <div className="text-sm text-gray-400">
                           {systemStatus?.worker.running
-                            ? `Running (PID ${systemStatus.worker.pid})`
-                            : 'Not running'}
+                            ? 'Running - Managed by Docker'
+                            : 'Managed by Docker'}
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center space-x-2">
-                      {systemStatus?.worker.running ? (
-                        <>
-                          <button
-                            onClick={() => handleComponentAction('worker', 'restart')}
-                            disabled={restarting !== null}
-                            className="px-3 py-1 text-sm bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 text-white rounded transition-colors"
-                          >
-                            {restarting === 'worker-restart' ? 'Restarting...' : 'Restart'}
-                          </button>
-                          <button
-                            onClick={() => handleComponentAction('worker', 'stop')}
-                            disabled={restarting !== null}
-                            className="px-3 py-1 text-sm bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white rounded transition-colors"
-                          >
-                            {restarting === 'worker-stop' ? 'Stopping...' : 'Stop'}
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          onClick={() => handleComponentAction('worker', 'start')}
-                          disabled={restarting !== null}
-                          className="px-3 py-1 text-sm bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white rounded transition-colors"
-                        >
-                          {restarting === 'worker-start' ? 'Starting...' : 'Start'}
-                        </button>
-                      )}
+                    <div className="px-3 py-1 text-xs bg-blue-600/20 text-blue-400 border border-blue-500/30 rounded">
+                      Container: cardigan-api
                     </div>
                   </div>
                 </div>
@@ -979,43 +928,18 @@ export default function Settings() {
                 <div className="p-4 bg-gray-900 rounded-lg">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
-                      <div className={`w-3 h-3 rounded-full ${systemStatus?.watcher.running ? 'bg-green-400' : 'bg-red-400'}`} />
+                      <div className={`w-3 h-3 rounded-full ${systemStatus?.watcher.running ? 'bg-green-400' : 'bg-yellow-400'}`} />
                       <div>
                         <div className="font-medium text-white">Transcript Watcher</div>
                         <div className="text-sm text-gray-400">
                           {systemStatus?.watcher.running
-                            ? `Running (PID ${systemStatus.watcher.pid})`
-                            : 'Not running'}
+                            ? 'Running - Managed by Docker'
+                            : 'Managed by Docker'}
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center space-x-2">
-                      {systemStatus?.watcher.running ? (
-                        <>
-                          <button
-                            onClick={() => handleComponentAction('watcher', 'restart')}
-                            disabled={restarting !== null}
-                            className="px-3 py-1 text-sm bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 text-white rounded transition-colors"
-                          >
-                            {restarting === 'watcher-restart' ? 'Restarting...' : 'Restart'}
-                          </button>
-                          <button
-                            onClick={() => handleComponentAction('watcher', 'stop')}
-                            disabled={restarting !== null}
-                            className="px-3 py-1 text-sm bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white rounded transition-colors"
-                          >
-                            {restarting === 'watcher-stop' ? 'Stopping...' : 'Stop'}
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          onClick={() => handleComponentAction('watcher', 'start')}
-                          disabled={restarting !== null}
-                          className="px-3 py-1 text-sm bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white rounded transition-colors"
-                        >
-                          {restarting === 'watcher-start' ? 'Starting...' : 'Start'}
-                        </button>
-                      )}
+                    <div className="px-3 py-1 text-xs bg-blue-600/20 text-blue-400 border border-blue-500/30 rounded">
+                      Container: cardigan-api
                     </div>
                   </div>
                 </div>
@@ -1024,19 +948,26 @@ export default function Settings() {
 
             {/* Folder Paths */}
             <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
-              <h2 className="text-lg font-semibold text-white mb-4">Folder Paths</h2>
+              <h2 className="text-lg font-semibold text-white mb-4">Docker Volume Mounts</h2>
+              <p className="text-sm text-gray-400 mb-4">
+                Persistent data volumes mounted in the container
+              </p>
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between p-3 bg-gray-900 rounded">
                   <span className="text-gray-400">Transcripts (input)</span>
-                  <code className="text-cyan-400">transcripts/</code>
+                  <code className="text-cyan-400">/data/transcripts</code>
                 </div>
                 <div className="flex justify-between p-3 bg-gray-900 rounded">
                   <span className="text-gray-400">Output (processed)</span>
-                  <code className="text-cyan-400">OUTPUT/</code>
+                  <code className="text-cyan-400">/data/output</code>
                 </div>
                 <div className="flex justify-between p-3 bg-gray-900 rounded">
-                  <span className="text-gray-400">Logs</span>
-                  <code className="text-cyan-400">logs/</code>
+                  <span className="text-gray-400">Database</span>
+                  <code className="text-cyan-400">/data/db/dashboard.db</code>
+                </div>
+                <div className="flex justify-between p-3 bg-gray-900 rounded">
+                  <span className="text-gray-400">Uploads</span>
+                  <code className="text-cyan-400">/data/uploads</code>
                 </div>
               </div>
             </div>
@@ -1044,14 +975,29 @@ export default function Settings() {
             {/* Terminal Commands */}
             <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
               <div className="flex items-start space-x-3">
-                <span className="text-blue-400 text-xl">💡</span>
-                <div>
-                  <h3 className="text-sm font-medium text-white">Terminal Commands</h3>
-                  <p className="text-xs text-gray-400 mt-1 mb-2">
-                    For full system restart, use the terminal scripts:
+                <span className="text-blue-400 text-xl">🐳</span>
+                <div className="w-full">
+                  <h3 className="text-sm font-medium text-white">Docker Commands</h3>
+                  <p className="text-xs text-gray-400 mt-1 mb-3">
+                    Manage the containerized system via Docker Compose
                   </p>
-                  <div className="space-y-1 text-xs font-mono">
-                    <div className="text-gray-300">./scripts/stop.sh && ./scripts/start.sh</div>
+                  <div className="space-y-2 text-xs">
+                    <div className="p-2 bg-gray-900 rounded">
+                      <div className="text-gray-500 mb-1">Restart all services:</div>
+                      <code className="text-green-400">docker compose restart</code>
+                    </div>
+                    <div className="p-2 bg-gray-900 rounded">
+                      <div className="text-gray-500 mb-1">View logs:</div>
+                      <code className="text-green-400">docker compose logs -f</code>
+                    </div>
+                    <div className="p-2 bg-gray-900 rounded">
+                      <div className="text-gray-500 mb-1">Stop system:</div>
+                      <code className="text-green-400">docker compose down</code>
+                    </div>
+                    <div className="p-2 bg-gray-900 rounded">
+                      <div className="text-gray-500 mb-1">Rebuild and restart:</div>
+                      <code className="text-green-400">docker compose up --build -d</code>
+                    </div>
                   </div>
                 </div>
               </div>

@@ -1,4 +1,4 @@
-"""Chat prototype router for Editorial Assistant v3.0 API.
+"""Chat prototype router for Cardigan API.
 
 Provides a simple REST-based chat endpoint for validating the embedded chat pattern.
 This is a minimal implementation for UX validation before building full WebSocket/persistence.
@@ -93,4 +93,4 @@ async def send_chat_message(request: ChatRequest) -> ChatResponse:
 
     except Exception as e:
         logger.error(f"Chat error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Chat request failed")
+        raise HTTPException(status_code=500, detail=f"Chat request failed: {str(e)}")

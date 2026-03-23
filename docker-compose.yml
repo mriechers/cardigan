@@ -1,0 +1,100 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      - DATABASE_PATH=/data/db/dashboard.db
+      - OUTPUT_DIR=/data/output
+      - CORS_ORIGINS=http://localhost:3000
+      - CARDIGAN_API_KEY=${CARDIGAN_API_KEY}
+      - TRANSCRIPTS_DIR=/data/transcripts
+    volumes:
+      - db-data:/data/db
+      - output-data:/data/output
+      - transcript-data:/data/transcripts
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/system/health')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    env_file: .env
+    environment:
+      - DATABASE_PATH=/data/db/dashboard.db
+      - OUTPUT_DIR=/data/output
+      - CARDIGAN_API_KEY=${CARDIGAN_API_KEY}
+      - TRANSCRIPTS_DIR=/data/transcripts
+    volumes:
+      # NOTE: SQLite shared via volume between api + worker. WAL mode handles
+      # concurrent access adequately for low-throughput workloads. Consider
+      # PostgreSQL if write contention becomes an issue.
+      - db-data:/data/db
+      - output-data:/data/output
+      - transcript-data:/data/transcripts
+    depends_on:
+      api:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    ports:
+      - "3000:3000"
+    environment:
+      - CARDIGAN_API_KEY=${CARDIGAN_API_KEY}
+    depends_on:
+      - api
+
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    command: ["python", "-m", "mcp_server.server"]
+    ports:
+      - "8080:8080"
+    env_file: .env
+    environment:
+      - MCP_TRANSPORT=sse
+      - EDITORIAL_API_URL=http://api:8000
+      - DATABASE_PATH=/data/db/dashboard.db
+      - OUTPUT_DIR=/data/output
+      - TRANSCRIPTS_DIR=/data/transcripts
+    volumes:
+      - db-data:/data/db
+      - output-data:/data/output
+      - transcript-data:/data/transcripts
+    depends_on:
+      api:
+        condition: service_healthy
+    profiles:
+      - mcp
+    restart: unless-stopped
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_started
+    profiles:
+      - tunnel
+    restart: unless-stopped
+
+volumes:
+  db-data:
+  output-data:
+  transcript-data:

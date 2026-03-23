@@ -78,21 +78,8 @@ def _kill_process(pattern: str) -> bool:
         return False
 
 
-ALLOWED_COMPONENTS = {
-    "run_worker.py": ["./venv/bin/python", "run_worker.py"],
-    "watch_transcripts.py": ["./venv/bin/python", "watch_transcripts.py"],
-}
-
-
-def _start_component(component_key: str, log_file: str) -> bool:
-    """Start a component in background.
-
-    Only components defined in ALLOWED_COMPONENTS can be started.
-    Uses list-form subprocess (no shell=True) to prevent command injection.
-    """
-    if component_key not in ALLOWED_COMPONENTS:
-        return False
-
+def _start_component(command: str, log_file: str) -> bool:
+    """Start a component in background."""
     try:
         project_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         log_path = os.path.join(project_dir, "logs", log_file)
@@ -100,10 +87,8 @@ def _start_component(component_key: str, log_file: str) -> bool:
         # Ensure logs directory exists
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
-        command_list = ALLOWED_COMPONENTS[component_key]
-
         with open(log_path, "a") as log:
-            subprocess.Popen(command_list, cwd=project_dir, stdout=log, stderr=log, start_new_session=True)
+            subprocess.Popen(command, shell=True, cwd=project_dir, stdout=log, stderr=log, start_new_session=True)
         return True
     except Exception:
         return False
@@ -133,7 +118,7 @@ async def restart_worker():
     _kill_process("run_worker.py")
 
     # Start new worker
-    success = _start_component("run_worker.py", "worker.log")
+    success = _start_component("./venv/bin/python run_worker.py", "worker.log")
 
     if success:
         return RestartResponse(success=True, message="Worker restarted successfully")
@@ -149,7 +134,7 @@ async def restart_watcher():
     _kill_process("watch_transcripts.py")
 
     # Start new watcher
-    success = _start_component("watch_transcripts.py", "watcher.log")
+    success = _start_component("./venv/bin/python watch_transcripts.py", "watcher.log")
 
     if success:
         return RestartResponse(success=True, message="Watcher restarted successfully")
@@ -184,7 +169,7 @@ async def start_worker():
     if _find_process("run_worker.py"):
         return RestartResponse(success=False, message="Worker is already running")
 
-    success = _start_component("run_worker.py", "worker.log")
+    success = _start_component("./venv/bin/python run_worker.py", "worker.log")
 
     if success:
         return RestartResponse(success=True, message="Worker started")
@@ -199,7 +184,7 @@ async def start_watcher():
     if _find_process("watch_transcripts.py"):
         return RestartResponse(success=False, message="Watcher is already running")
 
-    success = _start_component("watch_transcripts.py", "watcher.log")
+    success = _start_component("./venv/bin/python watch_transcripts.py", "watcher.log")
 
     if success:
         return RestartResponse(success=True, message="Watcher started")

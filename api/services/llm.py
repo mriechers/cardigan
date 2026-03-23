@@ -1,4 +1,4 @@
-"""LLM service layer for Editorial Assistant v3.0.
+"""LLM service layer for Cardigan.
 
 Provides unified interface for LLM API calls with cost tracking,
 model selection, and event logging.
@@ -626,7 +626,7 @@ class LLMClient:
         # Send trace to Langfuse for observability
         langfuse = get_langfuse_client()
         if langfuse.is_available():
-            langfuse.trace_generation(
+            await langfuse.trace_generation(
                 name=f"{phase}-generation" if phase else "llm-generation",
                 model=response.model,
                 input_messages=messages,
@@ -660,7 +660,7 @@ class LLMClient:
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             "HTTP-Referer": "https://pbswisconsin.org",
-            "X-Title": "PBS Wisconsin Editorial Assistant",
+            "X-Title": "Cardigan",
         }
 
         payload = {
@@ -849,14 +849,8 @@ class LLMClient:
         """Make Google Gemini API call."""
         client = await self.get_client()
 
-        endpoint = config["endpoint"]
-
-        # Pass API key via header instead of URL query parameter
-        # to avoid key leakage in logs and error messages
-        headers = {
-            "Content-Type": "application/json",
-            "x-goog-api-key": api_key,
-        }
+        # Build endpoint with API key
+        endpoint = f"{config['endpoint']}?key={api_key}"
 
         # Convert messages to Gemini format
         contents = []
@@ -878,7 +872,6 @@ class LLMClient:
 
         response = await client.post(
             endpoint,
-            headers=headers,
             json=payload,
         )
         response.raise_for_status()

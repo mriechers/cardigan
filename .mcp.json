@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "editorial-assistant": {
+      "type": "stdio",
+      "command": "/Users/mriechers/Developer/cardigan-v4/venv/bin/python",
+      "args": ["-m", "mcp_server.server"],
+      "cwd": "/Users/mriechers/Developer/cardigan-v4",
+      "env": {
+        "EDITORIAL_API_URL": "http://localhost:8000"
+      }
+    }
+  }
+}

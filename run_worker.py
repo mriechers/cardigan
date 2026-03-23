@@ -17,29 +17,35 @@ Secrets:
 """
 import argparse
 import asyncio
+import importlib.util
 import os
 import signal
 import sys
 from pathlib import Path
 
-# Load secrets from Keychain into environment (falls back to .env)
-sys.path.insert(0, str(Path.home() / "Developer/the-lodge/scripts"))
-try:
-    from keychain_secrets import get_secret
-
-    # Load known secrets into environment if not already set
-    for key in ["OPENROUTER_API_KEY", "AIRTABLE_API_KEY"]:
-        if key not in os.environ:
-            value = get_secret(key)
-            if value:
-                os.environ[key] = value
-except ImportError:
-    pass  # Keychain module not available (e.g., CI/Docker)
-
-# Load remaining environment variables from .env file
+# Load .env file FIRST — it contains the current, correct credentials
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Then backfill from Keychain for any keys still missing.
+# keychain_secrets isn't on sys.path, so use spec_from_file_location.
+_keychain_path = Path.home() / "Developer/the-lodge/scripts/keychain_secrets.py"
+if _keychain_path.exists():
+    try:
+        spec = importlib.util.spec_from_file_location("keychain_secrets", _keychain_path)
+        if spec and spec.loader:
+            _keychain_mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(_keychain_mod)
+            _get_secret = getattr(_keychain_mod, "get_secret", None)
+            if _get_secret:
+                for key in ["OPENROUTER_API_KEY", "AIRTABLE_API_KEY"]:
+                    if key not in os.environ:
+                        value = _get_secret(key)
+                        if value:
+                            os.environ[key] = value
+    except Exception:
+        pass  # Keychain module not available (e.g., CI/Docker)
 
 import json
 from pathlib import Path
@@ -103,7 +109,7 @@ async def main(args):
 
     try:
         worker_id = config.worker_id
-        print(f"[{worker_id}] Starting Editorial Assistant job worker...")
+        print(f"[{worker_id}] Starting Cardigan job worker...")
         print(f"[{worker_id}] Poll interval: {config.poll_interval}s")
         print(f"[{worker_id}] Heartbeat interval: {config.heartbeat_interval}s")
         print(f"[{worker_id}] Concurrent jobs: {config.max_concurrent_jobs}")
@@ -120,7 +126,7 @@ async def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run the Editorial Assistant job processing worker")
+    parser = argparse.ArgumentParser(description="Run the Cardigan job processing worker")
     parser.add_argument(
         "--poll-interval",
         type=int,

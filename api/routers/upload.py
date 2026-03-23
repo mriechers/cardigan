@@ -1,68 +1,28 @@
-"""Upload router for Editorial Assistant v3.0 API.
+"""Upload router for Cardigan API.
 
 Provides bulk transcript upload endpoint.
 """
 
 import logging
-import re
-from pathlib import Path, PurePosixPath
+import os
+from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
+from api.middleware.rate_limit import RATE_EXPENSIVE, limiter
 from api.models.job import JobCreate
 from api.services import database
 from api.services.airtable import AirtableClient
 from api.services.utils import extract_media_id
-
-
-def sanitize_upload_filename(filename: str) -> str:
-    """Sanitize an uploaded filename to prevent path traversal attacks.
-
-    Strips directory components, null bytes, and dangerous characters.
-
-    Args:
-        filename: Raw filename from upload
-
-    Returns:
-        Sanitized filename safe for filesystem use
-
-    Raises:
-        ValueError: If filename is empty or results in an empty string
-    """
-    if not filename:
-        raise ValueError("Empty filename")
-
-    # Remove null bytes
-    filename = filename.replace("\x00", "")
-
-    # Extract just the filename component (strip any directory parts)
-    filename = PurePosixPath(filename.replace("\\", "/")).name
-
-    # Remove any remaining path traversal components
-    filename = filename.replace("..", "")
-
-    # Allow only safe characters: alphanumeric, hyphen, underscore, space, dot
-    filename = re.sub(r"[^\w\-. ]", "_", filename)
-
-    # Remove leading dots (prevent hidden files)
-    filename = filename.lstrip(".")
-
-    # Remove leading/trailing whitespace
-    filename = filename.strip()
-
-    if not filename:
-        raise ValueError("Filename contains only unsafe characters")
-
-    return filename
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 # Configuration
-TRANSCRIPTS_DIR = Path("transcripts")
+TRANSCRIPTS_DIR = Path(os.getenv("TRANSCRIPTS_DIR", "transcripts"))
 ALLOWED_EXTENSIONS = {".txt", ".srt"}
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 MAX_BATCH_SIZE = 20
@@ -86,8 +46,10 @@ class UploadResponse(BaseModel):
 
 
 @router.post("/transcripts", response_model=UploadResponse)
+@limiter.limit(RATE_EXPENSIVE)
 async def upload_transcripts(
-    files: List[UploadFile] = File(..., description="Transcript files (.txt or .srt)")
+    request: Request,
+    files: List[UploadFile] = File(..., description="Transcript files (.txt or .srt)"),
 ) -> UploadResponse:
     """Upload multiple transcript files and queue for processing.
 
@@ -155,35 +117,8 @@ async def upload_transcripts(
                 failed_count += 1
                 continue
 
-            # Sanitize filename to prevent path traversal
-            try:
-                safe_filename = sanitize_upload_filename(file.filename or "")
-            except ValueError:
-                results.append(
-                    UploadStatus(
-                        filename=file.filename or "unknown",
-                        success=False,
-                        error="Invalid filename",
-                    )
-                )
-                failed_count += 1
-                continue
-
             # Save file to transcripts directory
-            file_path = TRANSCRIPTS_DIR / safe_filename
-
-            # Final safety check: ensure resolved path is within TRANSCRIPTS_DIR
-            if not file_path.resolve().is_relative_to(TRANSCRIPTS_DIR.resolve()):
-                results.append(
-                    UploadStatus(
-                        filename=file.filename or "unknown",
-                        success=False,
-                        error="Invalid file path",
-                    )
-                )
-                failed_count += 1
-                continue
-
+            file_path = TRANSCRIPTS_DIR / (file.filename or "")
             file_path.write_bytes(content)
             logger.info(f"Saved transcript: {file_path}")
 
@@ -196,12 +131,12 @@ async def upload_transcripts(
 
             job_create = JobCreate(
                 project_name=project_name,
-                transcript_file=safe_filename,
+                transcript_file=file.filename or "",
             )
 
             # Check for duplicate by media ID
             media_id = extract_media_id(job_create.transcript_file)
-            existing_jobs = await database.find_jobs_by_media_id(media_id)
+            existing_jobs = await database.find_jobs_by_media_id(media_id) if media_id else []
             if existing_jobs:
                 existing = existing_jobs[0]
                 results.append(
@@ -220,6 +155,8 @@ async def upload_transcripts(
 
             # Attempt auto-link to Airtable SST record
             try:
+                if not media_id:
+                    raise ValueError("No valid Media ID extracted")
                 airtable_client = AirtableClient()
                 record = await airtable_client.search_sst_by_media_id(media_id)
 
@@ -250,7 +187,7 @@ async def upload_transcripts(
 
         except Exception as e:
             logger.error(f"Failed to upload {file.filename}: {e}")
-            results.append(UploadStatus(filename=file.filename or "unknown", success=False, error="Upload processing failed"))
+            results.append(UploadStatus(filename=file.filename or "unknown", success=False, error=str(e)))
             failed_count += 1
 
     return UploadResponse(uploaded=uploaded_count, failed=failed_count, files=results)

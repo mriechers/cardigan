@@ -27,3 +27,6 @@ web/dist/
 # OS
 .DS_Store
 logs/
+
+# Non-Claude agent worktrees (created per CLAUDE.md isolation rules)
+.worktrees/

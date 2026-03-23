@@ -173,6 +173,14 @@
       "coverage_threshold": 0.70,
       "min_source_words": 500,
       "pause_on_truncation": true
+    },
+    "chunking": {
+      "enabled": true,
+      "threshold_words": 3000,
+      "target_chunk_words": 2000,
+      "overlap_captions": 8,
+      "max_parallel": 3,
+      "min_tier": 1
     }
   },
   "openrouter_presets": {

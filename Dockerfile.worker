@@ -1,0 +1,31 @@
+FROM python:3.13-slim
+
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Install dependencies first for better layer caching
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code (same as API — shares layers when built together)
+COPY api/ api/
+COPY config/ config/
+# Copy .claude subdirectories if they exist (agents for system prompts, templates for output formats)
+COPY .claude/ .claude/
+COPY alembic.ini* ./
+COPY pyproject.toml* ./
+COPY run_worker.py .
+COPY entrypoint.sh .
+RUN chmod +x entrypoint.sh
+
+# Create writable directories before switching to non-root user
+RUN mkdir -p logs /data/db /data/output /data/transcripts
+
+# Run as non-root user for security
+RUN useradd --create-home appuser && chown -R appuser:appuser logs config /data
+USER appuser
+
+ENTRYPOINT ["./entrypoint.sh"]
+
+CMD ["python", "run_worker.py"]

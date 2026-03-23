@@ -1,7 +1,7 @@
 """
-Editorial Assistant v3.0 API
+Cardigan v4.0 API
 
-FastAPI-based control plane for the Editorial Assistant system.
+FastAPI-based control plane for the Cardigan system.
 """
 
-__version__ = "3.0.0-dev"
+__version__ = "4.0.0"

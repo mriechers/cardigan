@@ -1,13 +1,14 @@
-"""WebSocket router for Editorial Assistant v3.0 API.
+"""WebSocket router for Cardigan API.
 
 Provides real-time job status updates via WebSocket connections.
 Broadcasts job status changes to all connected clients.
 """
 
 import logging
+import os
 from typing import Any, Dict, Set
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from api.models.job import Job
 
@@ -98,11 +99,14 @@ manager = ConnectionManager()
 
 
 @router.websocket("/ws/jobs")
-async def websocket_jobs_endpoint(websocket: WebSocket):
+async def websocket_jobs_endpoint(websocket: WebSocket, token: str = Query(default=None)):
     """WebSocket endpoint for real-time job updates.
 
     Clients connect to this endpoint to receive real-time notifications
     when jobs are created, updated, or completed.
+
+    When CARDIGAN_API_KEY is set, the `token` query parameter must match.
+    When the env var is empty/absent, all connections are allowed (dev mode).
 
     Message format:
         {
@@ -111,6 +115,11 @@ async def websocket_jobs_endpoint(websocket: WebSocket):
             "stats": { ... } // Queue stats (for stats_updated events)
         }
     """
+    api_key = os.environ.get("CARDIGAN_API_KEY", "")
+    if api_key and token != api_key:
+        await websocket.close(code=1008, reason="Policy Violation")
+        return
+
     await manager.connect(websocket)
 
     try:

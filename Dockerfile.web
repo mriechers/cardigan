@@ -1,0 +1,22 @@
+# Stage 1: Build React app
+FROM node:20-alpine AS build
+
+WORKDIR /app
+
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+
+COPY web/ .
+# Help.tsx imports docs/WEB_UI_GUIDE.md via relative path from repo root
+COPY docs/ ../docs/
+RUN npm run build
+
+# Stage 2: Serve with nginx
+FROM nginx:alpine
+
+COPY nginx.conf /etc/nginx/nginx.conf.template
+COPY --from=build /app/dist /usr/share/nginx/html
+
+EXPOSE 3000
+
+CMD ["/bin/sh", "-c", "envsubst '${CARDIGAN_API_KEY}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && nginx -g 'daemon off;'"]

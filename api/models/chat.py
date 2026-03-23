@@ -1,4 +1,4 @@
-"""Chat models for Editorial Assistant v3.0 API.
+"""Chat models for Cardigan API.
 
 Includes models for:
 - Chat messages (individual conversation turns)

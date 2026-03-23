@@ -1,38 +1,46 @@
 """
-Editorial Assistant v3.0 - FastAPI Application
+Cardigan v4.0 - FastAPI Application
 
 Main entry point for the API server.
 """
 
+import importlib.util
 import os
-import sys
 from pathlib import Path
 
-# Load secrets from Keychain into environment (falls back to .env)
-# This must happen before any imports that use the secrets
-sys.path.insert(0, str(Path.home() / "Developer/the-lodge/scripts"))
-try:
-    from keychain_secrets import get_secret
-
-    # Load known secrets into environment if not already set
-    for key in ["OPENROUTER_API_KEY", "AIRTABLE_API_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"]:
-        if key not in os.environ:
-            value = get_secret(key)
-            if value:
-                os.environ[key] = value
-except ImportError:
-    pass  # Keychain module not available (e.g., CI/Docker)
-
-# Load remaining environment variables from .env file
+# Load .env file FIRST — it contains the current, correct credentials
 from dotenv import load_dotenv
 
 load_dotenv()
 
+# Then backfill from Keychain for any keys still missing.
+# keychain_secrets isn't on sys.path, so use spec_from_file_location.
+_keychain_path = Path.home() / "Developer/the-lodge/scripts/keychain_secrets.py"
+if _keychain_path.exists():
+    try:
+        spec = importlib.util.spec_from_file_location("keychain_secrets", _keychain_path)
+        if spec and spec.loader:
+            _keychain_mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(_keychain_mod)
+            _get_secret = getattr(_keychain_mod, "get_secret", None)
+            if _get_secret:
+                for key in ["OPENROUTER_API_KEY", "AIRTABLE_API_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"]:
+                    if key not in os.environ:
+                        value = _get_secret(key)
+                        if value:
+                            os.environ[key] = value
+    except Exception:
+        pass  # Keychain module not available (e.g., CI/Docker)
+
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
+from api.middleware.auth import APIKeyMiddleware
+from api.middleware.rate_limit import limiter, rate_limit_exceeded_handler
 from api.services import database
 from api.services.ingest_config import ensure_defaults as ensure_ingest_defaults
 from api.services.ingest_scheduler import start_scheduler, stop_scheduler
@@ -52,7 +60,7 @@ async def lifespan(app: FastAPI):
     closes connections on shutdown.
     """
     # Startup: Initialize database and LLM client
-    logger.info("Starting Editorial Assistant API v3.0")
+    logger.info("Starting Cardigan API v4.0")
     await database.init_db()
     logger.info("Database initialized")
     get_llm_client()  # Initialize LLM client
@@ -73,43 +81,41 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Editorial Assistant API",
-    description="API for PBS Wisconsin Editorial Assistant v3.0",
-    version="3.0.0-dev",
+    title="Cardigan API",
+    description="API for Cardigan - PBS Wisconsin transcript processing and metadata generation",
+    version="4.0.0",
     lifespan=lifespan,
 )
 
 # CORS middleware for web dashboard
+_default_origins = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+]
+_cors_env = os.environ.get("CORS_ORIGINS", "")
+_cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()] if _cors_env else _default_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",  # React dev server
-        "http://localhost:5173",  # Vite dev server
-        "http://metadata.neighborhood:3000",  # Local domain alias
-        "https://cardigan.bymarkriechers.com",  # Cloudflare Tunnel
-    ],
+    allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
+# API key authentication middleware
+app.add_middleware(APIKeyMiddleware)
 
-@app.middleware("http")
-async def add_security_headers(request: Request, call_next):
-    """Add security headers to all responses."""
-    response: Response = await call_next(request)
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-    return response
+# Rate limiter
+app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 
 
 @app.get("/")
 async def root():
     """Health check endpoint."""
-    return {"status": "ok", "version": "3.0.0-dev"}
+    return {"status": "ok", "version": "4.0.0"}
 
 
 @app.get("/api/system/health")

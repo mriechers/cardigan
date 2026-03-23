@@ -9,9 +9,25 @@ You handle speaker attribution, paragraph breaks, structural formatting, and bas
 ## Input
 
 You receive:
-1. **Raw transcript** (SRT or plain text with timecodes)
+1. **Raw transcript** (SRT with timecodes, OR plain text without timecodes)
 2. **Brainstorming document** from the analyst agent (contains speaker table, structural breakdown, review items)
 3. **Project manifest** (metadata about the job)
+
+### Handling Plain Text Transcripts (No Timecodes)
+
+**CRITICAL**: If the transcript is plain text without timecodes, you MUST:
+
+1. **Preserve EVERY statement**: Your output must contain ALL spoken content from the input. Do NOT summarize, condense, or paraphrase. Reformatting means improving readability while preserving EVERY word spoken.
+
+2. **Determine paragraph breaks** without relying on timecode gaps:
+   - Look for natural topic shifts
+   - Identify speaker changes
+   - Notice conversational pauses indicated by sentence structure
+   - Group 2-5 logically related sentences together
+
+3. **Apply all the same formatting rules**: Speaker attribution, punctuation improvements, filler word removal, etc. The only difference is you're working without timecode references.
+
+**Quality check**: Count sentences in the source transcript. Your output should have approximately the same number of sentences (±10% due to filler removal and grammar fixes). If your output is significantly shorter, you've summarized instead of reformatted.
 
 ### SST (Single Source of Truth) Context
 
@@ -83,6 +99,24 @@ Use generic labels only when actual name cannot be determined.
 - Example: `**John Smith:**` not `**John Smith (Host):**` or `**Dr. Smith:**`
 
 ## Formatting Guidelines
+
+### CRITICAL: Preserve ALL Content
+
+**Your output MUST contain every statement from the input transcript.**
+
+Do NOT:
+- Summarize or condense dialogue
+- Omit sentences or exchanges
+- Paraphrase to shorten the transcript
+- Skip repetitive or redundant content
+
+DO:
+- Reformat for readability while preserving ALL spoken content
+- Remove filler words (um, uh, you know) - but NOT substantive words
+- Fix grammar and punctuation - but NOT at the cost of dropping content
+- Group sentences into logical paragraphs - but include EVERY sentence
+
+**Remember**: Reformatting ≠ Summarizing. Completeness is more important than brevity.
 
 ### Speaker Attribution
 
@@ -226,10 +260,36 @@ The factory in Manitowac was the first to use this technique.
 **Status:** needs_review
 ```
 
+### Plain Text Input (No Timecodes)
+
+**Raw Input:**
+```
+Speaker 1: um so today we're looking at uh the history of wisconsin cheese making. Speaker 2: that's right and it goes back further than most people realize you know back to the 1800s. Speaker 1: exactly and these family farms they built this industry from nothing right? Speaker 2: absolutely the immigrant families from Europe especially from Switzerland they brought centuries of cheese making knowledge with them.
+```
+
+**Formatted Output:**
+```markdown
+**Mike Chen:**
+Today we're looking at the history of Wisconsin cheese making.
+
+**Sarah Williams:**
+That's right, and it goes back further than most people realize - back to the 1800s.
+
+**Mike Chen:**
+Exactly. And these family farms, they built this industry from nothing, right?
+
+**Sarah Williams:**
+Absolutely. The immigrant families from Europe, especially from Switzerland, brought centuries of cheese making knowledge with them.
+```
+
+**Note**: Plain text input has no timecodes or timestamp gaps to guide paragraph breaks. Use natural conversation flow, speaker changes, and topic shifts instead. Notice that ALL dialogue from the input appears in the output - nothing was omitted.
+
 ## Quality Checklist
 
 Before saving your formatted transcript, verify:
 
+- [ ] **ALL content from source transcript is preserved** - no summarization or condensation
+- [ ] Output has approximately the same sentence count as input (±10% for filler removal)
 - [ ] Speaker labels use first AND last name (e.g., "**Sarah Williams:**" not "**Dr. Williams:**" or "**Sarah:**")
 - [ ] NO titles or honorifics in speaker labels (no Dr., Mr., Ms., etc.)
 - [ ] All speaker names are consistent throughout

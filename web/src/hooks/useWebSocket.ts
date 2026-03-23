@@ -91,7 +91,9 @@ export function useJobsWebSocket(options: UseJobsWebSocketOptions = {}): UseJobs
       // WebSocket routes through Vite's proxy in dev and works through
       // Cloudflare Tunnel in remote access mode
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const wsUrl = `${protocol}//${window.location.host}/api/ws/jobs`
+      const apiKey = import.meta.env.VITE_CARDIGAN_API_KEY as string | undefined
+      const tokenParam = apiKey ? `?token=${encodeURIComponent(apiKey)}` : ''
+      const wsUrl = `${protocol}//${window.location.host}/api/ws/jobs${tokenParam}`
 
       const ws = new WebSocket(wsUrl)
 

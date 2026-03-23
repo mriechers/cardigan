@@ -1,10 +1,11 @@
 [project]
 name = "editorial-assistant"
-version = "3.0.0-dev"
+version = "3.5.0"
 requires-python = ">=3.13"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 asyncio_mode = "auto"
 filterwarnings = [
     "ignore::DeprecationWarning",

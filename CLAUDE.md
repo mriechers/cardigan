@@ -2,9 +2,25 @@
 
 This file provides guidance to Claude Code when working with this repository.
 
+## Non-Claude Agents: Workspace Isolation Rules
+
+**If you are NOT Claude Code** (e.g., Gemini CLI, Codex, Copilot, Cursor, or any other LLM agent), you MUST follow these isolation rules to avoid interfering with Claude agent work:
+
+1. **Always work in a git worktree.** Never modify files on the current branch directly. Create a worktree before making any changes:
+   ```bash
+   git worktree add .worktrees/<your-agent-name>-<feature> -b <your-agent-name>/<feature-description>
+   ```
+2. **Always commit to a feature branch.** Your branch name must include your agent identifier (e.g., `gemini/fix-typo`, `codex/add-tests`, `copilot/refactor-utils`). Never commit to `main` or any branch you did not create.
+3. **Never force-push, rebase, or modify branches you did not create.** Treat all existing branches as read-only references.
+4. **Clean up after yourself.** When your work is complete, leave the worktree in place for human review. Do not merge your own branches.
+5. **Follow all other rules in this file.** The conventions below (commit format, secrets management, attribution, etc.) apply to all agents equally.
+
+> Claude Code agents are exempt from the worktree requirement because they are the primary agents for this workspace and coordinate directly with the user.
+
+
 ## Repository Purpose
 
-PBS Wisconsin Editorial Assistant v3.0 - A database-backed, API-first system for processing video transcripts and generating SEO-optimized metadata for streaming platforms.
+Cardigan - A database-backed, API-first system for processing video transcripts and generating SEO-optimized metadata for PBS Wisconsin streaming platforms.
 
 **Key differences from v2.0:**
 - FastAPI-based API layer (not direct script execution)

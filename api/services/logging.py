@@ -1,5 +1,5 @@
 """
-Editorial Assistant v3.0 - Structured JSON Logging
+Cardigan - Structured JSON Logging
 
 Provides JSON-formatted logging for consistent API log output.
 Logs to both console and rotating log files for stability monitoring.
@@ -82,6 +82,19 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(log_data)
 
 
+# Reserved LogRecord attributes — extra keys colliding with these cause KeyError.
+_RESERVED = set(logging.LogRecord("", 0, "", 0, "", (), None).__dict__)
+
+
+class SafeLogger(logging.Logger):
+    """Logger subclass that renames extra keys colliding with LogRecord attributes."""
+
+    def makeRecord(self, name, level, fn, lno, msg, args, exc_info, func=None, extra=None, sinfo=None):
+        if extra:
+            extra = {(f"extra_{k}" if k in _RESERVED else k): v for k, v in extra.items()}
+        return super().makeRecord(name, level, fn, lno, msg, args, exc_info, func, extra, sinfo)
+
+
 # Track whether logging has been set up
 _logging_configured = False
 
@@ -103,6 +116,9 @@ def setup_logging(
         enable_console: Whether to also log to console (default: True)
     """
     global _logging_configured
+
+    # Ensure all future loggers use SafeLogger to prevent extra-key collisions.
+    logging.setLoggerClass(SafeLogger)
 
     if level is None:
         level = os.getenv("LOG_LEVEL", "INFO")

@@ -96,9 +96,9 @@ export default function Layout() {
                 className="h-6"
               />
               <span className="text-lg font-semibold text-white">
-                Digital Editorial Assistant
+                Cardigan
               </span>
-              <span className="text-xs text-gray-400">v3.0</span>
+              <span className="text-xs text-gray-400">v4.0</span>
             </div>
             <div className="flex items-center space-x-1">
               <NavLink

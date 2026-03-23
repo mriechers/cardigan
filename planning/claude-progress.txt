@@ -1,11 +1,103 @@
 # Claude Progress Tracker
-# Last Updated: 2026-01-23
+# Last Updated: 2026-02-10
 
 ## V3.5 Orchestration Status
 
 **Orchestrator:** The Conductor
 **Mode:** Multi-Sprint Planning
-**Status:** Sprint 13.x COMPLETE - Ready for Next Sprint
+**Status:** Sprint 14 COMPLETE - Ready for Next Sprint
+
+---
+
+## Completed Sprint: 14 - Observability & Reliability
+
+### Sprint Goal
+Fix Langfuse integration, resolve retry tracking bugs, and remove all
+sys.path.insert hacks from the codebase. Research job speed patterns
+for future model tier optimization.
+
+### Sprint Status: COMPLETE (2026-02-10)
+
+All 6 tasks completed across 3 tracks (3-agent team):
+
+- Track 1: Langfuse & Observability (2 tasks) - COMPLETE
+- Track 2: Retry Tracking & Reliability (2 tasks) - COMPLETE
+- Track 3: Code Quality (1 task) - COMPLETE
+- Research: Job Speed Patterns (1 task) - COMPLETE
+
+### Final Task Status
+
+| ID | Task | Agent | Status |
+|----|------|-------|--------|
+| 1 | Fix Langfuse credential loading (.env over Keychain) | langfuse-dev | **complete** |
+| 2 | Write test suite for langfuse_client.py (33 tests) | langfuse-dev | **complete** |
+| 3 | Investigate job speed patterns (research) | investigator | **complete** |
+| 4 | Fix retry attempts counter staying at 1 | reliability-dev | **complete** |
+| 5 | Add retry event logging and progress tracking | reliability-dev | **complete** |
+| 6 | Remove sys.path.insert hacks (6 calls, 7 files) | investigator | **complete** |
+
+### Post-Sprint Fix (orchestrator)
+- Fixed `importlib.import_module` → `importlib.util.spec_from_file_location` in langfuse_client.py
+- Fixed 5 test mock targets (`get_secret` → `_keychain_get_secret`)
+- Neutralized `load_dotenv` in tests that clear `os.environ`
+
+### Test Coverage
+- **test_langfuse_client.py**: 33 tests passing (new)
+- **Existing suite**: 242+ passing, pre-existing failures unchanged
+- **sys.path.insert**: Zero instances remaining in codebase
+
+### Key Research Findings (Job Speed Patterns)
+- 159 jobs analyzed, 68 failure events
+- 93% of failures are infrastructure (missing files, logging bug), not model failures
+- Best cheapskate model: `xiaomi/mimo-v2-flash:free` (648 tok/s, 0% escalation)
+- Sleeper pick: `google/gemini-3-flash-preview` (941 tok/s at $0.002/call)
+- Manager phase is cost driver (37% of total spend at $0.018/call avg)
+- Full analysis posted to GitHub Issue #14
+
+### Files Created/Modified
+
+**New Files:**
+- `tests/api/test_langfuse_client.py` - 33 tests for Langfuse client
+- `scripts/__init__.py` - Package init for proper imports
+
+**Modified Files:**
+- `api/services/langfuse_client.py` - Credential priority, importlib.util import
+- `api/services/worker.py` - Retry attempts counter, history preservation
+- `api/routers/jobs.py` - Retry event logging, progress tracking
+- `api/services/airtable.py` - sys.path cleanup, importlib pattern
+- `api/main.py` - load_dotenv priority, sys.path cleanup
+- `run_worker.py` - Same fixes as main.py
+- `mcp_server/server.py` - sys.path cleanup
+- `tests/conftest.py` - Removed sys.path.insert
+- `alembic/env.py` - Removed unnecessary sys.path.insert
+- `scripts/backfill_airtable.py` - sys.path cleanup
+- `scripts/backfill_transcript_metrics.py` - sys.path cleanup
+- `pyproject.toml` - Added pythonpath for pytest
+
+### GitHub Issues Addressed
+- Issue #12 (Langfuse client API compatibility) - Fixed
+- Issue #11 (Phase retry tracking incomplete) - Fixed
+- Issue #9 (Remove sys.path manipulation) - Fixed
+- Issue #14 (Job speed investigation) - Researched, findings documented
+
+### Commits
+- `66c07c3` feat(sprint-14): Langfuse reliability, retry tracking, sys.path cleanup
+- `e0b3f95` fix: Correct Langfuse keychain import and test mocks
+
+---
+
+## V3.5 Sprint Roadmap
+
+### Completed
+- **Sprint 11.1**: Remote Ingest Watcher (16 tasks) - COMPLETE
+- **Sprint 12.1**: Embedded Chat Prototype (8 tasks) - COMPLETE
+- **Sprint 13.x**: "Ready for Work" UX Refinement (8 tasks) - COMPLETE
+- **Sprint 14**: Observability & Reliability (6 tasks) - COMPLETE
+
+### Next Up
+- Chat completion sprints (12.2-12.4)
+- Data visualization sprints (13.4-13.6)
+- Content Calendar, Large Transcript Optimization, Plugin System
 
 ---
 
@@ -110,12 +202,9 @@ This sprint includes a CONTROLLED EXCEPTION to the read-only Airtable policy:
 - **Sprint 11.1**: Remote Ingest Watcher (16 tasks) - COMPLETE
 - **Sprint 12.1**: Embedded Chat Prototype (8 tasks) - COMPLETE
 - **Sprint 13.x**: "Ready for Work" UX Refinement (8 tasks) - COMPLETE
+- **Sprint 14**: Observability & Reliability (6 tasks) - COMPLETE
 
-### Next Up (Wave 1 - Parallel)
-- Sprint 13.1: Langfuse Integration (7 tasks)
-- Sprint 13.2 + 13.3: UX Cleanup + Tests (10 tasks)
-
-### Future (Wave 2-6)
+### Future
 - Chat completion sprints (12.2-12.4)
 - Data visualization sprints (13.4-13.6)
 - Content Calendar, Large Transcript Optimization, Plugin System

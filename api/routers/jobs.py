@@ -1,4 +1,4 @@
-"""Jobs router for Editorial Assistant v3.0 API.
+"""Jobs router for Cardigan API.
 
 Provides endpoints for job detail retrieval, updates, and control operations.
 """
@@ -13,12 +13,13 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
-from api.models.events import SessionEvent
-from api.models.job import Job, JobStatus, JobUpdate
+from api.models.events import EventCreate, EventData, EventType, SessionEvent
+from api.models.job import Job, JobStatus, JobUpdate, PhaseStatus
 from api.services.airtable import AirtableClient
 from api.services.database import (
     get_events_for_job,
     get_job,
+    log_event,
     update_job,
 )
 
@@ -212,7 +213,21 @@ async def retry_job(job_id: int):
 
     # Determine which phases to reset based on failure type
     is_truncation = job.error_message and "TRUNCATION" in job.error_message
-    phases_to_reset = {"formatter", "seo", "manager", "timestamp"} if is_truncation else None
+    if is_truncation:
+        phases_to_reset = {"formatter", "seo", "manager", "timestamp"}
+    else:
+        # Find the first non-completed phase and reset from there forward
+        # This preserves completed phases (e.g., analyst) when a later phase fails
+        phase_names = [p.name for p in phases]
+        first_incomplete_idx = None
+        for i, phase in enumerate(phases):
+            if phase.status != PhaseStatus.completed:
+                first_incomplete_idx = i
+                break
+        if first_incomplete_idx is not None:
+            phases_to_reset = set(phase_names[first_incomplete_idx:])
+        else:
+            phases_to_reset = None  # All completed — reset everything as fallback
 
     # Reset phase statuses and set forced tier, archiving previous run data
     updated_phases = []
@@ -257,6 +272,23 @@ async def retry_job(job_id: int):
         phases=[JobPhase(**p) for p in updated_phases],
     )
     updated_job = await update_job(job_id, job_update)
+
+    # Log user retry event
+    await log_event(
+        EventCreate(
+            job_id=job_id,
+            event_type=EventType.user_action,
+            data=EventData(
+                extra={
+                    "action": "job_retry",
+                    "escalated_tier": escalated_tier,
+                    "tier_label": tier_labels.get(escalated_tier),
+                    "is_truncation_retry": is_truncation,
+                    "phases_reset": list(phases_to_reset) if phases_to_reset else "all",
+                }
+            ),
+        )
+    )
 
     return updated_job
 
@@ -531,6 +563,34 @@ async def retry_phase(
             },
         )
 
+    # Capture original model for event logging
+    original_model = None
+    for phase in job.phases or []:
+        if phase.name == phase_name and phase.model:
+            original_model = phase.model
+            break
+
+    # Log user retry event
+    await log_event(
+        EventCreate(
+            job_id=job_id,
+            event_type=EventType.user_action,
+            data=EventData(
+                phase=phase_name,
+                model=original_model,
+                extra={
+                    "action": "phase_retry",
+                    "tier": effective_tier,
+                    "auto_escalated": tier is None,
+                    "original_model": original_model,
+                },
+            ),
+        )
+    )
+
+    # Set current_phase so UI shows retry in progress
+    await update_job(job_id, JobUpdate(current_phase=phase_name))
+
     # Run the phase retry in the background
     async def run_retry():
         from api.services.worker import JobWorker
@@ -542,6 +602,8 @@ async def retry_phase(
                 "Phase retry failed",
                 extra={"job_id": job_id, "phase": phase_name, "tier": effective_tier, "error": result.get("error")},
             )
+        # Clear current_phase after retry completes
+        await update_job(job_id, JobUpdate(current_phase=None))
 
     background_tasks.add_task(run_retry)
 

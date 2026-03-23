@@ -6,62 +6,37 @@ Provides read-only access to the PBS Wisconsin SST (Single Source of Truth) tabl
 CRITICAL: This service is intentionally READ-ONLY. No write operations are permitted.
 """
 
+import importlib.util
 import os
-import sys
 from pathlib import Path
 from typing import Optional
 
 import httpx
 
-# Load secrets from Keychain (the-lodge shared utility)
-sys.path.insert(0, str(Path.home() / "Developer/the-lodge/scripts"))
-try:
-    from keychain_secrets import get_secret
-except ImportError:
-    # Fallback if keychain_secrets not available
-    def get_secret(key: str, required: bool = False) -> Optional[str]:
-        val = os.environ.get(key)
-        if val:
-            return val
-
-        # Try macOS Keychain directly for known keys
-        if key == "AIRTABLE_API_KEY":
-            try:
-                import subprocess
-
-                user = os.environ.get("USER") or os.getlogin()
-                cmd = [
-                    "security",
-                    "find-generic-password",
-                    "-s",
-                    "developer.workspace.AIRTABLE_API_KEY",
-                    "-a",
-                    user,
-                    "-w",
-                ]
-                result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-                return result.stdout.strip()
-            except Exception:
-                pass
-
-        return None
+# keychain_secrets isn't on sys.path, so use spec_from_file_location.
+_keychain_path = Path.home() / "Developer/the-lodge/scripts/keychain_secrets.py"
+get_secret = None
+if _keychain_path.exists():
+    try:
+        spec = importlib.util.spec_from_file_location("keychain_secrets", _keychain_path)
+        if spec and spec.loader:
+            _keychain_mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(_keychain_mod)
+            get_secret = getattr(_keychain_mod, "get_secret", None)
+    except Exception:
+        pass  # Keychain not available (CI/Docker)
 
 
-def _escape_airtable_formula_value(value: str) -> str:
-    """Escape a string for safe use in an Airtable filterByFormula.
-
-    Prevents formula injection by escaping single quotes and backslashes.
-
-    Args:
-        value: Raw string value to embed in a formula
-
-    Returns:
-        Escaped string safe for use inside single-quoted Airtable formula values
-    """
-    # Escape backslashes first, then single quotes
-    value = value.replace("\\", "\\\\")
-    value = value.replace("'", "\\'")
-    return value
+def _get_airtable_credential(key: str) -> Optional[str]:
+    """Get Airtable credential from environment first, Keychain as fallback."""
+    value = os.environ.get(key)
+    if value:
+        return value
+    if get_secret:
+        value = get_secret(key)
+        if value:
+            return value
+    return None
 
 
 class AirtableClient:
@@ -90,7 +65,7 @@ class AirtableClient:
         Raises:
             ValueError: If no API key is provided or found.
         """
-        self.api_key = api_key or get_secret("AIRTABLE_API_KEY")
+        self.api_key = api_key or _get_airtable_credential("AIRTABLE_API_KEY")
         if not self.api_key:
             raise ValueError("Airtable API key required. Add to Keychain or set AIRTABLE_API_KEY env var.")
 
@@ -117,8 +92,7 @@ class AirtableClient:
 
         # Use filterByFormula to search by Media ID field
         # Airtable formula: {Media ID} = 'value'
-        safe_media_id = _escape_airtable_formula_value(media_id)
-        formula = f"{{{self.MEDIA_ID_FIELD}}} = '{safe_media_id}'"
+        formula = f"{{{self.MEDIA_ID_FIELD}}} = '{media_id}'"
 
         params = {
             "filterByFormula": formula,
@@ -172,8 +146,8 @@ class AirtableClient:
             for i in range(0, len(media_ids), batch_size):
                 batch = media_ids[i : i + batch_size]
 
-                # Build OR formula for this batch (with escaped values)
-                conditions = [f"{{{self.MEDIA_ID_FIELD}}}='{_escape_airtable_formula_value(mid)}'" for mid in batch]
+                # Build OR formula for this batch
+                conditions = [f"{{{self.MEDIA_ID_FIELD}}}='{mid}'" for mid in batch]
                 formula = f"OR({','.join(conditions)})"
 
                 params = {

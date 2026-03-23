@@ -1,4 +1,4 @@
-"""Database service layer for Editorial Assistant v3.0.
+"""Database service layer for Cardigan.
 
 Provides async database operations using SQLAlchemy 2.0+ with aiosqlite.
 Thread-safe connection pool and CRUD operations for jobs, events, and config.
@@ -9,9 +9,11 @@ import json
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from enum import Enum
 from typing import List, Optional
 
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
     Float,
@@ -38,6 +40,17 @@ from api.models.chat import ChatMessage, ChatSession, ChatSessionStatus
 from api.models.config import ConfigItem, ConfigValueType
 from api.models.events import EventCreate, EventData, EventType, SessionEvent
 from api.models.job import Job, JobCreate, JobOutputs, JobPhase, JobStatus, JobUpdate, PhaseStatus
+
+class _SafeEncoder(json.JSONEncoder):
+    """JSON encoder that handles datetime and enum objects."""
+
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if isinstance(obj, Enum):
+            return obj.value
+        return super().default(obj)
+
 
 # Global engine and session factory
 _engine: Optional[AsyncEngine] = None
@@ -131,6 +144,49 @@ chat_messages_table = Table(
 )
 
 
+# Define available_files table for tracking remote ingest server files
+# Schema from migrations 006 + 007
+available_files_table = Table(
+    "available_files",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("remote_url", Text, nullable=False),
+    Column("filename", Text, nullable=False),
+    Column("directory_path", Text, nullable=True),
+    Column("file_type", Text, nullable=False),
+    Column("media_id", Text, nullable=True),
+    Column("file_size_bytes", Integer, nullable=True),
+    Column("remote_modified_at", DateTime, nullable=True),
+    Column("first_seen_at", DateTime, server_default=func.current_timestamp()),
+    Column("last_seen_at", DateTime, server_default=func.current_timestamp()),
+    Column("status", Text, nullable=False, server_default="new"),
+    Column("status_changed_at", DateTime, nullable=True),
+    Column("job_id", Integer, ForeignKey("jobs.id"), nullable=True),
+    Column("airtable_record_id", Text, nullable=True),
+    Column("attached_at", DateTime, nullable=True),
+    # Added in migration 007
+    Column("local_path", Text, nullable=True),
+    Column("downloaded_at", DateTime, nullable=True),
+)
+
+# Define screengrab_attachments audit log table (migration 006)
+screengrab_attachments_table = Table(
+    "screengrab_attachments",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("available_file_id", Integer, ForeignKey("available_files.id"), nullable=True),
+    Column("sst_record_id", Text, nullable=False),
+    Column("media_id", Text, nullable=False),
+    Column("filename", Text, nullable=False),
+    Column("remote_url", Text, nullable=False),
+    Column("attached_at", DateTime, server_default=func.current_timestamp()),
+    Column("attachments_before", Integer, nullable=True),
+    Column("attachments_after", Integer, nullable=True),
+    Column("success", Boolean, server_default="1"),
+    Column("error_message", Text, nullable=True),
+)
+
+
 def get_db_url() -> str:
     """Return SQLite database URL from environment or default."""
     db_path = os.getenv("DATABASE_PATH", "./dashboard.db")
@@ -167,6 +223,10 @@ async def init_db() -> None:
         class_=AsyncSession,
         expire_on_commit=False,
     )
+
+    # Create tables if they don't exist (fresh database)
+    async with _engine.begin() as conn:
+        await conn.run_sync(metadata.create_all)
 
 
 async def close_db() -> None:
@@ -708,7 +768,7 @@ async def update_job_phase(job_id: int, phases: list) -> Optional[Job]:
         Updated Job or None if not found
     """
     async with get_session() as session:
-        phases_json = json.dumps(phases)
+        phases_json = json.dumps(phases, cls=_SafeEncoder)
         stmt = update(jobs_table).where(jobs_table.c.id == job_id).values(phases=phases_json)
         result = await session.execute(stmt)
 

@@ -1,4 +1,4 @@
-"""Configuration API endpoints for Editorial Assistant v3.0.
+"""Configuration API endpoints for Cardigan.
 
 Provides endpoints for viewing and updating LLM routing configuration.
 """

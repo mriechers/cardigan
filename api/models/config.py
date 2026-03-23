@@ -1,4 +1,4 @@
-"""Config models for Editorial Assistant v3.0 API."""
+"""Config models for Cardigan API."""
 
 from datetime import datetime
 from enum import Enum

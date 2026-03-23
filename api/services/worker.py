@@ -1,4 +1,4 @@
-"""Job processing worker for Editorial Assistant v3.0.
+"""Job processing worker for Cardigan.
 
 Polls the queue for pending jobs and processes them through agent phases.
 """
@@ -241,6 +241,7 @@ class JobWorker:
         # Note: Use `or 0` pattern because .get() returns None for NULL db values
         context = {
             "project_name": job_dict.get("project_name") or "Unknown",
+            "transcript_file": job_dict.get("transcript_file", ""),
             "transcript_metrics": {
                 "word_count": job_dict.get("word_count") or 0,
                 "estimated_duration_minutes": job_dict.get("duration_minutes") or 0,
@@ -338,6 +339,7 @@ class JobWorker:
                     p["tier"] = phase_result.get("tier")
                     p["tier_label"] = phase_result.get("tier_label")
                     p["tier_reason"] = phase_result.get("tier_reason")
+                    p["attempts"] = phase_result.get("attempts", 1)
                     p["completed_at"] = datetime.now(timezone.utc).isoformat()
                     phase_updated = True
                     break
@@ -453,6 +455,7 @@ class JobWorker:
             # Process each phase
             context = {
                 "transcript": transcript_content,
+                "transcript_file": job.get("transcript_file", ""),
                 "project_path": project_path,
                 "transcript_metrics": transcript_metrics,
                 "sst_context": sst_context,  # Add SST context to processing context
@@ -506,10 +509,14 @@ class JobWorker:
                     "attempts": phase_result.get("attempts", 1),
                 }
 
-                # Update or add phase
+                # Update or add phase, preserving retry history fields
                 phase_updated = False
                 for i, p in enumerate(phases):
                     if p["name"] == phase_name:
+                        # Preserve retry history from previous runs
+                        phase_data["retry_count"] = p.get("retry_count", 0)
+                        phase_data["previous_runs"] = p.get("previous_runs")
+                        phase_data["metadata"] = p.get("metadata")
                         phases[i] = phase_data
                         phase_updated = True
                         break
@@ -638,7 +645,18 @@ class JobWorker:
                         "optional": True,  # Mark as optional phase
                     }
 
-                    phases.append(phase_data)
+                    # Update existing phase entry or append new one
+                    opt_phase_updated = False
+                    for i, p in enumerate(phases):
+                        if p.get("name") == phase_name:
+                            phase_data["retry_count"] = p.get("retry_count", 0)
+                            phase_data["previous_runs"] = p.get("previous_runs")
+                            phase_data["metadata"] = p.get("metadata")
+                            phases[i] = phase_data
+                            opt_phase_updated = True
+                            break
+                    if not opt_phase_updated:
+                        phases.append(phase_data)
                     await update_job_phase(job_id, phases)
 
                     # Optional phase failure is logged but doesn't fail the job
@@ -948,6 +966,8 @@ class JobWorker:
         from api.services.utils import extract_media_id
 
         media_id = extract_media_id(transcript_file)
+        if not media_id:
+            return None
 
         # Look for SRT file with same base name
         search_dirs = [TRANSCRIPTS_DIR, TRANSCRIPTS_ARCHIVE_DIR]
@@ -1054,6 +1074,35 @@ class JobWorker:
         Attempts to run with the initial tier based on transcript duration.
         On failure or timeout, escalates to the next tier and retries.
         """
+        # Check for chunked formatter processing
+        if phase_name == "formatter":
+            chunking_config = self.llm.config.get("routing", {}).get("chunking", {})
+            if chunking_config.get("enabled", False):
+                from api.services.chunking import split_transcript
+
+                transcript_file = context.get("transcript_file", "")
+                is_srt = transcript_file.lower().endswith(".srt")
+                chunks = split_transcript(
+                    context.get("transcript", ""),
+                    is_srt=is_srt,
+                    config=chunking_config,
+                )
+                if chunks is not None:
+                    logger.info(
+                        "Formatter using chunked processing",
+                        extra={
+                            "job_id": job_id,
+                            "chunk_count": len(chunks),
+                        },
+                    )
+                    return await self._run_formatter_chunked(
+                        job_id=job_id,
+                        chunks=chunks,
+                        context=context,
+                        project_path=project_path,
+                        chunking_config=chunking_config,
+                    )
+
         # Get escalation config
         escalation_config = self.llm.get_escalation_config()
         escalation_enabled = escalation_config.get("enabled", True)
@@ -1129,6 +1178,15 @@ class JobWorker:
             )
 
             try:
+                # Use the backend's configured timeout, falling back to escalation config
+                try:
+                    backend_config = self.llm.get_backend_config(backend)
+                    effective_timeout = backend_config.get("timeout", timeout_seconds)
+                    if not isinstance(effective_timeout, (int, float)):
+                        effective_timeout = timeout_seconds
+                except Exception:
+                    effective_timeout = timeout_seconds
+
                 # Call LLM with timeout (include phase/tier for Langfuse tracing)
                 response: LLMResponse = await asyncio.wait_for(
                     self.llm.chat(
@@ -1139,7 +1197,7 @@ class JobWorker:
                         tier=current_tier,
                         tier_label=tier_label,
                     ),
-                    timeout=timeout_seconds,
+                    timeout=effective_timeout,
                 )
 
                 # Track costs across retries
@@ -1191,14 +1249,14 @@ class JobWorker:
                 }
 
             except asyncio.TimeoutError:
-                last_error = f"Timeout after {timeout_seconds}s"
+                last_error = f"Timeout after {effective_timeout}s"
                 logger.warning(
                     "Phase timed out",
                     extra={
                         "job_id": job_id,
                         "phase": phase_name,
                         "tier_label": tier_label,
-                        "timeout_seconds": timeout_seconds,
+                        "timeout_seconds": effective_timeout,
                     },
                 )
 
@@ -1283,6 +1341,265 @@ class JobWorker:
             )
         )
         return {"success": False, "error": last_error, "attempts": attempts, "cost": total_cost}
+
+    async def _run_formatter_chunked(
+        self,
+        job_id: int,
+        chunks: list,
+        context: Dict[str, Any],
+        project_path: Path,
+        chunking_config: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Run formatter phase with chunked parallel processing.
+
+        Splits long transcripts into chunks, processes them concurrently
+        with a semaphore for backpressure, then merges results.
+        """
+        from api.services.chunking import TranscriptChunk, merge_formatter_chunks
+
+        max_parallel = chunking_config.get("max_parallel", 3)
+        semaphore = asyncio.Semaphore(max_parallel)
+
+        # Load system prompt once
+        system_prompt = self._load_agent_prompt("formatter")
+        analysis = context.get("analyst_output", "")
+        sst_context = context.get("sst_context")
+
+        # Build SST section (reuse logic from _build_phase_prompt)
+        sst_section = ""
+        if sst_context:
+            sst_section = "\n## Single Source of Truth (SST) Context\n\n"
+            for key in ["title", "program", "short_description", "long_description",
+                        "host", "presenter", "keywords", "tags"]:
+                if sst_context.get(key):
+                    sst_section += f"**{key.replace('_', ' ').title()}:** {sst_context[key]}\n"
+
+        # Get tier/backend for this phase
+        forced_tier = context.get("_force_tier")
+        if forced_tier is not None:
+            current_tier = forced_tier
+            tier_reason = f"Forced tier {forced_tier} by manager escalation"
+        else:
+            current_tier, tier_reason = self.llm.get_tier_for_phase_with_reason("formatter", context)
+
+        # Apply minimum tier for chunked formatting (cheapskate models condense too aggressively)
+        min_tier = chunking_config.get("min_tier")
+        if min_tier is not None and current_tier < min_tier:
+            logger.info(
+                "Applying chunked formatter min_tier",
+                extra={"from_tier": current_tier, "min_tier": min_tier},
+            )
+            current_tier = min_tier
+            tier_reason = f"Chunked formatter requires minimum tier {min_tier}"
+
+        routing_config = self.llm.config.get("routing", {})
+        tier_labels = routing_config.get("tier_labels", ["cheapskate", "default", "big-brain"])
+        tier_label = tier_labels[current_tier] if current_tier < len(tier_labels) else f"tier-{current_tier}"
+        backend = self.llm.get_backend_for_phase("formatter", context, tier_override=current_tier)
+
+        # Get timeout from backend config
+        escalation_config = self.llm.get_escalation_config()
+        timeout_seconds = escalation_config.get("timeout_seconds", 120)
+        try:
+            backend_config = self.llm.get_backend_config(backend)
+            effective_timeout = backend_config.get("timeout", timeout_seconds)
+            if not isinstance(effective_timeout, (int, float)):
+                effective_timeout = timeout_seconds
+        except Exception:
+            effective_timeout = timeout_seconds
+
+        total_chunks = len(chunks)
+
+        async def process_chunk(chunk: TranscriptChunk) -> str:
+            """Process a single chunk through the formatter LLM."""
+            async with semaphore:
+                # Verbatim preservation instruction (applies to all chunks)
+                verbatim_instruction = """CRITICAL: You MUST preserve ALL spoken dialogue. Do NOT summarize, condense, or paraphrase.
+Every sentence spoken in the transcript must appear in your output. You may remove filler words
+(um, uh) and fix grammar, but do NOT drop or merge sentences. Completeness is more important than brevity."""
+
+                if chunk.index == 0:
+                    # First chunk: normal formatter prompt
+                    user_message = f"{verbatim_instruction}\n\n"
+                    user_message += "Using the following analysis as guidance:\n\n"
+                    if sst_section:
+                        user_message += sst_section
+                    user_message += f"---\n{analysis}\n---\n\n"
+                    user_message += f"Please format this transcript:\n\n---\n{chunk.content}\n---"
+                else:
+                    # Continuation chunks: skip header, start with dialogue
+                    user_message = f"""{verbatim_instruction}
+
+IMPORTANT: This is section {chunk.index + 1} of {total_chunks} of a long transcript being processed in parts.
+DO NOT generate the metadata header (Project, Program, Duration, Date).
+DO NOT generate "# Formatted Transcript" heading.
+Begin directly with speaker attribution and dialogue.
+The previous section ended with:
+---
+{chunk.overlap_prefix}
+---
+Continue formatting from where the previous section left off. Do NOT repeat content from the overlap above.
+
+Using the following analysis as guidance:
+---
+{analysis}
+---
+
+Please format this transcript section:
+
+---
+{chunk.content}
+---"""
+
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ]
+
+                response = await asyncio.wait_for(
+                    self.llm.chat(
+                        messages=messages,
+                        backend=backend,
+                        job_id=job_id,
+                        phase="formatter",
+                        tier=current_tier,
+                        tier_label=tier_label,
+                    ),
+                    timeout=effective_timeout,
+                )
+
+                logger.info(
+                    "Chunk processed",
+                    extra={
+                        "job_id": job_id,
+                        "chunk_index": chunk.index,
+                        "total_chunks": total_chunks,
+                        "cost": response.cost,
+                        "tokens": response.total_tokens,
+                    },
+                )
+
+                return response.content
+
+        # Log phase start
+        await log_event(
+            EventCreate(
+                job_id=job_id,
+                event_type=EventType.phase_started,
+                data=EventData(
+                    phase="formatter",
+                    backend=backend,
+                    extra={
+                        "tier": current_tier,
+                        "tier_label": tier_label,
+                        "chunked": True,
+                        "chunk_count": total_chunks,
+                    },
+                ),
+            )
+        )
+
+        try:
+            # Run all chunks concurrently (semaphore limits parallelism)
+            chunk_results = await asyncio.gather(
+                *(process_chunk(chunk) for chunk in chunks),
+                return_exceptions=True,
+            )
+
+            # Check for failures
+            for i, result in enumerate(chunk_results):
+                if isinstance(result, Exception):
+                    error_msg = f"Chunk {i} failed: {result}"
+                    logger.error(error_msg, extra={"job_id": job_id, "chunk_index": i})
+                    await log_event(
+                        EventCreate(
+                            job_id=job_id,
+                            event_type=EventType.phase_failed,
+                            data=EventData(
+                                phase="formatter",
+                                extra={"error": error_msg, "chunk_index": i},
+                            ),
+                        )
+                    )
+                    return {
+                        "success": False,
+                        "error": error_msg,
+                        "attempts": 1,
+                        "cost": 0,
+                    }
+
+            # Merge outputs
+            merged = merge_formatter_chunks(chunk_results)
+
+            # Calculate aggregate cost/tokens from run tracker
+            # (RunCostTracker accumulates automatically via llm.chat)
+            # We report 0 here since the tracker handles it
+            total_cost = 0.0
+            total_tokens = 0
+
+            # Save merged output
+            output_file = project_path / "formatter_output.md"
+            if output_file.exists():
+                prev_content = output_file.read_text()
+                timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                prev_file = project_path / f"formatter_output.{timestamp}.prev.md"
+                prev_file.write_text(prev_content)
+
+            provenance_header = (
+                f"<!-- model: chunked ({total_chunks} chunks) | "
+                f"tier: {tier_label} | backend: {backend} -->\n"
+            )
+            output_file.write_text(provenance_header + merged)
+
+            await log_event(
+                EventCreate(
+                    job_id=job_id,
+                    event_type=EventType.phase_completed,
+                    data=EventData(
+                        phase="formatter",
+                        cost=total_cost,
+                        tokens=total_tokens,
+                        extra={
+                            "tier": current_tier,
+                            "tier_label": tier_label,
+                            "chunked": True,
+                            "chunk_count": total_chunks,
+                        },
+                    ),
+                )
+            )
+
+            return {
+                "success": True,
+                "output": merged,
+                "cost": total_cost,
+                "tokens": total_tokens,
+                "model": f"chunked ({total_chunks} chunks via {backend})",
+                "tier": current_tier,
+                "tier_label": tier_label,
+                "tier_reason": tier_reason,
+                "attempts": 1,
+            }
+
+        except Exception as e:
+            error_msg = f"Chunked formatter failed: {e}"
+            logger.error(error_msg, extra={"job_id": job_id}, exc_info=True)
+            await log_event(
+                EventCreate(
+                    job_id=job_id,
+                    event_type=EventType.phase_failed,
+                    data=EventData(
+                        phase="formatter",
+                        extra={"error": error_msg, "chunked": True},
+                    ),
+                )
+            )
+            return {
+                "success": False,
+                "error": error_msg,
+                "attempts": 1,
+                "cost": 0,
+            }
 
     async def _analyze_and_recover(
         self,
@@ -1733,14 +2050,17 @@ REASON: [Brief explanation - 1-2 sentences]
 Output a detailed analysis document in markdown format that will guide the formatting and SEO agents.""",
             "formatter": """You are a transcript formatter for PBS Wisconsin. Your role is to transform raw transcripts into clean, readable markdown documents.
 
+CRITICAL: Preserve ALL spoken dialogue. Do NOT summarize or condense. Every sentence must appear in your output.
+
 Guidelines:
 - Use proper speaker attribution (SPEAKER NAME:)
 - Create logical paragraph breaks
-- Preserve important timestamps
+- Preserve important timestamps (if present)
 - Fix obvious transcription errors
+- Remove filler words (um, uh) but preserve all substantive content
 - Maintain the original meaning and voice
 
-Output a clean, well-formatted markdown transcript.""",
+Output a clean, well-formatted markdown transcript with COMPLETE content.""",
             "seo": """You are an SEO specialist for PBS Wisconsin streaming content. Your role is to generate search-optimized metadata for video content.
 
 Generate:
@@ -1761,7 +2081,7 @@ Focus on:
 - Preserving speaker voice while improving prose
 
 Output the polished transcript with any notes on changes made.""",
-            "manager": """You are the QA Manager for PBS Wisconsin Editorial Assistant. Review all pipeline outputs for quality.
+            "manager": """You are the QA Manager for Cardigan. Review all pipeline outputs for quality.
 
 Check:
 1. Formatter: Speaker labels use first+last name only (no titles like Dr./Mr./Ms.), review notes only at top
@@ -1823,7 +2143,16 @@ Provide a detailed analysis document."""
 
         elif phase_name == "formatter":
             analysis = context.get("analyst_output", "")
-            prompt = "Using the following analysis as guidance:\n\n"
+
+            # Add verbatim preservation instruction (matches chunked formatter behavior)
+            verbatim_instruction = """CRITICAL: You MUST preserve ALL spoken dialogue. Do NOT summarize, condense, or paraphrase.
+Every sentence spoken in the transcript must appear in your output. You may remove filler words
+(um, uh) and fix grammar, but do NOT drop or merge sentences. Completeness is more important than brevity.
+
+"""
+
+            prompt = verbatim_instruction
+            prompt += "Using the following analysis as guidance:\n\n"
             if sst_section:
                 prompt += sst_section
             prompt += f"""---

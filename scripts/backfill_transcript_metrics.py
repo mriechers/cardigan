@@ -4,16 +4,12 @@
 This script finds jobs with missing metrics, locates their transcript files,
 calculates the metrics, and updates the database.
 
-Usage:
-    ./venv/bin/python scripts/backfill_transcript_metrics.py [--dry-run]
+Usage (from project root):
+    python -m scripts.backfill_transcript_metrics [--dry-run]
 """
 
 import sqlite3
-import sys
 from pathlib import Path
-
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from api.services.utils import calculate_transcript_metrics
 

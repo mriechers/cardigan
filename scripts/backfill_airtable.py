@@ -4,14 +4,12 @@ Backfill Airtable links for existing jobs.
 
 Finds jobs missing airtable_record_id and attempts to link them
 by looking up the Media ID in the SST table.
+
+Usage (from project root):
+    python -m scripts.backfill_airtable
 """
 
 import asyncio
-import sys
-from pathlib import Path
-
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from api.services import database
 from api.services.airtable import AirtableClient

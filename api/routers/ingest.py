@@ -1,4 +1,4 @@
-"""Ingest router for Editorial Assistant v3.0 API.
+"""Ingest router for Cardigan API.
 
 Provides endpoints for remote ingest server monitoring, transcript queueing,
 and screengrab attachment.
@@ -27,16 +27,10 @@ Screengrab endpoints:
 import logging
 from datetime import datetime
 from typing import List, Optional
-from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import text
-
-# Allowlist of permitted ingest server hostnames to prevent SSRF
-ALLOWED_INGEST_HOSTS = {
-    "mmingest.pbswi.wisc.edu",
-}
 
 from api.models.ingest import IngestConfigResponse, IngestConfigUpdate
 from api.services.database import get_session
@@ -46,6 +40,7 @@ from api.services.ingest_config import (
     record_scan_result,
     update_ingest_config,
 )
+from api.middleware.rate_limit import RATE_EXPENSIVE, limiter
 from api.services.ingest_scanner import IngestScanner
 from api.services.ingest_scheduler import configure_scheduler
 from api.services.screengrab_attacher import (
@@ -270,7 +265,9 @@ async def list_available_files(
 
 
 @router.post("/scan", response_model=ScanResponse)
+@limiter.limit(RATE_EXPENSIVE)
 async def trigger_scan(
+    request: Request,
     base_url: Optional[str] = Query(
         default=None, description="Base URL of ingest server (uses config default if not provided)"
     ),
@@ -299,14 +296,6 @@ async def trigger_scan(
         scan_base_url = base_url or config.server_url
         scan_dirs = directories.split(",") if directories else config.directories
 
-        # SSRF protection: validate base_url against allowlist
-        parsed = urlparse(scan_base_url)
-        if parsed.hostname not in ALLOWED_INGEST_HOSTS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid ingest server host. Allowed: {', '.join(ALLOWED_INGEST_HOSTS)}",
-            )
-
         scanner = IngestScanner(base_url=scan_base_url, directories=scan_dirs)
         result = await scanner.scan()
 
@@ -327,7 +316,7 @@ async def trigger_scan(
         logger.error(f"Scan failed: {e}")
         # Record failed scan
         await record_scan_result(success=False)
-        raise HTTPException(status_code=500, detail="Scan failed")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/status", response_model=IngestStatusResponse)
@@ -556,7 +545,7 @@ async def attach_screengrab(file_id: int) -> AttachResponse:
         )
     except Exception as e:
         logger.error(f"Attach failed for file {file_id}: {e}")
-        raise HTTPException(status_code=500, detail="Screengrab attachment failed")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/screengrabs/attach-all", response_model=BatchAttachResponse)
@@ -583,7 +572,7 @@ async def attach_all_screengrabs() -> BatchAttachResponse:
         )
     except Exception as e:
         logger.error(f"Batch attach failed: {e}")
-        raise HTTPException(status_code=500, detail="Batch attachment failed")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/screengrabs/{file_id}/ignore")
@@ -774,7 +763,7 @@ async def queue_transcript(file_id: int) -> QueueTranscriptResponse:
             file_id=file_id,
             media_id=download_result.get("media_id"),
             local_path=download_result.get("local_path"),
-            error="Failed to create job",
+            error=f"Failed to create job: {e}",
         )
 
 
