@@ -1337,11 +1337,11 @@ async def main():
 
     if transport == "sse":
         # SSE transport for Docker/HTTP environments
+        import uvicorn
         from mcp.server.sse import SseServerTransport
         from starlette.applications import Starlette
-        from starlette.routing import Route
         from starlette.responses import Response
-        import uvicorn
+        from starlette.routing import Route
 
         # Create SSE transport
         sse = SseServerTransport("/messages")

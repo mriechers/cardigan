@@ -41,6 +41,7 @@ from api.models.config import ConfigItem, ConfigValueType
 from api.models.events import EventCreate, EventData, EventType, SessionEvent
 from api.models.job import Job, JobCreate, JobOutputs, JobPhase, JobStatus, JobUpdate, PhaseStatus
 
+
 class _SafeEncoder(json.JSONEncoder):
     """JSON encoder that handles datetime and enum objects."""
 

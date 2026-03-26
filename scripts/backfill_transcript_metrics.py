@@ -9,6 +9,7 @@ Usage (from project root):
 """
 
 import sqlite3
+import sys
 from pathlib import Path
 
 from api.services.utils import calculate_transcript_metrics

@@ -12,12 +12,10 @@ import pytest
 
 from api.services.langfuse_client import (
     LangfuseClient,
-    ModelStats,
     ModelStatsResponse,
     _get_langfuse_credential,
     get_langfuse_client,
 )
-
 
 # ---------------------------------------------------------------------------
 # Credential loading

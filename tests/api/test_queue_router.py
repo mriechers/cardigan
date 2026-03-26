@@ -8,7 +8,10 @@ from fastapi.testclient import TestClient
 
 from api.main import app
 
-client = TestClient(app)
+# Use context manager to trigger lifespan events (DB init)
+_test_client = TestClient(app)
+_test_client.__enter__()
+client = _test_client
 
 
 @pytest.fixture

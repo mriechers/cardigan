@@ -1,8 +1,7 @@
 """Tests for API key authentication middleware."""
 
-import pytest
-from unittest.mock import patch, AsyncMock
 
+import pytest
 from starlette.testclient import TestClient
 
 from api.main import app

@@ -32,6 +32,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import text
 
+from api.middleware.rate_limit import RATE_EXPENSIVE, limiter
 from api.models.ingest import IngestConfigResponse, IngestConfigUpdate
 from api.services.database import get_session
 from api.services.ingest_config import (
@@ -40,7 +41,6 @@ from api.services.ingest_config import (
     record_scan_result,
     update_ingest_config,
 )
-from api.middleware.rate_limit import RATE_EXPENSIVE, limiter
 from api.services.ingest_scanner import IngestScanner
 from api.services.ingest_scheduler import configure_scheduler
 from api.services.screengrab_attacher import (

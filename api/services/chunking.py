@@ -8,7 +8,7 @@ Short transcripts (<threshold) bypass chunking entirely.
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 from api.services.utils import SRTCaption, generate_srt, parse_srt

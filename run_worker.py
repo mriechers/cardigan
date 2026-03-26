@@ -20,7 +20,6 @@ import asyncio
 import importlib.util
 import os
 import signal
-import sys
 from pathlib import Path
 
 # Load .env file FIRST — it contains the current, correct credentials

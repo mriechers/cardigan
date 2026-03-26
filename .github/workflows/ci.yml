@@ -57,6 +57,7 @@ jobs:
       LANGFUSE_SECRET_KEY: sk-lf-ci-dummy
       LANGFUSE_HOST: https://localhost
       DATABASE_PATH: ./ci-test.db
+      TESTING: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -67,6 +68,8 @@ jobs:
         run: pip install -r requirements.txt
       - name: Create required directories
         run: mkdir -p OUTPUT transcripts logs
+      - name: Run database migrations
+        run: alembic upgrade head
       - name: Run tests
         run: pytest --tb=short -q
 

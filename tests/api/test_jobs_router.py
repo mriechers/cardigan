@@ -8,7 +8,10 @@ from fastapi.testclient import TestClient
 
 from api.main import app
 
-client = TestClient(app)
+# Use context manager to trigger lifespan events (DB init)
+_test_client = TestClient(app)
+_test_client.__enter__()
+client = _test_client
 
 
 @pytest.fixture
@@ -19,7 +22,7 @@ async def sample_job():
         "transcript_file": "test_transcript.txt",
         "priority": 1,
     }
-    response = client.post("/api/queue/", json=job_data)
+    response = client.post("/api/queue/?force=true", json=job_data)
     assert response.status_code == 201
     return response.json()
 
@@ -31,7 +34,7 @@ async def completed_job():
         "project_name": "test-completed-job",
         "transcript_file": "completed_test.txt",
     }
-    response = client.post("/api/queue/", json=job_data)
+    response = client.post("/api/queue/?force=true", json=job_data)
     assert response.status_code == 201
     job = response.json()
 
@@ -49,7 +52,7 @@ async def failed_job():
         "project_name": "test-failed-job",
         "transcript_file": "failed_test.txt",
     }
-    response = client.post("/api/queue/", json=job_data)
+    response = client.post("/api/queue/?force=true", json=job_data)
     assert response.status_code == 201
     job = response.json()
 
@@ -67,7 +70,7 @@ async def paused_job():
         "project_name": "test-paused-job",
         "transcript_file": "paused_test.txt",
     }
-    response = client.post("/api/queue/", json=job_data)
+    response = client.post("/api/queue/?force=true", json=job_data)
     assert response.status_code == 201
     job = response.json()
 
