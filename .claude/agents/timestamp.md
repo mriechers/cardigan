@@ -68,11 +68,30 @@ Identify chapter breaks at:
 4. **Story boundaries**: When moving between different stories/features
 5. **Standard segments**: Intro, main content sections, closing/credits
 
-### Chapter Count Targets
+### Chapter Count Targets (Maximum)
 
-- **30 minute program**: 3-6 chapters
-- **60 minute program**: 5-10 chapters
-- **Short segments (<10 min)**: 2-3 chapters
+| Duration | Max chapters |
+|----------|-------------|
+| Under 5 min | 3 |
+| 5-15 min | 5 |
+| 15-30 min | 7 |
+| 30-60 min | 8 |
+| 60+ min | 10 |
+
+Fewer chapters is almost always better. Only add a chapter when there's a genuinely distinct topic shift.
+
+### First Chapter Rule
+
+The first chapter is always `0:00 Episode intro`. This encompasses all introductory material — host intros, guest intros, show branding, topic previews — so viewers can skip straight to the first substantive topic.
+
+### Chapter Naming Guidelines
+
+- **Sentence case**: Capitalize only the first word and proper nouns (e.g., "Online sports betting hits the floor", not "Online Sports Betting Hits the Floor")
+- **Concise**: 2-6 words per chapter name
+- **Descriptive and engaging**: Give the viewer a reason to click
+- **Neutral, professional tone**: Avoid dramatic or extreme language (e.g., "The data center bill stalls" not "The bill that died"). This content appears in PBS and public media descriptions.
+- **Capture the topic, not the format**: e.g., "The ADHD diagnosis" not "Personal story segment", "Wisconsin's 2020 election challenge" not "Legal analysis section"
+- **Avoid generic names**: Use "Episode intro" for the first chapter, but avoid vague names like "Discussion" or "Conclusion" when a more specific name fits
 
 ### Time Format Specifications
 
@@ -89,8 +108,12 @@ Identify chapter breaks at:
 ## Quality Checklist
 
 Before outputting, verify:
+- [ ] First chapter is `0:00 Episode intro`
+- [ ] Chapter count is within the maximum for the content duration
 - [ ] Chapters are in chronological order
 - [ ] No gaps between chapters (end time → next start time)
-- [ ] Chapter titles are concise (2-5 words)
+- [ ] Chapter titles use sentence case (only first word and proper nouns capitalized)
+- [ ] Chapter titles are concise (2-6 words) and describe the topic, not the format
+- [ ] Tone is neutral and professional (suitable for PBS descriptions)
 - [ ] Both format tables are complete and match
 - [ ] Total duration matches the video length
