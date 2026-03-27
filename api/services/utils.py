@@ -239,7 +239,13 @@ def extract_media_id(filename: str) -> Optional[str]:
 
     Searches the filename for a valid PBS Media ID pattern:
     4 alphanumeric chars (program code) + 4 digits (episode) + optional letter suffix.
-    Returns None if no valid Media ID pattern is found.
+
+    Processing order:
+    1. Strip macOS/Windows duplicate suffixes (e.g. " (1)", " - Copy")
+    2. Strip _ForClaude suffix
+    3. Match PBS Media ID pattern; if followed by _REV[date], include it
+    4. Fall back to full sanitized stem for project-style names (no spaces)
+    5. Return None if stem contains spaces or no valid pattern found
 
     Args:
         filename: Transcript filename (with or without extension)
@@ -253,21 +259,47 @@ def extract_media_id(filename: str) -> Optional[str]:
         >>> extract_media_id("9UNP2005HD.srt")
         '9UNP2005HD'
         >>> extract_media_id("2BUC0000HDWEB02_REV20251202.srt")
-        '2BUC0000HDWEB02'
+        '2BUC0000HDWEB02_REV20251202'
         >>> extract_media_id("2WLI1210HD_midshow.srt")
         '2WLI1210HD'
         >>> extract_media_id("6GWQ2503_REV20251121.srt")
-        '6GWQ2503'
+        '6GWQ2503_REV20251121'
+        >>> extract_media_id("WC_S01_trailer.srt")
+        'WC_S01_trailer'
         >>> extract_media_id("TLB CC IN WI.srt")
         >>> extract_media_id("test_transcript.txt")
-        >>> extract_media_id("WC_S01_trailer.srt")
+        'test_transcript'
     """
     stem = Path(filename).stem
 
-    # PBS Media ID pattern: 4 alphanumeric + 4 digits + optional letter/digit suffix
+    # Step 1: Strip macOS/Windows duplicate suffixes (e.g. " (1)", " - Copy")
+    sanitized, _ = sanitize_duplicate_filename(stem)
+
+    # Step 2: Strip _ForClaude (case-insensitive), may appear mid-stem before _REV
+    sanitized = re.sub(r"_ForClaude", "", sanitized, flags=re.IGNORECASE)
+
+    # Step 3: Match PBS Media ID pattern
     # e.g., 2WLI1209HD, 6GWQ2503, 2BUC0000HDWEB02
-    match = re.search(r"([A-Z0-9]{4}\d{4}(?:[A-Z]+\d{0,2})?)", stem, re.IGNORECASE)
-    return match.group(1).upper() if match else None
+    match = re.search(r"([A-Z0-9]{4}\d{4}(?:[A-Z]+\d{0,2})?)", sanitized, re.IGNORECASE)
+    if match:
+        base_id = match.group(1).upper()
+        # Check if a _REV[date] suffix follows the matched base ID in the sanitized stem
+        rev_match = re.search(
+            r"([A-Z0-9]{4}\d{4}(?:[A-Z]+\d{0,2})?)(_REV\d+)",
+            sanitized,
+            re.IGNORECASE,
+        )
+        if rev_match:
+            return (rev_match.group(1) + rev_match.group(2)).upper()
+        return base_id
+
+    # Step 4: Fall back to the sanitized stem for project-style names
+    # Only accept names with no spaces (underscore-separated or plain identifiers)
+    if " " not in sanitized:
+        return sanitized if sanitized else None
+
+    # Step 5: Stem contains spaces — freeform text, not a valid Media ID
+    return None
 
 
 # =============================================================================

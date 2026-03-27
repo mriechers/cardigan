@@ -1,14 +1,20 @@
 """Tests for Queue router endpoints.
 
 Tests queue listing, creation, deletion, and statistics.
+Uses the session-scoped api_client fixture from conftest.py.
 """
 
 import pytest
-from fastapi.testclient import TestClient
 
-from api.main import app
+# Module-level client will be set by the autouse fixture below
+client = None
 
-client = TestClient(app)
+
+@pytest.fixture(autouse=True)
+def _set_client(api_client):
+    """Inject the session-scoped api_client as module-level client."""
+    global client
+    client = api_client
 
 
 @pytest.fixture

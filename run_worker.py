@@ -15,12 +15,12 @@ Secrets:
     API keys are loaded from macOS Keychain (service: developer.workspace.*)
     Falls back to .env file or environment variables for CI/Docker.
 """
+
 import argparse
 import asyncio
 import importlib.util
 import os
 import signal
-import sys
 from pathlib import Path
 
 # Load .env file FIRST — it contains the current, correct credentials

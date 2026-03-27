@@ -9,6 +9,7 @@ Usage (from project root):
 """
 
 import sqlite3
+import sys
 from pathlib import Path
 
 from api.services.utils import calculate_transcript_metrics
@@ -75,14 +76,12 @@ def backfill_metrics(dry_run: bool = False):
     cursor = conn.cursor()
 
     # Find jobs with missing metrics
-    cursor.execute(
-        """
+    cursor.execute("""
         SELECT id, media_id, project_path, transcript_file, duration_minutes, word_count
         FROM jobs
         WHERE duration_minutes IS NULL OR word_count IS NULL
         ORDER BY id
-    """
-    )
+    """)
 
     jobs = cursor.fetchall()
     print(f"Found {len(jobs)} jobs with missing metrics\n")

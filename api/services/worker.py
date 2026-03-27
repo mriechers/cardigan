@@ -1369,8 +1369,16 @@ class JobWorker:
         sst_section = ""
         if sst_context:
             sst_section = "\n## Single Source of Truth (SST) Context\n\n"
-            for key in ["title", "program", "short_description", "long_description",
-                        "host", "presenter", "keywords", "tags"]:
+            for key in [
+                "title",
+                "program",
+                "short_description",
+                "long_description",
+                "host",
+                "presenter",
+                "keywords",
+                "tags",
+            ]:
                 if sst_context.get(key):
                     sst_section += f"**{key.replace('_', ' ').title()}:** {sst_context[key]}\n"
 
@@ -1546,8 +1554,7 @@ Please format this transcript section:
                 prev_file.write_text(prev_content)
 
             provenance_header = (
-                f"<!-- model: chunked ({total_chunks} chunks) | "
-                f"tier: {tier_label} | backend: {backend} -->\n"
+                f"<!-- model: chunked ({total_chunks} chunks) | " f"tier: {tier_label} | backend: {backend} -->\n"
             )
             output_file.write_text(provenance_header + merged)
 
@@ -1758,8 +1765,7 @@ REASON: [Brief explanation - 1-2 sentences]
 
             # Save the analysis report
             report_file = project_path / "recovery_analysis.md"
-            report_file.write_text(
-                f"""# Recovery Analysis Report
+            report_file.write_text(f"""# Recovery Analysis Report
 **Job ID:** {job_id}
 **Project:** {project_name}
 **Error:** {error}
@@ -1775,8 +1781,7 @@ REASON: [Brief explanation - 1-2 sentences]
 ---
 **Analysis Cost:** ${response.cost:.4f}
 **Model:** {response.model}
-"""
-            )
+""")
 
             total_cost = current_cost + response.cost
 

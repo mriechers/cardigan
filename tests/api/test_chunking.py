@@ -1,15 +1,11 @@
 """Tests for transcript chunking (split + merge)."""
 
-import pytest
-
 from api.services.chunking import (
-    TranscriptChunk,
     _split_plain_text,
     _split_srt,
     merge_formatter_chunks,
     split_transcript,
 )
-
 
 # ─── Helpers ───────────────────────────────────────────────────────────
 
@@ -125,11 +121,9 @@ class TestSplitSRT:
         for chunk in chunks[:-1]:
             lines = chunk.content.strip().split("\n")
             # Find the last text line (not index or timecode)
-            last_text = ""
             for line in reversed(lines):
                 line = line.strip()
                 if line and not line.isdigit() and "-->" not in line:
-                    last_text = line
                     break
             # Many (not all) should end with period
             # Just check this doesn't crash; exact boundary depends on word counts

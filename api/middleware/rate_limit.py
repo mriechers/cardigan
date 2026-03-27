@@ -4,13 +4,19 @@ Expensive endpoints (POST queue, ingest scan, upload): 10/min
 Read endpoints (GET): 60/min
 """
 
+import os
+
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["60/minute"],
+    enabled=os.getenv("TESTING") != "1",
+)
 
 # Rate limit strings used by endpoint decorators.
 RATE_EXPENSIVE = "10/minute"

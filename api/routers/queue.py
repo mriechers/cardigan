@@ -19,7 +19,9 @@ from api.services.utils import extract_media_id, get_srt_duration, parse_srt
 logger = logging.getLogger(__name__)
 
 # Base path for transcript files
-TRANSCRIPTS_DIR = os.getenv("TRANSCRIPTS_DIR", os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "transcripts"))
+TRANSCRIPTS_DIR = os.getenv(
+    "TRANSCRIPTS_DIR", os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "transcripts")
+)
 
 
 def calculate_transcript_metrics_from_file(transcript_file: str) -> Tuple[Optional[float], Optional[int]]:

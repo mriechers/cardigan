@@ -33,6 +33,17 @@ from api.services.database import (
 @pytest_asyncio.fixture
 async def test_db():
     """Create a temporary test database."""
+    import api.services.database as db_mod
+
+    # Save original engine state so we can restore after this test
+    orig_engine = db_mod._engine
+    orig_factory = db_mod._async_session_factory
+    orig_db_path = os.environ.get("DATABASE_PATH")
+
+    # Reset globals so init_db() creates a fresh engine for the temp DB
+    db_mod._engine = None
+    db_mod._async_session_factory = None
+
     # Create temp database file
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
@@ -43,9 +54,7 @@ async def test_db():
     # Initialize database
     await init_db()
 
-    # Run migrations to create schema
-    # Note: In a real test, we'd run alembic migrations here
-    # For now, we'll create tables manually using the metadata
+    # Create tables
     from api.services.database import _engine, metadata
 
     async with _engine.begin() as conn:
@@ -53,8 +62,14 @@ async def test_db():
 
     yield db_path
 
-    # Cleanup
+    # Cleanup: close temp DB and restore original engine
     await close_db()
+
+    # Restore the original engine so other tests aren't affected
+    db_mod._engine = orig_engine
+    db_mod._async_session_factory = orig_factory
+    if orig_db_path is not None:
+        os.environ["DATABASE_PATH"] = orig_db_path
 
     try:
         os.unlink(db_path)
@@ -67,6 +82,7 @@ async def test_create_and_get_job(test_db):
     """Test creating and retrieving a job."""
     # Create job
     job_create = JobCreate(
+        project_name="test-project",
         project_path="/projects/test-project",
         transcript_file="/transcripts/test.txt",
         priority=5,
@@ -81,7 +97,7 @@ async def test_create_and_get_job(test_db):
     assert job.priority == 5
     assert job.status == JobStatus.pending
     assert job.project_name == "test-project"
-    assert job.agent_phases == ["analyst", "formatter"]
+    assert job.agent_phases == ["analyst", "formatter", "seo", "manager"]
     assert job.retry_count == 0
     assert job.max_retries == 3
 
@@ -105,6 +121,7 @@ async def test_list_jobs(test_db):
     # Create multiple jobs
     await create_job(
         JobCreate(
+            project_name="job1",
             project_path="/projects/job1",
             transcript_file="/transcripts/1.txt",
             priority=1,
@@ -113,6 +130,7 @@ async def test_list_jobs(test_db):
 
     await create_job(
         JobCreate(
+            project_name="job2",
             project_path="/projects/job2",
             transcript_file="/transcripts/2.txt",
             priority=10,
@@ -121,6 +139,7 @@ async def test_list_jobs(test_db):
 
     job3 = await create_job(
         JobCreate(
+            project_name="job3",
             project_path="/projects/job3",
             transcript_file="/transcripts/3.txt",
             priority=5,
@@ -130,13 +149,9 @@ async def test_list_jobs(test_db):
     # Update one job to in_progress
     await update_job(job3.id, JobUpdate(status=JobStatus.in_progress))
 
-    # List all jobs
+    # List all jobs (default sort: newest first by queued_at)
     all_jobs = await list_jobs()
     assert len(all_jobs) == 3
-    # Should be ordered by priority desc
-    assert all_jobs[0].priority == 10
-    assert all_jobs[1].priority == 5
-    assert all_jobs[2].priority == 1
 
     # List only pending jobs
     pending_jobs = await list_jobs(status=JobStatus.pending)
@@ -154,6 +169,7 @@ async def test_update_job(test_db):
     # Create job
     job = await create_job(
         JobCreate(
+            project_name="test",
             project_path="/projects/test",
             transcript_file="/transcripts/test.txt",
         )
@@ -195,6 +211,7 @@ async def test_delete_job(test_db):
     # Create job
     job = await create_job(
         JobCreate(
+            project_name="test",
             project_path="/projects/test",
             transcript_file="/transcripts/test.txt",
         )
@@ -219,6 +236,7 @@ async def test_get_next_pending_job(test_db):
     # Create jobs with different priorities
     await create_job(
         JobCreate(
+            project_name="job1",
             project_path="/projects/job1",
             transcript_file="/transcripts/1.txt",
             priority=1,
@@ -227,6 +245,7 @@ async def test_get_next_pending_job(test_db):
 
     job2 = await create_job(
         JobCreate(
+            project_name="job2",
             project_path="/projects/job2",
             transcript_file="/transcripts/2.txt",
             priority=10,
@@ -235,6 +254,7 @@ async def test_get_next_pending_job(test_db):
 
     job3 = await create_job(
         JobCreate(
+            project_name="job3",
             project_path="/projects/job3",
             transcript_file="/transcripts/3.txt",
             priority=5,
@@ -262,6 +282,7 @@ async def test_log_event(test_db):
     # Create a job first
     job = await create_job(
         JobCreate(
+            project_name="test",
             project_path="/projects/test",
             transcript_file="/transcripts/test.txt",
         )
@@ -298,6 +319,7 @@ async def test_get_events_for_job(test_db):
     # Create a job
     job = await create_job(
         JobCreate(
+            project_name="test",
             project_path="/projects/test",
             transcript_file="/transcripts/test.txt",
         )
@@ -388,6 +410,7 @@ async def test_thread_safety(test_db):
     async def create_test_job(i):
         return await create_job(
             JobCreate(
+                project_name=f"job{i}",
                 project_path=f"/projects/job{i}",
                 transcript_file=f"/transcripts/{i}.txt",
                 priority=i,
@@ -413,6 +436,7 @@ async def test_stuck_job_reset(test_db):
     # Create a job and set it to in_progress
     job = await create_job(
         JobCreate(
+            project_name="test",
             project_path="/projects/test",
             transcript_file="/transcripts/test.txt",
         )
@@ -463,6 +487,7 @@ async def test_stuck_job_max_retries(test_db):
     # Create a job
     job = await create_job(
         JobCreate(
+            project_name="test",
             project_path="/projects/test",
             transcript_file="/transcripts/test.txt",
         )
@@ -505,18 +530,21 @@ async def test_run_stuck_job_cleanup(test_db):
     # Create multiple stuck jobs
     job1 = await create_job(
         JobCreate(
+            project_name="job1",
             project_path="/projects/job1",
             transcript_file="/transcripts/1.txt",
         )
     )
     job2 = await create_job(
         JobCreate(
+            project_name="job2",
             project_path="/projects/job2",
             transcript_file="/transcripts/2.txt",
         )
     )
     job3 = await create_job(
         JobCreate(
+            project_name="job3",
             project_path="/projects/job3",
             transcript_file="/transcripts/3.txt",
         )
@@ -581,14 +609,14 @@ def test_sanitize_path_component_invalid_chars():
     # Asterisk
     assert sanitize_path_component("test*file") == "test_file"
 
-    # Question mark
-    assert sanitize_path_component("what?") == "what_"
+    # Question mark (trailing underscore stripped)
+    assert sanitize_path_component("what?") == "what"
 
-    # Double quotes
-    assert sanitize_path_component('test"name"') == "test_name_"
+    # Double quotes (trailing underscore stripped)
+    assert sanitize_path_component('test"name"') == "test_name"
 
-    # Angle brackets
-    assert sanitize_path_component("project<2024>") == "project_2024_"
+    # Angle brackets (trailing underscore stripped)
+    assert sanitize_path_component("project<2024>") == "project_2024"
 
     # Pipe
     assert sanitize_path_component("test|name") == "test_name"
@@ -597,11 +625,11 @@ def test_sanitize_path_component_invalid_chars():
 def test_sanitize_path_component_multiple_invalid():
     """Test sanitization with multiple invalid characters."""
     result = sanitize_path_component("test/file\\name:v1*2?")
-    assert result == "test_file_name_v1_2_"
+    assert result == "test_file_name_v1_2"
 
-    # Complex real-world example
+    # Complex real-world example (spaces preserved, trailing underscore stripped)
     result = sanitize_path_component("My Project: Episode 1/Part 2 <Draft>")
-    assert result == "My_Project_Episode_1_Part_2_Draft_"
+    assert result == "My Project_ Episode 1_Part 2 _Draft"
 
 
 def test_sanitize_path_component_consecutive_underscores():
@@ -650,12 +678,13 @@ def test_sanitize_path_component_length_limit():
 
 def test_sanitize_path_component_unicode():
     """Test handling of unicode characters."""
-    # Non-ASCII characters should be replaced with underscore
-    assert sanitize_path_component("café") == "caf_"
-    assert sanitize_path_component("test™") == "test_"
-    # Pure unicode becomes underscore, then "unnamed" after strip
+    # Unicode alphanumeric chars (é) pass isalnum() in Python 3
+    assert sanitize_path_component("café") == "café"
+    # Non-alphanumeric unicode (™) stripped, trailing underscore trimmed
+    assert sanitize_path_component("test™") == "test"
+    # CJK characters pass isalnum() in Python 3
     result = sanitize_path_component("日本語")
-    assert result == "unnamed"
+    assert result == "日本語"
 
 
 def test_sanitize_path_component_special_cases():
@@ -669,7 +698,7 @@ def test_sanitize_path_component_special_cases():
 
     # Real PBS project name examples
     assert sanitize_path_component("WPT News 2024-03-15") == "WPT News 2024-03-15"
-    assert sanitize_path_component("University Place: Episode #123") == "University_Place_Episode_123"
+    assert sanitize_path_component("University Place: Episode #123") == "University Place_ Episode _123"
 
 
 @pytest.mark.asyncio
@@ -683,8 +712,8 @@ async def test_create_job_with_sanitized_project_name(test_db):
 
     job = await create_job(job_create)
 
-    # Verify the project_path was sanitized
-    assert job.project_path == "OUTPUT/Test_Project_Episode_1_Part_2"
+    # Verify the project_path was sanitized (spaces preserved, invalid chars → underscore)
+    assert job.project_path == "OUTPUT/Test Project_ Episode 1_Part 2"
     assert "/" not in job.project_name  # project_name is derived from path
 
 

@@ -2,9 +2,7 @@
 
 import logging
 
-import pytest
-
-from api.services.logging import SafeLogger, _RESERVED, setup_logging
+from api.services.logging import SafeLogger, setup_logging
 
 
 class TestSafeLogger:

@@ -212,13 +212,13 @@ class TestQueueFile:
         mock_response.json.return_value = {"id": 123}
         mock_post.return_value = mock_response
 
-        result = queue_file("test_transcript.txt")
+        result = queue_file("test_project.txt")
 
         assert result is True
         mock_post.assert_called_once()
         call_args = mock_post.call_args
-        assert call_args[1]["json"]["transcript_file"] == "test_transcript.txt"
-        assert call_args[1]["json"]["project_name"] == "test_transcript"
+        assert call_args[1]["json"]["transcript_file"] == "test_project.txt"
+        assert call_args[1]["json"]["project_name"] == "test_project"
 
     @patch("watch_transcripts.httpx.post")
     def test_queue_file_strips_forclaude_suffix(self, mock_post):

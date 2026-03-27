@@ -19,6 +19,17 @@ from api.services.database import (
 @pytest_asyncio.fixture
 async def integration_db():
     """Create a temporary test database for integration tests."""
+    import api.services.database as db_mod
+
+    # Save original engine state so we can restore after this test
+    orig_engine = db_mod._engine
+    orig_factory = db_mod._async_session_factory
+    orig_db_path = os.environ.get("DATABASE_PATH")
+
+    # Reset globals so init_db() creates a fresh engine
+    db_mod._engine = None
+    db_mod._async_session_factory = None
+
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
 
@@ -26,7 +37,6 @@ async def integration_db():
 
     await init_db()
 
-    # Create schema
     from api.services.database import _engine, metadata
 
     async with _engine.begin() as conn:
@@ -35,6 +45,12 @@ async def integration_db():
     yield db_path
 
     await close_db()
+
+    # Restore original engine
+    db_mod._engine = orig_engine
+    db_mod._async_session_factory = orig_factory
+    if orig_db_path is not None:
+        os.environ["DATABASE_PATH"] = orig_db_path
 
     try:
         os.unlink(db_path)
@@ -51,6 +67,7 @@ async def test_exit_criteria_thread_safe_connections(integration_db):
         job = await create_job(
             JobCreate(
                 project_path=f"/projects/test{i}",
+                project_name=f"test{i}",
                 transcript_file=f"/transcripts/test{i}.txt",
                 priority=i,
             )
@@ -75,6 +92,7 @@ async def test_exit_criteria_basic_crud(integration_db):
     job = await create_job(
         JobCreate(
             project_path="/projects/test",
+            project_name="test",
             transcript_file="/transcripts/test.txt",
             priority=5,
         )
@@ -113,6 +131,7 @@ async def test_exit_criteria_create_and_retrieve(integration_db):
     job1 = await create_job(
         JobCreate(
             project_path="/projects/episode1",
+            project_name="episode1",
             transcript_file="/transcripts/ep1.txt",
             priority=10,
         )
@@ -121,6 +140,7 @@ async def test_exit_criteria_create_and_retrieve(integration_db):
     job2 = await create_job(
         JobCreate(
             project_path="/projects/episode2",
+            project_name="episode2",
             transcript_file="/transcripts/ep2.txt",
             priority=5,
         )
@@ -129,6 +149,7 @@ async def test_exit_criteria_create_and_retrieve(integration_db):
     job3 = await create_job(
         JobCreate(
             project_path="/projects/episode3",
+            project_name="episode3",
             transcript_file="/transcripts/ep3.txt",
             priority=1,
         )
@@ -150,7 +171,9 @@ async def test_exit_criteria_create_and_retrieve(integration_db):
 
     # Verify defaults are set correctly
     assert all(job.status == JobStatus.pending for job in [retrieved1, retrieved2, retrieved3])
-    assert all(job.agent_phases == ["analyst", "formatter"] for job in [retrieved1, retrieved2, retrieved3])
+    assert all(
+        job.agent_phases == ["analyst", "formatter", "seo", "manager"] for job in [retrieved1, retrieved2, retrieved3]
+    )
     assert all(job.retry_count == 0 for job in [retrieved1, retrieved2, retrieved3])
     assert all(job.max_retries == 3 for job in [retrieved1, retrieved2, retrieved3])
 

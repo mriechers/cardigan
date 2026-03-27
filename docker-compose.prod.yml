@@ -1,0 +1,119 @@
+# Production deployment — pulls pre-built images from GHCR.
+# Usage: docker compose -f docker-compose.prod.yml up -d
+#
+# Requires:
+#   - .env file with API keys and CARDIGAN_API_KEY
+#   - docker login to ghcr.io (see Task 7 in the plan)
+
+services:
+  api:
+    image: ghcr.io/mriechers/cardigan-api:latest
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      - DATABASE_PATH=/data/db/dashboard.db
+      - OUTPUT_DIR=/data/output
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000}
+      - CARDIGAN_API_KEY=${CARDIGAN_API_KEY}
+      - TRANSCRIPTS_DIR=/data/transcripts
+    volumes:
+      - db-data:/data/db
+      - output-data:/data/output
+      - transcript-data:/data/transcripts
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/system/health')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    restart: unless-stopped
+
+  worker:
+    image: ghcr.io/mriechers/cardigan-worker:latest
+    env_file: .env
+    environment:
+      - DATABASE_PATH=/data/db/dashboard.db
+      - OUTPUT_DIR=/data/output
+      - CARDIGAN_API_KEY=${CARDIGAN_API_KEY}
+      - TRANSCRIPTS_DIR=/data/transcripts
+    volumes:
+      - db-data:/data/db
+      - output-data:/data/output
+      - transcript-data:/data/transcripts
+    depends_on:
+      api:
+        condition: service_healthy
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    restart: unless-stopped
+
+  web:
+    image: ghcr.io/mriechers/cardigan-web:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - CARDIGAN_API_KEY=${CARDIGAN_API_KEY}
+    depends_on:
+      - api
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    restart: unless-stopped
+
+  mcp:
+    image: ghcr.io/mriechers/cardigan-api:latest
+    command: ["python", "-m", "mcp_server.server"]
+    ports:
+      - "8080:8080"
+    env_file: .env
+    environment:
+      - MCP_TRANSPORT=sse
+      - EDITORIAL_API_URL=http://api:8000
+      - DATABASE_PATH=/data/db/dashboard.db
+      - OUTPUT_DIR=/data/output
+      - TRANSCRIPTS_DIR=/data/transcripts
+    volumes:
+      - db-data:/data/db
+      - output-data:/data/output
+      - transcript-data:/data/transcripts
+    depends_on:
+      api:
+        condition: service_healthy
+    profiles:
+      - mcp
+    restart: unless-stopped
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_started
+    profiles:
+      - tunnel
+    restart: unless-stopped
+
+  watchtower:
+    image: containrrr/watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Set DOCKER_CONFIG in .env if Docker runs as non-root user
+      # (e.g., DOCKER_CONFIG=/home/ubuntu/.docker)
+      - ${DOCKER_CONFIG:-/root/.docker}/config.json:/config.json:ro
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=300
+      # Only update containers with the watchtower.enable=true label
+      - WATCHTOWER_LABEL_ENABLE=true
+    restart: unless-stopped
+
+volumes:
+  db-data:
+  output-data:
+  transcript-data:

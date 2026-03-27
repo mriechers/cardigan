@@ -41,6 +41,7 @@ from api.models.config import ConfigItem, ConfigValueType
 from api.models.events import EventCreate, EventData, EventType, SessionEvent
 from api.models.job import Job, JobCreate, JobOutputs, JobPhase, JobStatus, JobUpdate, PhaseStatus
 
+
 class _SafeEncoder(json.JSONEncoder):
     """JSON encoder that handles datetime and enum objects."""
 
@@ -828,8 +829,7 @@ async def claim_next_job(worker_id: Optional[str] = None) -> Optional[Job]:
 
         # SQLite-compatible atomic claim using UPDATE with subquery
         # This finds the next job and claims it in a single statement
-        claim_sql = text(
-            """
+        claim_sql = text("""
             UPDATE jobs
             SET status = :new_status,
                 started_at = :started_at,
@@ -841,8 +841,7 @@ async def claim_next_job(worker_id: Optional[str] = None) -> Optional[Job]:
                 LIMIT 1
             )
             RETURNING *
-        """
-        )
+        """)
 
         result = await session.execute(
             claim_sql,

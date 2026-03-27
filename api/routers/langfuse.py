@@ -190,8 +190,7 @@ async def get_phase_stats(
 
     async with get_session() as session:
         # Query completions grouped by phase, model, tier
-        completions_query = text(
-            """
+        completions_query = text("""
             SELECT
                 json_extract(data, '$.phase') as phase,
                 json_extract(data, '$.model') as model,
@@ -205,12 +204,10 @@ async def get_phase_stats(
               AND timestamp >= :period_start
             GROUP BY phase, model, tier
             ORDER BY phase, tier
-        """
-        )
+        """)
 
         # Query failures grouped by phase, tier
-        failures_query = text(
-            """
+        failures_query = text("""
             SELECT
                 json_extract(data, '$.phase') as phase,
                 json_extract(data, '$.extra.tier') as tier,
@@ -220,8 +217,7 @@ async def get_phase_stats(
             WHERE event_type = 'phase_failed'
               AND timestamp >= :period_start
             GROUP BY phase, tier
-        """
-        )
+        """)
 
         completions_result = await session.execute(completions_query, {"period_start": period_start.isoformat()})
         completions = completions_result.fetchall()

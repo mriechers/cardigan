@@ -7,6 +7,7 @@ Usage:
 Options:
     --once    Queue all unprocessed files once and exit (no watching)
 """
+
 import sys
 import time
 from pathlib import Path

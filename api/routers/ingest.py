@@ -32,6 +32,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import text
 
+from api.middleware.rate_limit import RATE_EXPENSIVE, limiter
 from api.models.ingest import IngestConfigResponse, IngestConfigUpdate
 from api.services.database import get_session
 from api.services.ingest_config import (
@@ -40,7 +41,6 @@ from api.services.ingest_config import (
     record_scan_result,
     update_ingest_config,
 )
-from api.middleware.rate_limit import RATE_EXPENSIVE, limiter
 from api.services.ingest_scanner import IngestScanner
 from api.services.ingest_scheduler import configure_scheduler
 from api.services.screengrab_attacher import (
@@ -244,13 +244,11 @@ async def list_available_files(
         ]
 
         # Get total count of new files
-        count_query = text(
-            """
+        count_query = text("""
             SELECT COUNT(*) as count
             FROM available_files
             WHERE status = 'new' AND file_type = :file_type
-        """
-        )
+        """)
         result = await session.execute(count_query, {"file_type": file_type or "transcript"})
         total_new = result.fetchone().count
 
@@ -331,24 +329,20 @@ async def get_ingest_status() -> IngestStatusResponse:
 
     async with get_session() as session:
         # Count by status
-        status_query = text(
-            """
+        status_query = text("""
             SELECT status, COUNT(*) as count
             FROM available_files
             GROUP BY status
-        """
-        )
+        """)
         result = await session.execute(status_query)
         status_counts = {row.status: row.count for row in result.fetchall()}
 
         # Count by type
-        type_query = text(
-            """
+        type_query = text("""
             SELECT file_type, COUNT(*) as count
             FROM available_files
             GROUP BY file_type
-        """
-        )
+        """)
         result = await session.execute(type_query)
         type_counts = {row.file_type: row.count for row in result.fetchall()}
 
@@ -409,14 +403,12 @@ async def list_screengrabs(
         ]
 
         # Get totals
-        totals_query = text(
-            """
+        totals_query = text("""
             SELECT status, COUNT(*) as count
             FROM available_files
             WHERE file_type = 'screengrab'
             GROUP BY status
-        """
-        )
+        """)
         result = await session.execute(totals_query)
         totals = {row.status: row.count for row in result.fetchall()}
 
@@ -495,14 +487,12 @@ async def get_screengrabs_for_media_id(
         ]
 
         # Get totals for this media_id
-        totals_query = text(
-            """
+        totals_query = text("""
             SELECT status, COUNT(*) as count
             FROM available_files
             WHERE file_type = 'screengrab' AND media_id = :media_id
             GROUP BY status
-        """
-        )
+        """)
         result = await session.execute(totals_query, {"media_id": media_id})
         totals = {row.status: row.count for row in result.fetchall()}
 
@@ -587,14 +577,12 @@ async def ignore_screengrab(file_id: int) -> dict:
         Success message
     """
     async with get_session() as session:
-        query = text(
-            """
+        query = text("""
             UPDATE available_files
             SET status = 'ignored',
                 status_changed_at = :now
             WHERE id = :file_id AND file_type = 'screengrab'
-        """
-        )
+        """)
         result = await session.execute(
             query,
             {
@@ -621,14 +609,12 @@ async def unignore_screengrab(file_id: int) -> dict:
         Success message
     """
     async with get_session() as session:
-        query = text(
-            """
+        query = text("""
             UPDATE available_files
             SET status = 'new',
                 status_changed_at = :now
             WHERE id = :file_id AND file_type = 'screengrab' AND status = 'ignored'
-        """
-        )
+        """)
         result = await session.execute(
             query,
             {
@@ -731,13 +717,11 @@ async def queue_transcript(file_id: int) -> QueueTranscriptResponse:
 
         # Update available_files with job_id
         async with get_session() as session:
-            update_query = text(
-                """
+            update_query = text("""
                 UPDATE available_files
                 SET job_id = :job_id
                 WHERE id = :file_id
-            """
-            )
+            """)
             await session.execute(
                 update_query,
                 {
@@ -812,14 +796,12 @@ async def ignore_transcript(file_id: int) -> dict:
         Success message
     """
     async with get_session() as session:
-        query = text(
-            """
+        query = text("""
             UPDATE available_files
             SET status = 'ignored',
                 status_changed_at = :now
             WHERE id = :file_id AND file_type = 'transcript'
-        """
-        )
+        """)
         result = await session.execute(
             query,
             {
@@ -847,14 +829,12 @@ async def unignore_transcript(file_id: int) -> dict:
         Success message
     """
     async with get_session() as session:
-        query = text(
-            """
+        query = text("""
             UPDATE available_files
             SET status = 'new',
                 status_changed_at = :now
             WHERE id = :file_id AND file_type = 'transcript' AND status = 'ignored'
-        """
-        )
+        """)
         result = await session.execute(
             query,
             {

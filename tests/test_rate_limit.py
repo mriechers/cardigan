@@ -1,8 +1,6 @@
 """Tests for rate limiting middleware."""
 
 import pytest
-from unittest.mock import patch
-
 from starlette.testclient import TestClient
 
 from api.main import app
@@ -11,9 +9,12 @@ from api.middleware.rate_limit import limiter
 
 @pytest.fixture(autouse=True)
 def reset_limiter():
-    """Reset rate limiter state between tests."""
+    """Reset rate limiter state and ensure limiter is enabled for these tests."""
+    original_enabled = limiter.enabled
+    limiter.enabled = True
     limiter.reset()
     yield
+    limiter.enabled = original_enabled
 
 
 @pytest.fixture
