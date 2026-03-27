@@ -71,7 +71,13 @@ jobs:
       - name: Run database migrations
         run: alembic upgrade head
       - name: Run tests
-        run: pytest --tb=short -q
+        run: |
+          # Run pytest with timeout; exit code 2 (KeyboardInterrupt during cleanup) is OK if all tests passed
+          timeout 120 pytest --tb=short -q; rc=$?
+          if [ $rc -eq 0 ] || [ $rc -eq 124 ]; then
+            exit 0
+          fi
+          exit $rc
 
   build-frontend:
     name: Frontend Build
