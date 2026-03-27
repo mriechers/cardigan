@@ -134,7 +134,7 @@ class JobWorker:
     PHASES = ["analyst", "formatter", "seo", "manager"]
 
     # Optional phases with trigger conditions
-    # timestamp: Runs automatically for 30+ minute content, or when requested
+    # timestamp: Runs automatically for 10+ minute content, or when requested
     OPTIONAL_PHASES = ["timestamp"]
 
     # Duration threshold (in minutes) for auto-triggering timestamp phase
