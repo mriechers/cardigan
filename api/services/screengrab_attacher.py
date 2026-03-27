@@ -178,13 +178,11 @@ class ScreengrabAttacher:
 
         async with get_session() as session:
             # Fetch file record
-            query = text(
-                """
+            query = text("""
                 SELECT id, remote_url, filename, media_id, status
                 FROM available_files
                 WHERE id = :file_id AND file_type = 'screengrab'
-            """
-            )
+            """)
             result = await session.execute(query, {"file_id": file_id})
             row = result.fetchone()
 
@@ -236,16 +234,14 @@ class ScreengrabAttacher:
 
         async with get_session() as session:
             # Fetch all 'new' screengrabs with media IDs
-            query = text(
-                """
+            query = text("""
                 SELECT id, remote_url, filename, media_id
                 FROM available_files
                 WHERE file_type = 'screengrab'
                   AND status = 'new'
                   AND media_id IS NOT NULL
                 ORDER BY first_seen_at ASC
-            """
-            )
+            """)
             result = await session.execute(query)
             rows = result.fetchall()
 
@@ -320,16 +316,14 @@ class ScreengrabAttacher:
         from sqlalchemy import text
 
         async with get_session() as session:
-            query = text(
-                """
+            query = text("""
                 INSERT INTO screengrab_attachments
                 (available_file_id, sst_record_id, media_id, filename, remote_url,
                  attached_at, attachments_before, attachments_after, success, error_message)
                 VALUES
                 (:available_file_id, :sst_record_id, :media_id, :filename, :remote_url,
                  :attached_at, :attachments_before, :attachments_after, :success, :error_message)
-            """
-            )
+            """)
 
             await session.execute(
                 query,
@@ -364,16 +358,14 @@ class ScreengrabAttacher:
             new_status = "new"  # Keep as new for retry on transient errors
 
         async with get_session() as session:
-            query = text(
-                """
+            query = text("""
                 UPDATE available_files
                 SET status = :status,
                     status_changed_at = :changed_at,
                     airtable_record_id = :record_id,
                     attached_at = :attached_at
                 WHERE id = :file_id
-            """
-            )
+            """)
 
             await session.execute(
                 query,

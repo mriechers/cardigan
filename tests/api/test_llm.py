@@ -415,7 +415,9 @@ class TestAPIInteractions:
         assert response.model == "google/gemini-2.0-flash-exp"
         assert response.total_tokens == 150
 
-    @pytest.mark.xfail(reason="Mock targets httpx.AsyncClient.post but chat() delegates to _call_openrouter — payload not captured correctly")
+    @pytest.mark.xfail(
+        reason="Mock targets httpx.AsyncClient.post but chat() delegates to _call_openrouter — payload not captured correctly"
+    )
     @pytest.mark.asyncio
     async def test_chat_with_preset(self, llm_client, monkeypatch):
         """Test chat with OpenRouter preset."""

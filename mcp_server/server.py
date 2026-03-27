@@ -1348,25 +1348,13 @@ async def main():
 
         async def handle_sse(request):
             """Handle SSE connection endpoint."""
-            async with sse.connect_sse(
-                request.scope,
-                request.receive,
-                request._send
-            ) as streams:
-                await server.run(
-                    streams[0],
-                    streams[1],
-                    server.create_initialization_options()
-                )
+            async with sse.connect_sse(request.scope, request.receive, request._send) as streams:
+                await server.run(streams[0], streams[1], server.create_initialization_options())
             return Response()
 
         async def handle_post_message(request):
             """Handle message POST endpoint."""
-            await sse.handle_post_message(
-                request.scope,
-                request.receive,
-                request._send
-            )
+            await sse.handle_post_message(request.scope, request.receive, request._send)
             return Response()
 
         # Create Starlette app with SSE routes
@@ -1379,22 +1367,13 @@ async def main():
         )
 
         # Run SSE server (must use async serve() since we're already in an event loop)
-        config = uvicorn.Config(
-            app,
-            host="0.0.0.0",
-            port=8080,
-            log_level="info"
-        )
+        config = uvicorn.Config(app, host="0.0.0.0", port=8080, log_level="info")
         srv = uvicorn.Server(config)
         await srv.serve()
     else:
         # Default stdio transport for local Claude Desktop
         async with stdio_server() as (read_stream, write_stream):
-            await server.run(
-                read_stream,
-                write_stream,
-                server.create_initialization_options()
-            )
+            await server.run(read_stream, write_stream, server.create_initialization_options())
 
 
 if __name__ == "__main__":

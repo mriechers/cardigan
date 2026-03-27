@@ -171,7 +171,9 @@ async def test_exit_criteria_create_and_retrieve(integration_db):
 
     # Verify defaults are set correctly
     assert all(job.status == JobStatus.pending for job in [retrieved1, retrieved2, retrieved3])
-    assert all(job.agent_phases == ["analyst", "formatter", "seo", "manager"] for job in [retrieved1, retrieved2, retrieved3])
+    assert all(
+        job.agent_phases == ["analyst", "formatter", "seo", "manager"] for job in [retrieved1, retrieved2, retrieved3]
+    )
     assert all(job.retry_count == 0 for job in [retrieved1, retrieved2, retrieved3])
     assert all(job.max_retries == 3 for job in [retrieved1, retrieved2, retrieved3])
 

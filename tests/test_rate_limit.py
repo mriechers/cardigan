@@ -1,6 +1,5 @@
 """Tests for rate limiting middleware."""
 
-
 import pytest
 from starlette.testclient import TestClient
 

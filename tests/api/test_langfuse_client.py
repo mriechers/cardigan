@@ -21,6 +21,7 @@ from api.services.langfuse_client import (
 # Credential loading
 # ---------------------------------------------------------------------------
 
+
 class TestCredentialLoading:
     """Tests for _get_langfuse_credential() priority order."""
 
@@ -66,6 +67,7 @@ class TestCredentialLoading:
 # ---------------------------------------------------------------------------
 # Client initialization
 # ---------------------------------------------------------------------------
+
 
 class TestClientInitialization:
     """Tests for LangfuseClient._ensure_initialized()."""
@@ -162,6 +164,7 @@ class TestClientInitialization:
 # ---------------------------------------------------------------------------
 # trace_generation()
 # ---------------------------------------------------------------------------
+
 
 class TestTraceGeneration:
     """Tests for LangfuseClient.trace_generation()."""
@@ -313,6 +316,7 @@ class TestTraceGeneration:
 # get_model_stats()
 # ---------------------------------------------------------------------------
 
+
 class TestGetModelStats:
     """Tests for LangfuseClient.get_model_stats()."""
 
@@ -390,9 +394,7 @@ class TestGetModelStats:
         client = self._make_client()
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
-        mock_resp.json.return_value = {
-            "data": [{"count_count": 3, "sum_totalCost": 0.1, "sum_totalTokens": 100}]
-        }
+        mock_resp.json.return_value = {"data": [{"count_count": 3, "sum_totalCost": 0.1, "sum_totalTokens": 100}]}
         client._http_client.get = AsyncMock(return_value=mock_resp)
 
         result = await client.get_model_stats()
@@ -437,6 +439,7 @@ class TestGetModelStats:
 # ---------------------------------------------------------------------------
 # get_trace_cost()
 # ---------------------------------------------------------------------------
+
 
 class TestGetTraceCost:
     """Tests for LangfuseClient.get_trace_cost()."""
@@ -527,6 +530,7 @@ class TestGetTraceCost:
 # ---------------------------------------------------------------------------
 # Singleton
 # ---------------------------------------------------------------------------
+
 
 class TestSingleton:
     """Tests for get_langfuse_client() singleton."""

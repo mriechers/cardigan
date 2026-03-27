@@ -1,6 +1,5 @@
 """Tests for API key authentication middleware."""
 
-
 import pytest
 from starlette.testclient import TestClient
 

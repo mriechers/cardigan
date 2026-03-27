@@ -298,9 +298,7 @@ def merge_formatter_chunks(chunks: List[str]) -> str:
 
     # Extract all review notes
     review_notes: List[str] = []
-    review_pattern = re.compile(
-        r"<!--\s*REVIEW NOTES\s*-->.*?(?=<!--|$)", re.DOTALL | re.IGNORECASE
-    )
+    review_pattern = re.compile(r"<!--\s*REVIEW NOTES\s*-->.*?(?=<!--|$)", re.DOTALL | re.IGNORECASE)
 
     # Process each chunk
     header = ""
@@ -332,9 +330,7 @@ def merge_formatter_chunks(chunks: List[str]) -> str:
             # Subsequent chunks: strip any generated header
             body = chunk
             # Remove "# Formatted Transcript" heading
-            body = re.sub(
-                r"^#\s+Formatted Transcript\s*\n?", "", body, flags=re.MULTILINE
-            )
+            body = re.sub(r"^#\s+Formatted Transcript\s*\n?", "", body, flags=re.MULTILINE)
             # Remove metadata lines (Project:, Program:, Duration:, Date:)
             body = re.sub(
                 r"^\*\*(?:Project|Program|Duration|Date|Air Date|Media ID):\*\*.*\n?",
@@ -347,16 +343,12 @@ def merge_formatter_chunks(chunks: List[str]) -> str:
             body = body.strip()
 
         # Extract and save Status line from last chunk only
-        status_match = re.search(
-            r"^\*\*Status:\*\*\s+.*$", body, flags=re.MULTILINE
-        )
+        status_match = re.search(r"^\*\*Status:\*\*\s+.*$", body, flags=re.MULTILINE)
         if status_match:
             if i == len(chunks) - 1:
                 status_line = status_match.group(0)
             # Remove status from all chunks
-            body = re.sub(
-                r"^\*\*Status:\*\*\s+.*$", "", body, flags=re.MULTILINE
-            ).strip()
+            body = re.sub(r"^\*\*Status:\*\*\s+.*$", "", body, flags=re.MULTILINE).strip()
 
         bodies.append(body)
 

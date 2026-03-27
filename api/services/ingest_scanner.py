@@ -150,13 +150,11 @@ class IngestScanner:
             async with get_session() as session:
                 if media_ids:
                     placeholders = ",".join([f":id{i}" for i in range(len(media_ids))])
-                    query = text(
-                        f"""
+                    query = text(f"""
                         SELECT DISTINCT media_id
                         FROM jobs
                         WHERE media_id IN ({placeholders})
-                    """
-                    )
+                    """)
 
                     params_dict = {f"id{i}": mid for i, mid in enumerate(media_ids)}
                     result = await session.execute(query, params_dict)
@@ -294,12 +292,10 @@ class IngestScanner:
             for i in range(0, len(all_urls), batch_size):
                 batch_urls = all_urls[i : i + batch_size]
                 placeholders = ",".join([f":url{j}" for j in range(len(batch_urls))])
-                check_query = text(
-                    f"""
+                check_query = text(f"""
                     SELECT remote_url FROM available_files
                     WHERE remote_url IN ({placeholders})
-                """
-                )
+                """)
                 params = {f"url{j}": url for j, url in enumerate(batch_urls)}
                 result = await session.execute(check_query, params)
                 existing_urls.update(row.remote_url for row in result.fetchall())
@@ -309,16 +305,14 @@ class IngestScanner:
             # Step 2: Insert new files
             new_files = [f for f in files if f.url not in existing_urls]
             for f in new_files:
-                insert_query = text(
-                    """
+                insert_query = text("""
                     INSERT INTO available_files
                     (remote_url, filename, directory_path, file_type, media_id,
                      file_size_bytes, remote_modified_at, first_seen_at, last_seen_at, status)
                     VALUES
                     (:remote_url, :filename, :directory_path, :file_type, :media_id,
                      :file_size_bytes, :remote_modified_at, :now, :now, 'new')
-                """
-                )
+                """)
                 await session.execute(
                     insert_query,
                     {
@@ -340,20 +334,16 @@ class IngestScanner:
 
             # Step 3: Update last_seen_at for existing files (single UPDATE)
             if existing_urls:
-                update_query = text(
-                    """
+                update_query = text("""
                     UPDATE available_files
                     SET last_seen_at = :now
                     WHERE remote_url IN (SELECT remote_url FROM available_files WHERE 1=1)
-                """
-                )
+                """)
                 # Actually, let's just update all records to current timestamp
                 # This is simpler and still fast
-                update_query = text(
-                    """
+                update_query = text("""
                     UPDATE available_files SET last_seen_at = :now
-                """
-                )
+                """)
                 await session.execute(update_query, {"now": now})
 
             await session.commit()
@@ -598,25 +588,21 @@ class IngestScanner:
         """
         async with get_session() as session:
             # Check if already tracked
-            check_query = text(
-                """
+            check_query = text("""
                 SELECT id, status FROM available_files
                 WHERE remote_url = :url
-            """
-            )
+            """)
             result = await session.execute(check_query, {"url": remote_file.url})
             existing = result.fetchone()
 
             if existing:
                 # Update last_seen_at and backfill remote_modified_at if missing
-                update_query = text(
-                    """
+                update_query = text("""
                     UPDATE available_files
                     SET last_seen_at = :now,
                         remote_modified_at = COALESCE(remote_modified_at, :remote_modified_at)
                     WHERE id = :id
-                """
-                )
+                """)
                 await session.execute(
                     update_query,
                     {
@@ -628,16 +614,14 @@ class IngestScanner:
                 return False
 
             # Insert new file
-            insert_query = text(
-                """
+            insert_query = text("""
                 INSERT INTO available_files
                 (remote_url, filename, directory_path, file_type, media_id,
                  file_size_bytes, remote_modified_at, first_seen_at, last_seen_at, status)
                 VALUES
                 (:remote_url, :filename, :directory_path, :file_type, :media_id,
                  :file_size_bytes, :remote_modified_at, :now, :now, 'new')
-            """
-            )
+            """)
 
             now = datetime.now(timezone.utc).isoformat()
             await session.execute(
@@ -657,7 +641,9 @@ class IngestScanner:
             logger.info(f"Tracked new {remote_file.file_type}: {remote_file.filename}")
             return True
 
-    async def download_file(self, file_id: int, destination_dir: str = os.getenv("TRANSCRIPTS_DIR", "transcripts")) -> dict:
+    async def download_file(
+        self, file_id: int, destination_dir: str = os.getenv("TRANSCRIPTS_DIR", "transcripts")
+    ) -> dict:
         """
         Download a file from the ingest server to a local directory.
 
@@ -679,13 +665,11 @@ class IngestScanner:
 
         # Get file record from database
         async with get_session() as session:
-            query = text(
-                """
+            query = text("""
                 SELECT id, remote_url, filename, media_id, file_type, status
                 FROM available_files
                 WHERE id = :file_id
-            """
-            )
+            """)
             result = await session.execute(query, {"file_id": file_id})
             row = result.fetchone()
 
@@ -730,15 +714,13 @@ class IngestScanner:
 
         # Update file status in database
         async with get_session() as session:
-            update_query = text(
-                """
+            update_query = text("""
                 UPDATE available_files
                 SET status = 'queued',
                     local_path = :local_path,
                     downloaded_at = :now
                 WHERE id = :file_id
-            """
-            )
+            """)
             await session.execute(
                 update_query,
                 {
@@ -763,16 +745,14 @@ class IngestScanner:
             List of file records ready for attachment
         """
         async with get_session() as session:
-            query = text(
-                """
+            query = text("""
                 SELECT id, remote_url, filename, media_id, first_seen_at
                 FROM available_files
                 WHERE file_type = 'screengrab'
                   AND status = 'new'
                   AND media_id IS NOT NULL
                 ORDER BY first_seen_at ASC
-            """
-            )
+            """)
             result = await session.execute(query)
             rows = result.fetchall()
 
