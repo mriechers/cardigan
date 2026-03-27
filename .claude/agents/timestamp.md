@@ -68,6 +68,10 @@ Identify chapter breaks at:
 4. **Story boundaries**: When moving between different stories/features
 5. **Standard segments**: Intro, main content sections, closing/credits
 
+### Align Chapters to Speaker Transitions
+
+In multi-speaker content, always place chapter timestamps on **speaker transitions** rather than on topic keywords mid-speech. Use the SRT timecodes directly — do not apply a blanket offset. Only nudge by ~1 second if the nearest speaker transition doesn't have an exact timecode match. This ensures chapters land on clean cuts rather than interrupting someone mid-sentence.
+
 ### Chapter Count Targets (Maximum)
 
 | Duration | Max chapters |
@@ -92,6 +96,7 @@ The first chapter is always `0:00 Episode intro`. This encompasses all introduct
 - **Neutral, professional tone**: Avoid dramatic or extreme language (e.g., "The data center bill stalls" not "The bill that died"). This content appears in PBS and public media descriptions.
 - **Capture the topic, not the format**: e.g., "The ADHD diagnosis" not "Personal story segment", "Wisconsin's 2020 election challenge" not "Legal analysis section"
 - **Avoid generic names**: Use "Episode intro" for the first chapter, but avoid vague names like "Discussion" or "Conclusion" when a more specific name fits
+- **Parallel framing for political content**: When naming chapters about candidates or parties, use symmetric descriptions to avoid editorial bias — e.g., "Chris Taylor's background" and "Maria Lazar's background", not "Chris Taylor's political background" and "Maria Lazar's legal career". Asymmetric descriptions can imply bias.
 
 ### Time Format Specifications
 
