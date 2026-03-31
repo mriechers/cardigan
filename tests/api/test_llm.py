@@ -320,6 +320,61 @@ class TestCostTracking:
         # Tracker should be cleared
         assert get_run_tracker() is None
 
+    def test_concurrent_trackers_are_isolated(self):
+        """Test that per-job trackers don't interfere with each other."""
+        tracker_a = start_run_tracking(job_id=100)
+        tracker_b = start_run_tracking(job_id=200)
+
+        resp_a = LLMResponse(
+            content="a",
+            model="m",
+            input_tokens=10,
+            output_tokens=5,
+            total_tokens=15,
+            cost=0.01,
+            duration_ms=100,
+            backend="openrouter",
+        )
+        resp_b = LLMResponse(
+            content="b",
+            model="m",
+            input_tokens=20,
+            output_tokens=10,
+            total_tokens=30,
+            cost=0.05,
+            duration_ms=200,
+            backend="openrouter",
+        )
+
+        tracker_a.add_call(resp_a)
+        tracker_b.add_call(resp_b)
+
+        # Each tracker should have only its own cost
+        assert get_run_tracker(job_id=100).total_cost == 0.01
+        assert get_run_tracker(job_id=200).total_cost == 0.05
+
+    @pytest.mark.asyncio
+    async def test_end_run_tracking_by_job_id(self):
+        """Test that ending one job's tracker doesn't affect another."""
+        start_run_tracking(job_id=100)
+        start_run_tracking(job_id=200)
+
+        with patch("api.services.llm.log_event") as mock_log:
+            mock_log.return_value = None
+            summary = await end_run_tracking(job_id=100)
+
+        assert summary is not None
+        assert summary["job_id"] == 100
+
+        # Job 200's tracker should still be active
+        assert get_run_tracker(job_id=200) is not None
+        assert get_run_tracker(job_id=200).job_id == 200
+
+        # Clean up
+        with patch("api.services.llm.log_event") as mock_log:
+            mock_log.return_value = None
+            await end_run_tracking(job_id=200)
+
 
 class TestSafetyGuards:
     """Tests for cost cap and safety guard enforcement."""

@@ -204,7 +204,7 @@ class IngestConfig(BaseModel):
     last_scan_success: Optional[bool] = Field(None, description="Whether last scan succeeded")
     server_url: str = Field("https://mmingest.pbswi.wisc.edu/", description="Base URL of ingest server")
     directories: List[str] = Field(
-        default_factory=lambda: ["/misc/", "/SCC2SRT/", "/wisconsinlife/"], description="Directories to scan"
+        default_factory=lambda: ["/"], description="Root directories to scan (recurses into subdirectories)"
     )
     ignore_directories: List[str] = Field(default_factory=lambda: ["/promos/"], description="Directories to ignore")
 

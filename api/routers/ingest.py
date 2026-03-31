@@ -294,7 +294,11 @@ async def trigger_scan(
         scan_base_url = base_url or config.server_url
         scan_dirs = directories.split(",") if directories else config.directories
 
-        scanner = IngestScanner(base_url=scan_base_url, directories=scan_dirs)
+        scanner = IngestScanner(
+            base_url=scan_base_url,
+            directories=scan_dirs,
+            ignore_directories=config.ignore_directories,
+        )
         result = await scanner.scan()
 
         # Record scan result in config
@@ -682,6 +686,7 @@ async def queue_transcript(file_id: int) -> QueueTranscriptResponse:
     scanner = IngestScanner(
         base_url=config.server_url,
         directories=config.directories,
+        ignore_directories=config.ignore_directories,
     )
 
     # Download the file
@@ -742,6 +747,15 @@ async def queue_transcript(file_id: int) -> QueueTranscriptResponse:
 
     except Exception as e:
         logger.error(f"Failed to create job for transcript {file_id}: {e}")
+        # Reset file status so it doesn't become an orphan
+        try:
+            async with get_session() as session:
+                await session.execute(
+                    text("UPDATE available_files SET status = 'new' WHERE id = :file_id"),
+                    {"file_id": file_id},
+                )
+        except Exception as reset_err:
+            logger.error(f"Failed to reset status for file {file_id}: {reset_err}", exc_info=True)
         return QueueTranscriptResponse(
             success=False,
             file_id=file_id,

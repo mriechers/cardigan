@@ -25,6 +25,7 @@ NOTE: Airtable access is READ-ONLY. No write operations are permitted.
 import asyncio
 import importlib.util
 import json
+import logging
 import os
 import re
 from datetime import datetime
@@ -32,6 +33,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 import httpx
+
+logger = logging.getLogger(__name__)
 from dotenv import load_dotenv
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -254,8 +257,8 @@ async def fetch_job_from_api(project_name: str) -> dict | None:
                 for job in jobs:
                     if job.get("project_name") == project_name:
                         return job
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Could not fetch job for {project_name}: {e}")
     return None
 
 
@@ -291,7 +294,8 @@ async def fetch_sst_context(airtable_record_id: str) -> Optional[dict]:
                 record = response.json()
                 return _extract_sst_fields(record)
             return None
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Could not fetch SST context for {airtable_record_id}: {e}")
         return None
 
 
@@ -335,7 +339,8 @@ async def search_sst_by_media_id(media_id: str) -> Optional[dict]:
                 if records:
                     return _extract_sst_fields(records[0])
             return None
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Could not search SST for media ID {media_id}: {e}")
         return None
 
 
@@ -497,6 +502,25 @@ async def list_tools() -> list[Tool]:
                         "type": "string",
                         "description": "The Media ID / project name (e.g., '2WLIEuchreWorldChampSM')",
                     }
+                },
+                "required": ["media_id"],
+            },
+        ),
+        Tool(
+            name="submit_processing_job",
+            description=(
+                "Queue a new video transcript for processing by Media ID. "
+                "Looks for the transcript file locally or on the ingest server, "
+                "validates the Media ID against the Airtable SST, and creates a processing job. "
+                "Returns the job ID and queue position."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "media_id": {
+                        "type": "string",
+                        "description": "The SST Media ID (e.g., '2WLI1209HD', '2YAC2026Andre')",
+                    },
                 },
                 "required": ["media_id"],
             },
@@ -722,6 +746,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         return await handle_search_projects(arguments)
     elif name == "get_sst_metadata":
         return await handle_get_sst_metadata(arguments)
+    elif name == "submit_processing_job":
+        return await handle_submit_processing_job(arguments)
     else:
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -1317,6 +1343,132 @@ async def handle_get_sst_metadata(arguments: dict) -> list[TextContent]:
         lines.append(f"**Episode/Segment:** {sst_data['program']}")
 
     return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def handle_submit_processing_job(arguments: dict) -> list[TextContent]:
+    """Queue a new processing job by Media ID.
+
+    Searches for the transcript file locally or on the ingest server,
+    validates the Media ID, and creates a job.
+    """
+    media_id = arguments.get("media_id", "").strip()
+    if not media_id:
+        return [TextContent(type="text", text="Error: media_id is required")]
+
+    # Step 1: Check if this media ID already has a job
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{API_BASE_URL}/api/queue/",
+                params={"search": media_id, "page_size": 5},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                existing = [j for j in data.get("jobs", []) if j.get("media_id") == media_id]
+                if existing:
+                    job = existing[0]
+                    return [
+                        TextContent(
+                            type="text",
+                            text=(
+                                f"A job already exists for **{media_id}**:\n\n"
+                                f"- **Job #{job['id']}** — Status: {job['status']}\n"
+                                f"- Project: {job.get('project_name', 'N/A')}\n\n"
+                                f"No new job was created."
+                            ),
+                        )
+                    ]
+    except Exception as e:
+        logger.warning(f"Could not check for existing jobs for {media_id}: {e}")
+
+    # Step 2: Look for transcript file locally
+    transcript_file = None
+    if TRANSCRIPTS_DIR.exists():
+        for f in TRANSCRIPTS_DIR.iterdir():
+            if f.is_file() and media_id.upper() in f.name.upper():
+                transcript_file = f.name
+                break
+
+    # Step 3: If not local, check ingest server available_files
+    ingest_file_id = None
+    if not transcript_file:
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(
+                    f"{API_BASE_URL}/api/ingest/available",
+                    params={"search": media_id, "file_type": "transcript", "status": "new"},
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    files = data.get("files", [])
+                    if files:
+                        ingest_file_id = files[0]["id"]
+                        transcript_file = files[0]["filename"]
+        except Exception as e:
+            logger.warning(f"Could not search ingest server for {media_id}: {e}")
+
+    if not transcript_file:
+        return [
+            TextContent(
+                type="text",
+                text=(
+                    f"No transcript file found for **{media_id}**.\n\n"
+                    f"Checked:\n"
+                    f"- Local `transcripts/` directory\n"
+                    f"- Ingest server available files\n\n"
+                    f"Upload or scan for the transcript first, then try again."
+                ),
+            )
+        ]
+
+    # Step 4: Queue the job
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            if ingest_file_id:
+                # Queue via ingest endpoint (downloads from server)
+                resp = await client.post(
+                    f"{API_BASE_URL}/api/ingest/transcripts/{ingest_file_id}/queue",
+                )
+            else:
+                # Queue via standard endpoint (local file)
+                resp = await client.post(
+                    f"{API_BASE_URL}/api/queue/",
+                    json={
+                        "project_name": media_id,
+                        "transcript_file": transcript_file,
+                    },
+                )
+
+            if resp.status_code in (200, 201):
+                data = resp.json()
+                job_id = data.get("job_id") or data.get("id")
+                return [
+                    TextContent(
+                        type="text",
+                        text=(
+                            f"Job submitted for **{media_id}**!\n\n"
+                            f"- **Job #{job_id}**\n"
+                            f"- Transcript: `{transcript_file}`\n"
+                            f"- Source: {'ingest server' if ingest_file_id else 'local file'}\n\n"
+                            f"The pipeline will process this automatically."
+                        ),
+                    )
+                ]
+            else:
+                error = resp.text
+                try:
+                    error = resp.json().get("detail", error)
+                except Exception:
+                    pass
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"Failed to queue job for **{media_id}**: {error}",
+                    )
+                ]
+
+    except Exception as e:
+        return [TextContent(type="text", text=f"Error submitting job: {e}")]
 
 
 # =============================================================================
