@@ -40,13 +40,12 @@ KEY_IGNORE_DIRECTORIES = f"{INGEST_PREFIX}ignore_directories"
 DEFAULT_CONFIG = IngestConfig(
     enabled=True,
     scan_interval_hours=24,
-    scan_time="00:00",  # Midnight
+    scan_time="07:00",  # 7 AM daily scan
     last_scan_at=None,
     last_scan_success=None,
     server_url="https://mmingest.pbswi.wisc.edu/",
-    # /exports/ removed - returns 404
-    # /SCC2SRT/ and /wisconsinlife/ added - contain transcript files
-    directories=["/misc/", "/SCC2SRT/", "/wisconsinlife/"],
+    # Scan from root to auto-discover all directories (IWP, SCC2SRT, misc, etc.)
+    directories=["/"],
     ignore_directories=["/promos/"],
 )
 

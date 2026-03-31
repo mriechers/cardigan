@@ -294,7 +294,11 @@ async def trigger_scan(
         scan_base_url = base_url or config.server_url
         scan_dirs = directories.split(",") if directories else config.directories
 
-        scanner = IngestScanner(base_url=scan_base_url, directories=scan_dirs)
+        scanner = IngestScanner(
+            base_url=scan_base_url,
+            directories=scan_dirs,
+            ignore_directories=config.ignore_directories,
+        )
         result = await scanner.scan()
 
         # Record scan result in config
@@ -682,6 +686,7 @@ async def queue_transcript(file_id: int) -> QueueTranscriptResponse:
     scanner = IngestScanner(
         base_url=config.server_url,
         directories=config.directories,
+        ignore_directories=config.ignore_directories,
     )
 
     # Download the file

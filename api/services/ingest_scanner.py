@@ -70,12 +70,16 @@ class IngestScanner:
     TRANSCRIPT_EXTENSIONS = {".srt", ".txt"}
     SCREENGRAB_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 
+    # Maximum recursion depth for subdirectory scanning
+    MAX_SCAN_DEPTH = 3
+
     def __init__(
         self,
         base_url: str = "https://mmingest.pbswi.wisc.edu/",
         directories: Optional[List[str]] = None,
         timeout_seconds: int = 30,
         auth: Optional[tuple] = None,
+        ignore_directories: Optional[List[str]] = None,
     ):
         """
         Initialize scanner.
@@ -85,11 +89,13 @@ class IngestScanner:
             directories: List of directory paths to scan (e.g., ["/exports/", "/images/"])
             timeout_seconds: HTTP request timeout
             auth: Optional (username, password) tuple for basic auth
+            ignore_directories: Directory paths to skip during recursive scanning
         """
         self.base_url = base_url.rstrip("/")
         self.directories = directories or ["/"]
         self.timeout = timeout_seconds
         self.auth = auth
+        self.ignore_directories = {d.strip("/").lower() for d in (ignore_directories or [])}
 
     async def get_qc_passed_media_ids(self) -> List[str]:
         """
@@ -354,16 +360,18 @@ class IngestScanner:
         self,
         url: str,
         directory_path: str,
+        depth: int = 0,
     ) -> List[RemoteFile]:
         """
-        Fetch and parse a directory listing.
+        Fetch and parse a directory listing, recursing into subdirectories.
 
         Args:
             url: Full URL to the directory
             directory_path: Path relative to base URL
+            depth: Current recursion depth (0 = top-level configured directory)
 
         Returns:
-            List of RemoteFile objects
+            List of RemoteFile objects (including from subdirectories)
         """
         files: List[RemoteFile] = []
 
@@ -376,14 +384,34 @@ class IngestScanner:
             response = await client.get(url, auth=auth)
             response.raise_for_status()
 
-            # Parse HTML
-            files = self._parse_directory_listing(
+            # Parse HTML into files and subdirectory links
+            found_files, subdirs = self._parse_directory_listing(
                 response.text,
                 url,
                 directory_path,
             )
+            files.extend(found_files)
 
-        logger.info(f"Found {len(files)} files in {directory_path}")
+        logger.info(f"Found {len(found_files)} files in {directory_path}")
+
+        # Recurse into subdirectories if within depth limit
+        if depth < self.MAX_SCAN_DEPTH:
+            for subdir_name, subdir_url in subdirs:
+                subdir_path = f"{directory_path.rstrip('/')}/{subdir_name}/"
+
+                # Check against ignore list
+                if subdir_name.lower() in self.ignore_directories:
+                    logger.debug(f"Skipping ignored directory: {subdir_path}")
+                    continue
+
+                try:
+                    sub_files = await self._scan_directory(
+                        subdir_url, subdir_path, depth + 1
+                    )
+                    files.extend(sub_files)
+                except Exception as e:
+                    logger.warning(f"Failed to scan subdirectory {subdir_path}: {e}")
+
         return files
 
     def _parse_directory_listing(
@@ -391,9 +419,9 @@ class IngestScanner:
         html: str,
         base_url: str,
         directory_path: str,
-    ) -> List[RemoteFile]:
+    ) -> tuple[List[RemoteFile], List[tuple[str, str]]]:
         """
-        Parse Apache/nginx autoindex HTML to extract file links.
+        Parse Apache/nginx autoindex HTML to extract file links and subdirectories.
 
         Typical Apache autoindex format:
         <a href="filename.srt">filename.srt</a>  12-Jan-2025 14:30  45K
@@ -404,9 +432,11 @@ class IngestScanner:
             directory_path: Path for tracking
 
         Returns:
-            List of RemoteFile objects
+            Tuple of (files, subdirectories) where subdirectories is a list
+            of (name, url) tuples for recursive scanning
         """
         files: List[RemoteFile] = []
+        subdirs: List[tuple[str, str]] = []
         soup = BeautifulSoup(html, "html.parser")
 
         for link in soup.find_all("a"):
@@ -420,8 +450,11 @@ class IngestScanner:
             if href.startswith("?"):
                 continue
             if href.endswith("/"):
-                # This is a subdirectory - skip for now
-                # (could recursively scan in future)
+                # Subdirectory — collect for recursive scanning
+                subdir_name = href.rstrip("/").split("/")[-1]
+                if subdir_name and subdir_name not in ("..", "."):
+                    subdir_url = urljoin(base_url + "/", href)
+                    subdirs.append((subdir_name, subdir_url))
                 continue
 
             # Determine file type by extension
@@ -457,7 +490,7 @@ class IngestScanner:
                 )
             )
 
-        return files
+        return files, subdirs
 
     def _extract_media_id(self, filename: str) -> Optional[str]:
         """
@@ -772,9 +805,11 @@ class IngestScanner:
 def get_ingest_scanner(
     base_url: str = "https://mmingest.pbswi.wisc.edu/",
     directories: Optional[List[str]] = None,
+    ignore_directories: Optional[List[str]] = None,
 ) -> IngestScanner:
     """Create IngestScanner instance with default config."""
     return IngestScanner(
         base_url=base_url,
         directories=directories or ["/"],
+        ignore_directories=ignore_directories,
     )
