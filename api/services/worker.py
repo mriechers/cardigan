@@ -609,7 +609,7 @@ class JobWorker:
                 logger.info(
                     "Job paused due to truncation detection", extra={"job_id": job_id, "project_name": project_name}
                 )
-                run_summary = await end_run_tracking()
+                run_summary = await end_run_tracking(job_id)
                 if run_summary:
                     await update_job_status(
                         job_id,
@@ -686,7 +686,7 @@ class JobWorker:
             await self._create_manifest(job, project_path, phases, tracker)
 
             # Mark job completed
-            run_summary = await end_run_tracking()
+            run_summary = await end_run_tracking(job_id)
             await update_job_status(
                 job_id,
                 JobStatus.completed,
@@ -718,7 +718,7 @@ class JobWorker:
             )
 
             # End tracking for this attempt
-            run_summary = await end_run_tracking()
+            run_summary = await end_run_tracking(job_id)
             current_cost = run_summary["total_cost"] if run_summary else 0
 
             # Set status to investigating while manager analyzes the failure

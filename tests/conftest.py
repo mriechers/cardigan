@@ -1,7 +1,11 @@
 """Pytest configuration for Cardigan v4 tests."""
 
-import asyncio
 import os
+
+# Must be set before any app modules are imported (disables rate limiter)
+os.environ["TESTING"] = "1"
+
+import asyncio
 import tempfile
 
 import pytest

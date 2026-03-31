@@ -131,36 +131,51 @@ class RunCostTracker:
         }
 
 
-# Global cost tracker for current run
+# Per-job cost trackers (keyed by job_id) — safe for concurrent processing
+_run_trackers: Dict[int, RunCostTracker] = {}
+
+# Legacy global for backward compatibility (used when job_id is None)
 _current_run_tracker: Optional[RunCostTracker] = None
 
 
 def start_run_tracking(job_id: Optional[int] = None) -> RunCostTracker:
     """Start tracking costs for a new processing run."""
     global _current_run_tracker
-    _current_run_tracker = RunCostTracker(
+    tracker = RunCostTracker(
         job_id=job_id,
         start_time=datetime.now(timezone.utc),
     )
+    if job_id is not None:
+        _run_trackers[job_id] = tracker
+    _current_run_tracker = tracker
+    return tracker
+
+
+def get_run_tracker(job_id: Optional[int] = None) -> Optional[RunCostTracker]:
+    """Get a run's cost tracker by job_id."""
+    if job_id is not None and job_id in _run_trackers:
+        return _run_trackers[job_id]
     return _current_run_tracker
 
 
-def get_run_tracker() -> Optional[RunCostTracker]:
-    """Get the current run's cost tracker."""
-    return _current_run_tracker
-
-
-async def end_run_tracking() -> Optional[Dict[str, Any]]:
+async def end_run_tracking(job_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
     """End run tracking and emit worker:completed event.
 
     Returns summary dict with total_cost and total_tokens.
     """
     global _current_run_tracker
 
-    if _current_run_tracker is None:
+    # Look up by job_id first, fall back to global
+    tracker = None
+    if job_id is not None:
+        tracker = _run_trackers.pop(job_id, None)
+    if tracker is None:
+        tracker = _current_run_tracker
+        _current_run_tracker = None
+
+    if tracker is None:
         return None
 
-    tracker = _current_run_tracker
     summary = tracker.to_dict()
 
     # Log worker:completed event
@@ -180,7 +195,10 @@ async def end_run_tracking() -> Optional[Dict[str, Any]]:
         )
     )
 
-    _current_run_tracker = None
+    # Clean up global if it was this tracker
+    if _current_run_tracker is tracker:
+        _current_run_tracker = None
+
     return summary
 
 
@@ -604,9 +622,10 @@ class LLMClient:
         response.duration_ms = duration_ms
         response.backend = backend_name
 
-        # Track costs
-        if _current_run_tracker is not None:
-            _current_run_tracker.add_call(response)
+        # Track costs (per-job tracker for concurrency safety)
+        tracker = get_run_tracker(job_id)
+        if tracker is not None:
+            tracker.add_call(response)
 
         # Log cost_update event
         await log_event(
