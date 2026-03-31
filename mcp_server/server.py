@@ -257,8 +257,8 @@ async def fetch_job_from_api(project_name: str) -> dict | None:
                 for job in jobs:
                     if job.get("project_name") == project_name:
                         return job
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Could not fetch job for {project_name}: {e}")
     return None
 
 
@@ -294,7 +294,8 @@ async def fetch_sst_context(airtable_record_id: str) -> Optional[dict]:
                 record = response.json()
                 return _extract_sst_fields(record)
             return None
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Could not fetch SST context for {airtable_record_id}: {e}")
         return None
 
 
@@ -338,7 +339,8 @@ async def search_sst_by_media_id(media_id: str) -> Optional[dict]:
                 if records:
                     return _extract_sst_fields(records[0])
             return None
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Could not search SST for media ID {media_id}: {e}")
         return None
 
 

@@ -780,6 +780,11 @@ class JobWorker:
             )
 
         finally:
+            # Ensure cost tracker is cleaned up (prevents memory leak on crashes)
+            from api.services.llm import _run_trackers
+
+            _run_trackers.pop(job_id, None)
+
             # Stop heartbeat - properly await cancellation
             if self._heartbeat_task:
                 self._heartbeat_task.cancel()

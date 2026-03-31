@@ -89,7 +89,8 @@ class IngestScanner:
             directories: List of directory paths to scan (e.g., ["/exports/", "/images/"])
             timeout_seconds: HTTP request timeout
             auth: Optional (username, password) tuple for basic auth
-            ignore_directories: Directory paths to skip during recursive scanning
+            ignore_directories: Directory names to skip during recursive scanning.
+                Matched by name only (e.g., "promos" matches at any depth).
         """
         self.base_url = base_url.rstrip("/")
         self.directories = directories or ["/"]
@@ -587,8 +588,8 @@ class IngestScanner:
                     if len(parts) >= 3:
                         file_size = self._parse_size(parts[-1])
 
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Could not parse metadata for {link_element.get('href', '?')}: {e}")
 
         return file_size, modified_at
 
