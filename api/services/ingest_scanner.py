@@ -405,9 +405,7 @@ class IngestScanner:
                     continue
 
                 try:
-                    sub_files = await self._scan_directory(
-                        subdir_url, subdir_path, depth + 1
-                    )
+                    sub_files = await self._scan_directory(subdir_url, subdir_path, depth + 1)
                     files.extend(sub_files)
                 except Exception as e:
                     logger.warning(f"Failed to scan subdirectory {subdir_path}: {e}")

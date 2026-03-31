@@ -1362,15 +1362,17 @@ async def handle_submit_processing_job(arguments: dict) -> list[TextContent]:
                 existing = [j for j in data.get("jobs", []) if j.get("media_id") == media_id]
                 if existing:
                     job = existing[0]
-                    return [TextContent(
-                        type="text",
-                        text=(
-                            f"A job already exists for **{media_id}**:\n\n"
-                            f"- **Job #{job['id']}** — Status: {job['status']}\n"
-                            f"- Project: {job.get('project_name', 'N/A')}\n\n"
-                            f"No new job was created."
-                        ),
-                    )]
+                    return [
+                        TextContent(
+                            type="text",
+                            text=(
+                                f"A job already exists for **{media_id}**:\n\n"
+                                f"- **Job #{job['id']}** — Status: {job['status']}\n"
+                                f"- Project: {job.get('project_name', 'N/A')}\n\n"
+                                f"No new job was created."
+                            ),
+                        )
+                    ]
     except Exception:
         pass  # Non-blocking — proceed to create if check fails
 
@@ -1401,16 +1403,18 @@ async def handle_submit_processing_job(arguments: dict) -> list[TextContent]:
             pass
 
     if not transcript_file:
-        return [TextContent(
-            type="text",
-            text=(
-                f"No transcript file found for **{media_id}**.\n\n"
-                f"Checked:\n"
-                f"- Local `transcripts/` directory\n"
-                f"- Ingest server available files\n\n"
-                f"Upload or scan for the transcript first, then try again."
-            ),
-        )]
+        return [
+            TextContent(
+                type="text",
+                text=(
+                    f"No transcript file found for **{media_id}**.\n\n"
+                    f"Checked:\n"
+                    f"- Local `transcripts/` directory\n"
+                    f"- Ingest server available files\n\n"
+                    f"Upload or scan for the transcript first, then try again."
+                ),
+            )
+        ]
 
     # Step 4: Queue the job
     try:
@@ -1433,26 +1437,30 @@ async def handle_submit_processing_job(arguments: dict) -> list[TextContent]:
             if resp.status_code in (200, 201):
                 data = resp.json()
                 job_id = data.get("job_id") or data.get("id")
-                return [TextContent(
-                    type="text",
-                    text=(
-                        f"Job submitted for **{media_id}**!\n\n"
-                        f"- **Job #{job_id}**\n"
-                        f"- Transcript: `{transcript_file}`\n"
-                        f"- Source: {'ingest server' if ingest_file_id else 'local file'}\n\n"
-                        f"The pipeline will process this automatically."
-                    ),
-                )]
+                return [
+                    TextContent(
+                        type="text",
+                        text=(
+                            f"Job submitted for **{media_id}**!\n\n"
+                            f"- **Job #{job_id}**\n"
+                            f"- Transcript: `{transcript_file}`\n"
+                            f"- Source: {'ingest server' if ingest_file_id else 'local file'}\n\n"
+                            f"The pipeline will process this automatically."
+                        ),
+                    )
+                ]
             else:
                 error = resp.text
                 try:
                     error = resp.json().get("detail", error)
                 except Exception:
                     pass
-                return [TextContent(
-                    type="text",
-                    text=f"Failed to queue job for **{media_id}**: {error}",
-                )]
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"Failed to queue job for **{media_id}**: {error}",
+                    )
+                ]
 
     except Exception as e:
         return [TextContent(type="text", text=f"Error submitting job: {e}")]
