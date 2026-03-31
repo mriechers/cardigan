@@ -81,7 +81,13 @@ async def upload_transcripts(
         raise HTTPException(status_code=400, detail=f"Batch size exceeds maximum of {MAX_BATCH_SIZE} files")
 
     # Ensure transcripts directory exists
-    TRANSCRIPTS_DIR.mkdir(exist_ok=True)
+    try:
+        TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        raise HTTPException(
+            status_code=500,
+            detail="Server cannot write to transcripts directory. Check file permissions.",
+        )
 
     results: List[UploadStatus] = []
     uploaded_count = 0

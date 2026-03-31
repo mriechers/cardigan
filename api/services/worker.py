@@ -440,6 +440,25 @@ class JobWorker:
                 },
             )
 
+            # Persist metrics to database (backfills on retry if missing)
+            if not job.get("word_count") or not job.get("duration_minutes"):
+                try:
+                    from api.models.job import JobUpdate
+                    from api.services.database import update_job
+
+                    await update_job(
+                        job_id,
+                        JobUpdate(
+                            word_count=transcript_metrics["word_count"],
+                            duration_minutes=transcript_metrics["estimated_duration_minutes"],
+                        ),
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to persist transcript metrics (non-fatal)",
+                        extra={"job_id": job_id, "error": str(e)},
+                    )
+
             # Fetch SST context if linked (Task 6.2.1)
             sst_context = await self._fetch_sst_context(job)
             if sst_context:
@@ -596,7 +615,7 @@ class JobWorker:
                 logger.info(
                     "Job paused due to truncation detection", extra={"job_id": job_id, "project_name": project_name}
                 )
-                run_summary = await end_run_tracking()
+                run_summary = await end_run_tracking(job_id)
                 if run_summary:
                     await update_job_status(
                         job_id,
@@ -673,7 +692,7 @@ class JobWorker:
             await self._create_manifest(job, project_path, phases, tracker)
 
             # Mark job completed
-            run_summary = await end_run_tracking()
+            run_summary = await end_run_tracking(job_id)
             await update_job_status(
                 job_id,
                 JobStatus.completed,
@@ -705,7 +724,7 @@ class JobWorker:
             )
 
             # End tracking for this attempt
-            run_summary = await end_run_tracking()
+            run_summary = await end_run_tracking(job_id)
             current_cost = run_summary["total_cost"] if run_summary else 0
 
             # Set status to investigating while manager analyzes the failure
@@ -761,6 +780,11 @@ class JobWorker:
             )
 
         finally:
+            # Ensure cost tracker is cleaned up (prevents memory leak on crashes)
+            from api.services.llm import _run_trackers
+
+            _run_trackers.pop(job_id, None)
+
             # Stop heartbeat - properly await cancellation
             if self._heartbeat_task:
                 self._heartbeat_task.cancel()

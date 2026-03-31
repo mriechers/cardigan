@@ -30,7 +30,7 @@ class TestDirectoryListingParser:
         </html>
         """
 
-        files = scanner._parse_directory_listing(html, "https://test.com/", "/")
+        files, _subdirs = scanner._parse_directory_listing(html, "https://test.com/", "/")
 
         assert len(files) == 2
         assert files[0].filename == "2WLI1209HD_ForClaude.srt"
@@ -49,7 +49,7 @@ class TestDirectoryListingParser:
         </html>
         """
 
-        files = scanner._parse_directory_listing(html, "https://test.com/", "/")
+        files, _subdirs = scanner._parse_directory_listing(html, "https://test.com/", "/")
 
         assert len(files) == 2
         assert files[0].file_type == "transcript"
@@ -68,13 +68,13 @@ class TestDirectoryListingParser:
         </html>
         """
 
-        files = scanner._parse_directory_listing(html, "https://test.com/", "/")
+        files, _subdirs = scanner._parse_directory_listing(html, "https://test.com/", "/")
 
         assert len(files) == 1
         assert files[0].filename == "2WLI1209HD.srt"
 
-    def test_skip_subdirectory_links(self):
-        """Test that subdirectory links (ending in /) are skipped."""
+    def test_collect_subdirectory_links(self):
+        """Test that subdirectory links are collected for recursive scanning."""
         scanner = IngestScanner()
         html = """
         <html>
@@ -85,10 +85,13 @@ class TestDirectoryListingParser:
         </html>
         """
 
-        files = scanner._parse_directory_listing(html, "https://test.com/", "/")
+        files, subdirs = scanner._parse_directory_listing(html, "https://test.com/", "/")
 
         assert len(files) == 1
         assert files[0].filename == "2WLI1209HD.srt"
+        assert len(subdirs) == 1
+        assert subdirs[0][0] == "subdir"
+        assert subdirs[0][1] == "https://test.com/subdir/"
 
     def test_skip_query_parameter_links(self):
         """Test that query parameter links are skipped."""
@@ -104,7 +107,7 @@ class TestDirectoryListingParser:
         </html>
         """
 
-        files = scanner._parse_directory_listing(html, "https://test.com/", "/")
+        files, _subdirs = scanner._parse_directory_listing(html, "https://test.com/", "/")
 
         assert len(files) == 1
         assert files[0].filename == "2WLI1209HD.srt"
@@ -121,7 +124,7 @@ class TestDirectoryListingParser:
         </html>
         """
 
-        files = scanner._parse_directory_listing(html, "https://test.com/exports/", "/exports/")
+        files, _subdirs = scanner._parse_directory_listing(html, "https://test.com/exports/", "/exports/")
 
         assert files[0].url == "https://test.com/exports/file1.srt"
         assert files[1].url == "https://test.com/exports/file2.srt"
@@ -140,7 +143,7 @@ class TestDirectoryListingParser:
         </html>
         """
 
-        files = scanner._parse_directory_listing(html, "https://test.com/", "/")
+        files, _subdirs = scanner._parse_directory_listing(html, "https://test.com/", "/")
 
         assert len(files) == 4
         transcripts = [f for f in files if f.file_type == "transcript"]
@@ -162,7 +165,7 @@ class TestDirectoryListingParser:
         </html>
         """
 
-        files = scanner._parse_directory_listing(html, "https://test.com/", "/")
+        files, _subdirs = scanner._parse_directory_listing(html, "https://test.com/", "/")
 
         # Only .srt and .txt should be included, but README.txt doesn't have a Media ID
         # so it will be included with media_id=None
@@ -269,7 +272,7 @@ class TestFileTypeDetection:
         scanner = IngestScanner()
         html = '<a href="test.srt">test.srt</a>'
 
-        files = scanner._parse_directory_listing(html, "https://test.com/", "/")
+        files, _subdirs = scanner._parse_directory_listing(html, "https://test.com/", "/")
 
         assert len(files) == 1
         assert files[0].file_type == "transcript"
@@ -279,7 +282,7 @@ class TestFileTypeDetection:
         scanner = IngestScanner()
         html = '<a href="test.txt">test.txt</a>'
 
-        files = scanner._parse_directory_listing(html, "https://test.com/", "/")
+        files, _subdirs = scanner._parse_directory_listing(html, "https://test.com/", "/")
 
         assert len(files) == 1
         assert files[0].file_type == "transcript"
@@ -289,7 +292,7 @@ class TestFileTypeDetection:
         scanner = IngestScanner()
         html = '<a href="test.jpg">test.jpg</a>'
 
-        files = scanner._parse_directory_listing(html, "https://test.com/", "/")
+        files, _subdirs = scanner._parse_directory_listing(html, "https://test.com/", "/")
 
         assert len(files) == 1
         assert files[0].file_type == "screengrab"
@@ -299,7 +302,7 @@ class TestFileTypeDetection:
         scanner = IngestScanner()
         html = '<a href="test.jpeg">test.jpeg</a>'
 
-        files = scanner._parse_directory_listing(html, "https://test.com/", "/")
+        files, _subdirs = scanner._parse_directory_listing(html, "https://test.com/", "/")
 
         assert len(files) == 1
         assert files[0].file_type == "screengrab"
@@ -309,7 +312,7 @@ class TestFileTypeDetection:
         scanner = IngestScanner()
         html = '<a href="test.png">test.png</a>'
 
-        files = scanner._parse_directory_listing(html, "https://test.com/", "/")
+        files, _subdirs = scanner._parse_directory_listing(html, "https://test.com/", "/")
 
         assert len(files) == 1
         assert files[0].file_type == "screengrab"
@@ -328,7 +331,7 @@ class TestFileTypeDetection:
         </html>
         """
 
-        files = scanner._parse_directory_listing(html, "https://test.com/", "/")
+        files, _subdirs = scanner._parse_directory_listing(html, "https://test.com/", "/")
 
         assert len(files) == 4
         transcripts = [f for f in files if f.file_type == "transcript"]
@@ -646,3 +649,236 @@ class TestCheckIngestServerForMediaId:
         # Should return results from successful directory
         assert len(result) == 1
         assert result[0].filename == "2WLI1209HD.srt"
+
+
+class TestRecursiveScanning:
+    """Tests for recursive subdirectory scanning."""
+
+    def test_parse_returns_subdirectories(self):
+        """Test that parser returns subdirectory links separately from files."""
+        scanner = IngestScanner()
+        html = """
+        <html><body>
+        <a href="../">Parent Directory</a>
+        <a href="IWP/">IWP/</a>
+        <a href="misc/">misc/</a>
+        <a href="2WLI1209HD.srt">2WLI1209HD.srt</a>
+        </body></html>
+        """
+
+        files, subdirs = scanner._parse_directory_listing(html, "https://test.com/", "/")
+
+        assert len(files) == 1
+        assert len(subdirs) == 2
+        subdir_names = [s[0] for s in subdirs]
+        assert "IWP" in subdir_names
+        assert "misc" in subdir_names
+
+    def test_parse_excludes_parent_from_subdirs(self):
+        """Test that .. and . are not included in subdirectories."""
+        scanner = IngestScanner()
+        html = """
+        <html><body>
+        <a href="../">Parent</a>
+        <a href="./">Current</a>
+        <a href="real-dir/">real-dir/</a>
+        </body></html>
+        """
+
+        _files, subdirs = scanner._parse_directory_listing(html, "https://test.com/", "/")
+
+        assert len(subdirs) == 1
+        assert subdirs[0][0] == "real-dir"
+
+    @pytest.mark.asyncio
+    async def test_recursive_scan_finds_nested_files(self):
+        """Test that scan recurses into subdirectories to find files."""
+        scanner = IngestScanner(base_url="https://test.com", directories=["/"])
+
+        # Root listing: one file + one subdirectory
+        root_html = """
+        <html><body>
+        <a href="IWP/">IWP/</a>
+        <a href="root_file.srt">root_file.srt</a>
+        </body></html>
+        """
+
+        # IWP subdirectory: two files
+        iwp_html = """
+        <html><body>
+        <a href="../">Parent</a>
+        <a href="2IWP1001HD.srt">2IWP1001HD.srt</a>
+        <a href="2IWP1002HD.srt">2IWP1002HD.srt</a>
+        </body></html>
+        """
+
+        mock_responses = {
+            "https://test.com/": root_html,
+            "https://test.com/IWP/": iwp_html,
+        }
+
+        async def mock_get(url, auth=None):
+            resp = MagicMock()
+            resp.text = mock_responses.get(url, "<html></html>")
+            resp.raise_for_status = MagicMock()
+            return resp
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_instance = AsyncMock()
+            mock_instance.get = mock_get
+            mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_client.return_value = mock_instance
+
+            with patch.object(scanner, "_track_files_batch", return_value=(3, 3, 0)):
+                result = await scanner.scan()
+
+        assert result.success is True
+        assert result.total_files_on_server == 3
+
+    @pytest.mark.asyncio
+    async def test_recursive_scan_respects_ignore_directories(self):
+        """Test that ignored directories are not recursed into."""
+        scanner = IngestScanner(
+            base_url="https://test.com",
+            directories=["/"],
+            ignore_directories=["/promos/"],
+        )
+
+        root_html = """
+        <html><body>
+        <a href="promos/">promos/</a>
+        <a href="good/">good/</a>
+        <a href="root.srt">root.srt</a>
+        </body></html>
+        """
+
+        good_html = """
+        <html><body>
+        <a href="nested.srt">nested.srt</a>
+        </body></html>
+        """
+
+        mock_responses = {
+            "https://test.com/": root_html,
+            "https://test.com/good/": good_html,
+        }
+
+        async def mock_get(url, auth=None):
+            if url == "https://test.com/promos/":
+                raise AssertionError("Should not scan ignored directory")
+            resp = MagicMock()
+            resp.text = mock_responses.get(url, "<html></html>")
+            resp.raise_for_status = MagicMock()
+            return resp
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_instance = AsyncMock()
+            mock_instance.get = mock_get
+            mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_client.return_value = mock_instance
+
+            with patch.object(scanner, "_track_files_batch", return_value=(2, 2, 0)):
+                result = await scanner.scan()
+
+        assert result.success is True
+        assert result.total_files_on_server == 2
+
+    @pytest.mark.asyncio
+    async def test_recursive_scan_respects_max_depth(self):
+        """Test that recursion stops at MAX_SCAN_DEPTH."""
+        scanner = IngestScanner(base_url="https://test.com", directories=["/"])
+
+        # Create a chain: / -> level1/ -> level2/ -> level3/ -> level4/
+        # With MAX_SCAN_DEPTH=3, level4 should NOT be scanned
+        def make_dir_html(subdir_name=None, file_name=None):
+            links = '<a href="../">Parent</a>\n'
+            if subdir_name:
+                links += f'<a href="{subdir_name}/">{subdir_name}/</a>\n'
+            if file_name:
+                links += f'<a href="{file_name}">{file_name}</a>\n'
+            return f"<html><body>{links}</body></html>"
+
+        mock_responses = {
+            "https://test.com/": make_dir_html("level1", "root.srt"),
+            "https://test.com/level1/": make_dir_html("level2", "l1.srt"),
+            "https://test.com/level1/level2/": make_dir_html("level3", "l2.srt"),
+            "https://test.com/level1/level2/level3/": make_dir_html("level4", "l3.srt"),
+            # level4 should never be reached
+        }
+
+        scanned_urls = []
+
+        async def mock_get(url, auth=None):
+            scanned_urls.append(url)
+            if "level4" in url:
+                raise AssertionError("Should not scan beyond MAX_SCAN_DEPTH")
+            resp = MagicMock()
+            resp.text = mock_responses.get(url, "<html></html>")
+            resp.raise_for_status = MagicMock()
+            return resp
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_instance = AsyncMock()
+            mock_instance.get = mock_get
+            mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_client.return_value = mock_instance
+
+            with patch.object(scanner, "_track_files_batch", return_value=(4, 4, 0)):
+                result = await scanner.scan()
+
+        assert result.success is True
+        # Should scan root + level1 + level2 + level3 (4 levels, depth 0-3)
+        assert "https://test.com/" in scanned_urls
+        assert "https://test.com/level1/" in scanned_urls
+        assert "https://test.com/level1/level2/" in scanned_urls
+        assert "https://test.com/level1/level2/level3/" in scanned_urls
+        assert "https://test.com/level1/level2/level3/level4/" not in scanned_urls
+
+    @pytest.mark.asyncio
+    async def test_recursive_scan_handles_subdirectory_errors(self):
+        """Test that errors in subdirectories don't break the whole scan."""
+        scanner = IngestScanner(base_url="https://test.com", directories=["/"])
+
+        root_html = """
+        <html><body>
+        <a href="broken/">broken/</a>
+        <a href="good/">good/</a>
+        <a href="root.srt">root.srt</a>
+        </body></html>
+        """
+
+        good_html = """
+        <html><body>
+        <a href="nested.srt">nested.srt</a>
+        </body></html>
+        """
+
+        async def mock_get(url, auth=None):
+            if "broken" in url:
+                raise Exception("Connection refused")
+            resp = MagicMock()
+            if url == "https://test.com/":
+                resp.text = root_html
+            elif url == "https://test.com/good/":
+                resp.text = good_html
+            else:
+                resp.text = "<html></html>"
+            resp.raise_for_status = MagicMock()
+            return resp
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_instance = AsyncMock()
+            mock_instance.get = mock_get
+            mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_client.return_value = mock_instance
+
+            with patch.object(scanner, "_track_files_batch", return_value=(2, 2, 0)):
+                result = await scanner.scan()
+
+        # Scan should succeed despite broken subdirectory
+        assert result.success is True
+        assert result.total_files_on_server == 2

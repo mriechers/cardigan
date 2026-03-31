@@ -112,6 +112,18 @@ app.add_middleware(SlowAPIMiddleware)
 app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 
 
+# Global exception handler: ensure ALL errors return JSON, never HTML
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    from fastapi.responses import JSONResponse
+
+    logger.error(f"Unhandled exception on {request.method} {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
+
+
 @app.get("/")
 async def root():
     """Health check endpoint."""
