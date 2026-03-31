@@ -16,6 +16,7 @@ COPY mcp_server/ mcp_server/
 COPY .claude/ .claude/
 COPY knowledge/ knowledge/
 COPY alembic.ini* ./
+COPY alembic/ alembic/
 COPY pyproject.toml* ./
 COPY run_worker.py .
 COPY entrypoint.sh .
