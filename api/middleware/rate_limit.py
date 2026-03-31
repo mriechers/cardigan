@@ -19,8 +19,9 @@ limiter = Limiter(
 )
 
 # Rate limit strings used by endpoint decorators.
-RATE_EXPENSIVE = "10/minute"
-RATE_READ = "60/minute"
+# Configurable via env vars for different deployment scenarios.
+RATE_EXPENSIVE = os.getenv("RATE_LIMIT_EXPENSIVE", "30/minute")
+RATE_READ = os.getenv("RATE_LIMIT_READ", "120/minute")
 
 
 def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
