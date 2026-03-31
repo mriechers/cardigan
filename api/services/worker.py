@@ -440,6 +440,19 @@ class JobWorker:
                 },
             )
 
+            # Persist metrics to database (backfills on retry if missing)
+            if not job.get("word_count") or not job.get("duration_minutes"):
+                from api.models.job import JobUpdate
+                from api.services.database import update_job
+
+                await update_job(
+                    job_id,
+                    JobUpdate(
+                        word_count=transcript_metrics["word_count"],
+                        duration_minutes=transcript_metrics["estimated_duration_minutes"],
+                    ),
+                )
+
             # Fetch SST context if linked (Task 6.2.1)
             sst_context = await self._fetch_sst_context(job)
             if sst_context:
