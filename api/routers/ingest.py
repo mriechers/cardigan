@@ -747,6 +747,15 @@ async def queue_transcript(file_id: int) -> QueueTranscriptResponse:
 
     except Exception as e:
         logger.error(f"Failed to create job for transcript {file_id}: {e}")
+        # Reset file status so it doesn't become an orphan
+        try:
+            async with get_session() as session:
+                await session.execute(
+                    text("UPDATE available_files SET status = 'new' WHERE id = :file_id"),
+                    {"file_id": file_id},
+                )
+        except Exception:
+            logger.error(f"Failed to reset status for file {file_id}")
         return QueueTranscriptResponse(
             success=False,
             file_id=file_id,

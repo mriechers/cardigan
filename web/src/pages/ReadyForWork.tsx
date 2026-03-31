@@ -175,9 +175,9 @@ export default function ReadyForWork() {
         throw new Error('Failed to queue files')
       }
 
-      const results = await response.json()
-      const successCount = results.filter((r: QueueResponse) => r.success).length
-      const failCount = results.length - successCount
+      const data = await response.json()
+      const successCount = data.queued ?? 0
+      const failCount = data.failed ?? 0
 
       if (successCount > 0) {
         toast(`${successCount} file${successCount !== 1 ? 's' : ''} queued successfully`, 'success')
