@@ -25,6 +25,7 @@ NOTE: Airtable access is READ-ONLY. No write operations are permitted.
 import asyncio
 import importlib.util
 import json
+import logging
 import os
 import re
 from datetime import datetime
@@ -32,6 +33,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 import httpx
+
+logger = logging.getLogger(__name__)
 from dotenv import load_dotenv
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -1373,8 +1376,8 @@ async def handle_submit_processing_job(arguments: dict) -> list[TextContent]:
                             ),
                         )
                     ]
-    except Exception:
-        pass  # Non-blocking — proceed to create if check fails
+    except Exception as e:
+        logger.warning(f"Could not check for existing jobs for {media_id}: {e}")
 
     # Step 2: Look for transcript file locally
     transcript_file = None
@@ -1399,8 +1402,8 @@ async def handle_submit_processing_job(arguments: dict) -> list[TextContent]:
                     if files:
                         ingest_file_id = files[0]["id"]
                         transcript_file = files[0]["filename"]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Could not search ingest server for {media_id}: {e}")
 
     if not transcript_file:
         return [

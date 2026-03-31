@@ -86,7 +86,7 @@ async def upload_transcripts(
     except PermissionError:
         raise HTTPException(
             status_code=500,
-            detail=f"Server cannot write to transcripts directory: {TRANSCRIPTS_DIR}. Check file permissions.",
+            detail="Server cannot write to transcripts directory. Check file permissions.",
         )
 
     results: List[UploadStatus] = []

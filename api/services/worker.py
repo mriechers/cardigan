@@ -442,16 +442,22 @@ class JobWorker:
 
             # Persist metrics to database (backfills on retry if missing)
             if not job.get("word_count") or not job.get("duration_minutes"):
-                from api.models.job import JobUpdate
-                from api.services.database import update_job
+                try:
+                    from api.models.job import JobUpdate
+                    from api.services.database import update_job
 
-                await update_job(
-                    job_id,
-                    JobUpdate(
-                        word_count=transcript_metrics["word_count"],
-                        duration_minutes=transcript_metrics["estimated_duration_minutes"],
-                    ),
-                )
+                    await update_job(
+                        job_id,
+                        JobUpdate(
+                            word_count=transcript_metrics["word_count"],
+                            duration_minutes=transcript_metrics["estimated_duration_minutes"],
+                        ),
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to persist transcript metrics (non-fatal)",
+                        extra={"job_id": job_id, "error": str(e)},
+                    )
 
             # Fetch SST context if linked (Task 6.2.1)
             sst_context = await self._fetch_sst_context(job)

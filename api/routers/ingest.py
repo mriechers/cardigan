@@ -754,8 +754,8 @@ async def queue_transcript(file_id: int) -> QueueTranscriptResponse:
                     text("UPDATE available_files SET status = 'new' WHERE id = :file_id"),
                     {"file_id": file_id},
                 )
-        except Exception:
-            logger.error(f"Failed to reset status for file {file_id}")
+        except Exception as reset_err:
+            logger.error(f"Failed to reset status for file {file_id}: {reset_err}", exc_info=True)
         return QueueTranscriptResponse(
             success=False,
             file_id=file_id,

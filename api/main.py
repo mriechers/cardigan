@@ -117,10 +117,10 @@ app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 async def global_exception_handler(request, exc):
     from fastapi.responses import JSONResponse
 
-    logger.error(f"Unhandled exception on {request.method} {request.url.path}: {exc}")
+    logger.error(f"Unhandled exception on {request.method} {request.url.path}: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
-        content={"detail": str(exc)},
+        content={"detail": "Internal server error"},
     )
 
 
