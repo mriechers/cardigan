@@ -121,8 +121,14 @@ export default function TranscriptUploader({ onUploadComplete }: TranscriptUploa
       })
 
       if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.detail || 'Upload failed')
+        let errorMessage = `Upload failed (${response.status})`
+        try {
+          const error = await response.json()
+          errorMessage = error.detail || errorMessage
+        } catch {
+          // Response wasn't JSON (e.g. HTML error page)
+        }
+        throw new Error(errorMessage)
       }
 
       const result: UploadResponse = await response.json()
