@@ -264,7 +264,7 @@ class JobWorker:
             self._heartbeat_task.cancel()
 
     async def retry_single_phase(
-        self, job_id: int, phase_name: str, force_tier: Optional[int] = None
+        self, job_id: int, phase_name: str, force_tier: Optional[int] = None, feedback: Optional[str] = None
     ) -> Dict[str, Any]:
         """Retry a single phase for a completed job.
 
@@ -275,6 +275,7 @@ class JobWorker:
             job_id: The job ID to retry a phase for
             phase_name: The phase to retry (e.g., 'timestamp', 'seo', 'analyst')
             force_tier: Optional tier override (0=cheapskate, 1=default, 2=big-brain)
+            feedback: Optional editorial feedback to guide the retry
 
         Returns:
             Dict with status, phase result, and any errors
@@ -348,6 +349,14 @@ class JobWorker:
                     "tier": force_tier,
                     "tier_label": tier_labels.get(force_tier, "unknown"),
                 },
+            )
+
+        # Inject editorial feedback if provided
+        if feedback:
+            context["_editorial_feedback"] = feedback
+            logger.info(
+                "Including editorial feedback in retry",
+                extra={"job_id": job_id, "phase": phase_name, "feedback_length": len(feedback)},
             )
 
         # Run the phase
@@ -2420,6 +2429,17 @@ Output a timestamp report with TWO sections:
 2. **YouTube Format** - Simple list like "0:00 Introduction" for video descriptions
 
 Follow the exact format specified in your system instructions."""
+
+            # Inject editorial feedback if present
+            editorial_feedback = context.get("_editorial_feedback")
+            if editorial_feedback:
+                prompt += f"""
+
+## Editorial Feedback
+
+The editor reviewed the previous timestamp output and provided the following feedback. Incorporate these changes:
+
+{editorial_feedback}"""
             return prompt
 
         return f"Process the following:\n\n{transcript}"

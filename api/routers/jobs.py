@@ -508,6 +508,11 @@ async def retry_phase(
         description="Force specific tier: 0=cheapskate, 1=default, 2=big-brain. "
         "If not specified, auto-escalates from the tier previously used.",
     ),
+    feedback: Optional[str] = Query(
+        default=None,
+        description="Editorial feedback to guide the retry (e.g., 'add a chapter for topic X', "
+        "'merge the first two chapters'). Injected into the agent prompt.",
+    ),
 ):
     """Retry a single phase for a job with automatic escalation.
 
@@ -583,6 +588,7 @@ async def retry_phase(
                     "tier": effective_tier,
                     "auto_escalated": tier is None,
                     "original_model": original_model,
+                    "has_feedback": feedback is not None,
                 },
             ),
         )
@@ -596,7 +602,7 @@ async def retry_phase(
         from api.services.worker import JobWorker
 
         worker = JobWorker()
-        result = await worker.retry_single_phase(job_id, phase_name, force_tier=effective_tier)
+        result = await worker.retry_single_phase(job_id, phase_name, force_tier=effective_tier, feedback=feedback)
         if not result.get("success"):
             logger.error(
                 "Phase retry failed",

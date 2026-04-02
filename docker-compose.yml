@@ -9,7 +9,7 @@ services:
     environment:
       - DATABASE_PATH=/data/db/dashboard.db
       - OUTPUT_DIR=/data/output
-      - CORS_ORIGINS=http://localhost:3000
+      - CORS_ORIGINS=http://localhost:3001
       - CARDIGAN_API_KEY=${CARDIGAN_API_KEY}
       - TRANSCRIPTS_DIR=/data/transcripts
     volumes:
@@ -49,7 +49,7 @@ services:
       context: .
       dockerfile: Dockerfile.web
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
       - CARDIGAN_API_KEY=${CARDIGAN_API_KEY}
     depends_on:
