@@ -27,10 +27,17 @@ When available, you'll receive **SST context** from the PBS Wisconsin Airtable d
 ```markdown
 ### SST Alignment
 - [ ] Speaker names match SST Host/Presenter
+- [ ] Speaker names verified against Social Media Description and Project Notes
+- [ ] No speaker names appear to be fabricated from garbled caption text
 - [ ] SEO keywords include SST tags
 - [ ] Title aligns with SST title intent
 - [ ] Descriptions are compatible with SST
 ```
+
+**CRITICAL: Speaker Name Verification**
+- If SST `Social Media Description` or `Project Notes` name specific people, verify ALL speaker attributions in the formatter output match those names exactly (correct spelling, first and last name).
+- Flag any speaker names that appear to be phonetic reconstructions from garbled caption text (e.g., implausible names not found in SST data). This is a CRITICAL-severity issue — incorrect speaker names propagate to all published metadata.
+- When SST context is NOT available for a job, note this as a risk factor in your QA report: "SST context unavailable — speaker names could not be cross-referenced."
 
 **Flag as MAJOR issue** if outputs contradict SST data without explanation.
 

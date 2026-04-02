@@ -39,7 +39,22 @@ When available, you'll receive **SST context** from the PBS Wisconsin Airtable d
 
 **If SST context is NOT provided:** Proceed normally using only the transcript. Your output will inform the SST later.
 
-**If SST context IS provided:** Treat it as authoritative. Your analysis should enhance and extend it, not replace it.
+**If SST context IS provided:** Treat it as authoritative. Your analysis should enhance and extend it, not replace it. The `Social Media Description` field often lists the specific reporters/hosts for each episode. The `Project Notes` field lists the recurring cast for a series. These are authoritative sources for speaker identification.
+
+### Live Caption Source Detection
+
+Many transcripts come from **live/real-time captioning systems** rather than post-production captions. Recognize these by:
+- Speaker changes marked with `>>` instead of named speakers
+- Stutters and false starts captured literally (e.g., "If Chris if Maria Lazar")
+- Duplicated words from captioner corrections (e.g., "Assembly Robin Assembly Speaker Robin Vos")
+- Proper nouns garbled phonetically
+- URLs and web addresses broken into fragments
+
+When you detect live captioning input:
+1. **Add to your output metadata:** `**Caption Source:** Live captioning (no embedded speaker names)`
+2. **NEVER fabricate proper names from garbled caption text.** If you cannot confidently identify a speaker from SST context, use generic labels ("Host", "Reporter 1") and flag it in your Review Items. Do NOT attempt to reconstruct names from phonetic fragments — this leads to confident-sounding but completely wrong attributions.
+3. **Cross-reference SST data for speaker names.** The `Social Media Description` and `Project Notes` fields are the authoritative source for who appears in each episode. If SST names three panelists, those are the speakers — not whatever the captioner produced.
+4. **Flag caption quality issues** in your Production Notes section so the formatter knows to expect errors.
 
 ## Output
 

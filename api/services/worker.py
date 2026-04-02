@@ -6,6 +6,7 @@ Polls the queue for pending jobs and processes them through agent phases.
 import asyncio
 import json
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -38,6 +39,66 @@ OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "OUTPUT"))
 TRANSCRIPTS_DIR = Path(os.getenv("TRANSCRIPTS_DIR", "transcripts"))
 TRANSCRIPTS_ARCHIVE_DIR = TRANSCRIPTS_DIR / "archive"
 AGENTS_DIR = Path(".claude/agents")
+KNOWLEDGE_DIR = Path("knowledge")
+
+
+def _extract_speakers_from_sst(sst_context: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract host and panelist names from SST text fields.
+
+    Parses Social Media Description and Project Notes to find speaker names
+    when the dedicated Host/Presenter fields aren't populated.
+
+    Returns dict with optional 'host' and 'panelists' keys.
+    """
+    result: Dict[str, Any] = {}
+
+    # Title/role words that precede names but aren't names themselves
+    _TITLE_PREFIX = r"(?:(?:Chief|Senior|Political|Reporter|Reporters|Bureau|Capitol|News|Wisconsin|PBS|WPR|County|District|Court|Assembly|State|Department|Justice|General)\s+)*"
+    # Proper name: First [van/de/von] Last — after stripping title prefixes
+    _NAME = rf"{_TITLE_PREFIX}([A-Z][a-z]+(?:\s+van)?\s+[A-Z][a-z]+)"
+
+    # Try Project Notes first (series-level, more structured)
+    project_notes = sst_context.get("project_notes", "")
+    if project_notes:
+        # Find host: "led by ... [Name]" up to "and include"
+        led_match = re.search(r"(?:led|hosted)\s+by\s+(.+?)(?:\s+and\s+include|\.\s|$)", project_notes)
+        if led_match:
+            names = re.findall(_NAME, led_match.group(1))
+            if names:
+                result["host"] = names[0]
+
+        # Find panelists: "include ... [names]"
+        include_match = re.search(r"include\s+(.+?)(?:\.\s|\.$|$)", project_notes)
+        if include_match:
+            panelists = re.findall(_NAME, include_match.group(1))
+            if panelists:
+                result["panelists"] = panelists
+
+    # Try Social Media Description (per-episode, names reporters)
+    social_desc = sst_context.get("social_media_description", "")
+    if social_desc:
+        reporters_match = re.search(
+            rf"reporters?\s+{_NAME}\s+and\s+{_NAME}",
+            social_desc,
+            re.IGNORECASE,
+        )
+        if reporters_match:
+            name1, name2 = reporters_match.group(1), reporters_match.group(2)
+            if result.get("host"):
+                # Add episode-specific names as panelists if not already listed
+                existing = result.get("panelists", [])
+                for name in [name1, name2]:
+                    if name != result["host"] and name not in existing:
+                        existing.append(name)
+                if existing:
+                    result["panelists"] = existing
+            else:
+                # First name is likely the host
+                result["host"] = name1
+                if name2 != name1:
+                    result["panelists"] = [name2]
+
+    return result
 
 
 class WorkerConfig:
@@ -73,11 +134,11 @@ class JobWorker:
     PHASES = ["analyst", "formatter", "seo", "manager"]
 
     # Optional phases with trigger conditions
-    # timestamp: Runs automatically for 30+ minute content, or when requested
+    # timestamp: Runs automatically for 10+ minute content, or when requested
     OPTIONAL_PHASES = ["timestamp"]
 
     # Duration threshold (in minutes) for auto-triggering timestamp phase
-    TIMESTAMP_AUTO_THRESHOLD_MINUTES = 30
+    TIMESTAMP_AUTO_THRESHOLD_MINUTES = 10
 
     # Phases that always run on big-brain tier (not configurable)
     # - manager: QA oversight requires strong reasoning
@@ -830,7 +891,28 @@ class JobWorker:
                 "presenter": fields.get("Presenter"),
                 "program": fields.get("Program"),
                 "media_id": fields.get("Media ID"),
+                "social_media_description": fields.get("Social Media Description"),
             }
+
+            # Follow Project linked record for series-level context
+            project_ids = fields.get("Project")
+            if project_ids and isinstance(project_ids, list):
+                try:
+                    project_record = await client.get_project_record(project_ids[0])
+                    if project_record:
+                        project_fields = project_record.get("fields", {})
+                        sst_context["project_notes"] = project_fields.get("Notes")
+                        sst_context["project_description"] = project_fields.get("Project Description")
+                except Exception as e:
+                    logger.debug("Failed to fetch linked Project (non-fatal)", extra={"error": str(e)})
+
+            # Auto-extract speaker names from SST text fields when Host/Presenter aren't set
+            if not sst_context.get("host"):
+                extracted = _extract_speakers_from_sst(sst_context)
+                if extracted.get("host"):
+                    sst_context["host"] = extracted["host"]
+                if extracted.get("panelists") and not sst_context.get("presenter"):
+                    sst_context["presenter"] = ", ".join(extracted["panelists"])
 
             # Remove None values
             sst_context = {k: v for k, v in sst_context.items() if v is not None}
@@ -1402,6 +1484,8 @@ class JobWorker:
                 "presenter",
                 "keywords",
                 "tags",
+                "social_media_description",
+                "project_notes",
             ]:
                 if sst_context.get(key):
                     sst_section += f"**{key.replace('_', ' ').title()}:** {sst_context[key]}\n"
@@ -1448,7 +1532,8 @@ class JobWorker:
                 # Verbatim preservation instruction (applies to all chunks)
                 verbatim_instruction = """CRITICAL: You MUST preserve ALL spoken dialogue. Do NOT summarize, condense, or paraphrase.
 Every sentence spoken in the transcript must appear in your output. You may remove filler words
-(um, uh) and fix grammar, but do NOT drop or merge sentences. Completeness is more important than brevity."""
+(um, uh) and fix grammar, but do NOT drop or merge sentences. Completeness is more important than brevity.
+If a caption is garbled or unclear, include your best reconstruction rather than dropping it. NEVER silently omit content."""
 
                 if chunk.index == 0:
                     # First chunk: normal formatter prompt
@@ -2155,14 +2240,27 @@ Output a QA report with:
                 sst_section += f"**Keywords:** {sst_context['keywords']}\n"
             if sst_context.get("tags"):
                 sst_section += f"**Tags:** {sst_context['tags']}\n"
+            if sst_context.get("social_media_description"):
+                sst_section += f"**Social Media Description:** {sst_context['social_media_description']}\n"
+            if sst_context.get("project_notes"):
+                sst_section += f"**Project Notes (Series Info):** {sst_context['project_notes']}\n"
 
-            sst_section += "\n*Use this context to align your analysis with existing metadata.*\n\n"
+            sst_section += "\n*Use this context to align your analysis with existing metadata. Speaker names from SST are authoritative.*\n\n"
+
+        # Load Wisconsin proper-noun reference for analyst and formatter phases
+        wi_reference = ""
+        if phase_name in ("analyst", "formatter"):
+            wi_ref_path = KNOWLEDGE_DIR / "wisconsin_reference.md"
+            if wi_ref_path.exists():
+                wi_reference = f"\n## Wisconsin Proper-Noun Reference\n\n{wi_ref_path.read_text()}\n\n"
 
         if phase_name == "analyst":
             prompt = """Please analyze the following transcript:
 """
             if sst_section:
                 prompt += sst_section
+            if wi_reference:
+                prompt += wi_reference
             prompt += f"""---
 {transcript}
 ---
@@ -2177,6 +2275,7 @@ Provide a detailed analysis document."""
             verbatim_instruction = """CRITICAL: You MUST preserve ALL spoken dialogue. Do NOT summarize, condense, or paraphrase.
 Every sentence spoken in the transcript must appear in your output. You may remove filler words
 (um, uh) and fix grammar, but do NOT drop or merge sentences. Completeness is more important than brevity.
+If a caption is garbled or unclear, include your best reconstruction rather than dropping it. NEVER silently omit content.
 
 """
 
@@ -2184,6 +2283,8 @@ Every sentence spoken in the transcript must appear in your output. You may remo
             prompt += "Using the following analysis as guidance:\n\n"
             if sst_section:
                 prompt += sst_section
+            if wi_reference:
+                prompt += wi_reference
             prompt += f"""---
 {analysis}
 ---

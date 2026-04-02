@@ -309,6 +309,16 @@ def merge_formatter_chunks(chunks: List[str]) -> str:
         # Strip provenance HTML comment from top (<!-- model: ... -->)
         chunk = re.sub(r"^<!--\s*model:.*?-->\s*\n?", "", chunk.strip())
 
+        # Strip LLM-generated model/creator attribution lines (appear at end of chunk responses)
+        chunk = re.sub(
+            r"^\*\*(?:Model|Creator|Agent):\*\*.*\n?",
+            "",
+            chunk,
+            flags=re.MULTILINE,
+        )
+        # Clean up orphaned --- separators left after attribution removal
+        chunk = re.sub(r"\n---+\s*\n*$", "", chunk.strip())
+
         # Extract review notes from this chunk
         notes = review_pattern.findall(chunk)
         for note in notes:

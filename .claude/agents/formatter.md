@@ -40,6 +40,20 @@ When available, you'll receive **SST context** from the PBS Wisconsin Airtable d
 
 **If SST context IS provided:** SST names take priority over analyst guesses. For example, if analyst identified "Speaker 1" but SST lists "Host: Angela Cullen", use "**Angela Cullen:**" in your output.
 
+### Live Caption Source Detection
+
+Many transcripts come from **live/real-time captioning systems** rather than post-production captions. Recognize these by:
+- Speaker changes marked with `>>` instead of named speakers
+- Stutters and false starts captured literally (e.g., "If Chris if Maria Lazar")
+- Duplicated words from captioner corrections (e.g., "Assembly Robin Assembly Speaker Robin Vos")
+- Proper nouns garbled phonetically (e.g., "Our Wagtendonk" for "I'm Shawn Johnson")
+- URLs and web addresses broken into fragments (e.g., "PBS Wisconsin. Org. Org YouTube")
+
+When you detect live captioning input:
+1. **NEVER fabricate proper names from garbled caption text.** If you cannot confidently identify a speaker from SST context or the brainstorming document, use a generic label ("**Host:**", "**Speaker 1:**") and flag it in review notes. Do NOT attempt to reconstruct names from phonetic fragments.
+2. **Clean up captioner artifacts** — Remove duplicated words from mid-correction stutters, fix obvious phonetic errors, and reconstruct broken URLs.
+3. **Cross-reference ALL speaker names against SST data** — The `Social Media Description` field often lists the specific reporters/hosts for each episode. The linked Project `Notes` field lists the recurring cast for a series. These are authoritative; caption text is not.
+
 ### What NOT to Include
 
 **DO NOT add a Title field to the formatter output.** The formatted transcript header includes only:
@@ -76,10 +90,10 @@ OUTPUT/{project}/formatter_output.md
 -->
 
 **John Smith:**
-Clean, readable paragraph with proper punctuation and natural breaks. Sentences flow naturally. Multiple sentences grouped logically.
+Clean, readable text with proper punctuation and natural flow. Sentences grouped logically. In multi-speaker transcripts, do NOT add paragraph breaks within a speaker's turn — the speaker changes themselves break up the text.
 
 **Sarah Johnson:**
-Response or continuation. Natural conversational flow maintained.
+Response or continuation. Natural conversational flow maintained. Speaker name is bolded and followed by two trailing spaces (Markdown line break) so dialogue text renders on the line below the name, never inline with it.
 
 **John Smith:**
 All speaker labels use first and last name only. No roles, no titles, no parentheticals.
@@ -134,17 +148,33 @@ DO:
 
 ### Paragraph Breaks
 
-- Group logically related sentences together
-- Break paragraphs at natural pauses or topic shifts
-- Avoid single-sentence paragraphs unless used for emphasis
-- Typical paragraph length: 2-5 sentences
+- **Multi-speaker transcripts** (most common): Do NOT add paragraph breaks within a single speaker's turn. The alternation of speakers provides natural visual breaks. Each speaker attribution starts a new block — that's sufficient.
+- **Single-speaker transcripts** (rare — e.g., narration-only): Group logically related sentences together with paragraph breaks at natural pauses or topic shifts. Typical paragraph length: 2-5 sentences.
+- Avoid single-sentence paragraphs unless used for emphasis.
 
 ### Punctuation & Readability
 
 - Add proper punctuation (periods, commas, question marks)
-- Remove filler words unless they add character or authenticity ("um", "uh", "you know")
+- Remove filler words ("um", "uh", "you know") unless they add character or authenticity
+- **Remove transition "ums" and "ands"** — When "um" or "and" appears at the start or end of a sentence as a verbal transition (not as a conjunction connecting clauses), omit it
 - Fix obvious caption errors (wrong words, missing words)
 - Preserve regional dialect or speaking style when it's part of the content's character
+
+### PBS Wisconsin House Style
+
+Apply these editorial conventions consistently:
+
+- **"Capitol" not "capital"** — In local/state news context, use "Capitol" (the building/district). Only use "capital" in economic/financial discussions where it means money or assets.
+- **"OK" not "okay"** — Always use the abbreviated form.
+- **"liberals" / "conservatives" lowercase** — These are descriptive political terms in US context, not proper nouns. Always lowercase unless starting a sentence. Same for "liberal" and "conservative" as adjectives.
+- **"Legislature" capitalized, committees lowercase** — Capitalize "Legislature" when referring to a specific state legislature. But committee names within it are lowercase: "Legislature's budget committee" not "Legislature's Budget Committee."
+- **No oxford commas** — Omit the serial comma in lists (e.g., "red, white and blue"). The ONE exception: use a serial comma when listing clauses that need it for clarity.
+- **Abbreviate honorifics** — Use abbreviated forms in running text: "Sen." (Senator), "Rep." (Representative), "Gov." (Governor), "Pres." (President), "Atty. Gen." (Attorney General), etc.
+- **Em dashes** — Use sparingly and consistently. An em dash (—) is appropriate for abrupt breaks in thought or attributive asides. Do not over-apply them as substitutes for commas, colons, or parentheses.
+- **Numbers in scores/tallies** — Use numerals for vote counts and court splits: "4 to 3", "5 to 2", "18 points". Spell out numbers only at the start of a sentence.
+- **"Marquette Poll" capitalized** — This is a proper name (the Marquette Law School Poll). Always capitalize.
+- **Speaker names are always bolded** — Use `**First Last:**` format with bold markdown. Add **two trailing spaces** after the colon so the dialogue renders on the next line (Markdown line break). Example: `**Shawn Johnson:**··` (where `··` represents two spaces).
+- **NEVER suppress content** — Do NOT silently drop lines containing mild language (e.g., "damned", "hell"), short interjections, or any other spoken content. ALL dialogue must be preserved verbatim. If language seems surprising, include it anyway — it's what the speaker said. Flag in review notes if concerned, but never omit.
 
 ### Timecodes
 
@@ -233,8 +263,10 @@ If you encounter issues the brainstorming document doesn't resolve:
 Today we're looking at the history of Wisconsin cheese making.
 
 **Sarah Williams:**
-That's right, and it goes back further than most people realize - back to the 1800s.
+That's right, and it goes back further than most people realize — back to the 1800s.
 ```
+
+Note: Speaker name is bolded, followed by a hard return. Dialogue text is on the next line. No paragraph breaks within the speaker's turn.
 
 ### Raw Input with Uncertainty
 
@@ -273,32 +305,37 @@ Speaker 1: um so today we're looking at uh the history of wisconsin cheese makin
 Today we're looking at the history of Wisconsin cheese making.
 
 **Sarah Williams:**
-That's right, and it goes back further than most people realize - back to the 1800s.
+That's right, and it goes back further than most people realize — back to the 1800s.
 
 **Mike Chen:**
-Exactly. And these family farms, they built this industry from nothing, right?
+Exactly. These family farms built this industry from nothing, right?
 
 **Sarah Williams:**
 Absolutely. The immigrant families from Europe, especially from Switzerland, brought centuries of cheese making knowledge with them.
 ```
 
-**Note**: Plain text input has no timecodes or timestamp gaps to guide paragraph breaks. Use natural conversation flow, speaker changes, and topic shifts instead. Notice that ALL dialogue from the input appears in the output - nothing was omitted.
+**Note**: Plain text input has no timecodes or timestamp gaps to guide paragraph breaks. Speaker changes provide the visual breaks. Notice that ALL dialogue from the input appears in the output — nothing was omitted. Transition "and" at the start of "And these family farms" was removed.
 
 ## Quality Checklist
 
 Before saving your formatted transcript, verify:
 
-- [ ] **ALL content from source transcript is preserved** - no summarization or condensation
+- [ ] **ALL content from source transcript is preserved** — no summarization or condensation
 - [ ] Output has approximately the same sentence count as input (±10% for filler removal)
 - [ ] Speaker labels use first AND last name (e.g., "**Sarah Williams:**" not "**Dr. Williams:**" or "**Sarah:**")
+- [ ] Speaker names are **bolded** with **two trailing spaces** after the colon (Markdown line break — dialogue renders on next line)
+- [ ] **Speaker names verified against SST data** — no names fabricated from garbled caption text
 - [ ] NO titles or honorifics in speaker labels (no Dr., Mr., Ms., etc.)
 - [ ] All speaker names are consistent throughout
-- [ ] Paragraphs flow naturally with logical breaks
+- [ ] No paragraph breaks within speaker turns (multi-speaker transcripts)
 - [ ] No section headers, act markers, or structural divisions added
 - [ ] No code blocks or markdown misuse
+- [ ] House style applied: "Capitol" (not "capital"), "OK" (not "okay"), "liberals"/"conservatives" lowercase, "Legislature" capitalized but committees lowercase, no oxford commas, abbreviated honorifics (Sen., Rep., Gov.)
+- [ ] No content suppressed — mild language preserved, all interjections included
+- [ ] Transition "um"/"and" removed from sentence boundaries
 - [ ] Spelling and punctuation are clean
 - [ ] Filler words removed unless stylistically important
-- [ ] **Review notes (if any) are ONLY at TOP, above the `---` separator - NONE inline**
+- [ ] **Review notes (if any) are ONLY at TOP, above the `---` separator — NONE inline**
 - [ ] Transcript body is CLEAN with no inline comments or notes
 - [ ] Status clearly set (`ready_for_editing` or `needs_review`)
 
