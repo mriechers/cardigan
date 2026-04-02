@@ -41,14 +41,13 @@
       "cost_per_project": 0.2,
       "enabled": false
     },
-    "claude": {
-      "type": "anthropic",
-      "endpoint": "https://api.anthropic.com/v1/messages",
-      "model": "claude-3-5-sonnet-latest",
-      "api_key_env": "ANTHROPIC_API_KEY",
-      "timeout": 180,
-      "cost_per_project": 0.25,
-      "enabled": false
+    "openrouter-claude": {
+      "type": "openrouter",
+      "endpoint": "https://openrouter.ai/api/v1/chat/completions",
+      "model": "anthropic/claude-sonnet-4.5",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "timeout": 240,
+      "cost_per_project": 0.25
     },
     "gemini-flash": {
       "type": "gemini",
@@ -122,7 +121,7 @@
   },
   "phase_backends": {
     "analyst": "openrouter",
-    "formatter": "openrouter-cheapskate",
+    "formatter": "openrouter-claude",
     "seo": "openrouter-cheapskate",
     "manager": "openrouter-big-brain",
     "copy_editor": "openrouter",
@@ -132,12 +131,14 @@
     "tiers": [
       "openrouter-cheapskate",
       "openrouter",
-      "openrouter-big-brain"
+      "openrouter-big-brain",
+      "openrouter-claude"
     ],
     "tier_labels": [
       "cheapskate",
       "default",
-      "big-brain"
+      "big-brain",
+      "claude-via-openrouter"
     ],
     "duration_thresholds": [
       {
@@ -155,7 +156,7 @@
     ],
     "phase_base_tiers": {
       "analyst": 0,
-      "formatter": 0,
+      "formatter": 3,
       "seo": 0,
       "manager": 2,
       "copy_editor": 2,

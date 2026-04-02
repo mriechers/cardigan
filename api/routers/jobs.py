@@ -504,8 +504,7 @@ async def retry_phase(
     tier: Optional[int] = Query(
         default=None,
         ge=0,
-        le=2,
-        description="Force specific tier: 0=cheapskate, 1=default, 2=big-brain. "
+        description="Force specific tier index. "
         "If not specified, auto-escalates from the tier previously used.",
     ),
 ):
@@ -552,7 +551,7 @@ async def retry_phase(
             if phase.name == phase_name and phase.tier is not None:
                 previous_tier = phase.tier
                 break
-        effective_tier = min(previous_tier + 1, 2)
+        effective_tier = previous_tier + 1
         logger.info(
             "Auto-escalating phase retry",
             extra={
