@@ -511,8 +511,12 @@ class TestRetryPhaseEndpoint:
         assert data["phase"] == "manager"
 
     @pytest.mark.asyncio
-    async def test_retry_phase_invalid_tier_rejected(self, sample_job):
-        """Test that out-of-range tier values are rejected with 422."""
+    async def test_retry_phase_high_tier_accepted(self, sample_job):
+        """Test that tier values beyond configured tiers are accepted (no upper cap).
+
+        Tiers are dynamically defined in config. The endpoint accepts any
+        non-negative integer and the worker handles unknown tiers gracefully.
+        """
         job_id = sample_job["id"]
 
         response = client.post(
@@ -520,7 +524,9 @@ class TestRetryPhaseEndpoint:
             json={"tier": 5},
         )
 
-        assert response.status_code == 422
+        # Accepted (200) — the retry runs in the background even if the tier
+        # doesn't map to a configured backend
+        assert response.status_code == 200
 
     @pytest.mark.asyncio
     async def test_retry_phase_negative_tier_rejected(self, sample_job):

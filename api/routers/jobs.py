@@ -199,9 +199,9 @@ async def retry_job(job_id: int):
     for phase in phases:
         if phase.tier is not None and phase.tier > max_previous_tier:
             max_previous_tier = phase.tier
-    escalated_tier = min(max_previous_tier + 1, 2)  # Cap at big-brain (tier 2)
+    escalated_tier = min(max_previous_tier + 1, 3)  # Cap at tier 3 (Claude pinned)
 
-    tier_labels = {0: "cheapskate", 1: "default", 2: "big-brain"}
+    tier_labels = {0: "Claude Haiku", 1: "Claude Sonnet", 2: "Claude Opus", 3: "Claude (pinned)"}
     logger.info(
         "Retry with escalation",
         extra={
@@ -634,8 +634,7 @@ class PhaseRetryRequest(BaseModel):
     tier: Optional[int] = Field(
         None,
         ge=0,
-        le=2,
-        description="Force specific tier: 0=cheapskate, 1=default, 2=big-brain. "
+        description="Force specific tier index (0=Claude Haiku, 1=Claude Sonnet, 2=Claude Opus, 3=Claude pinned). "
         "If not specified, auto-escalates from the tier previously used.",
     )
     feedback: Optional[str] = Field(
@@ -723,7 +722,7 @@ async def retry_phase(
             if phase.name == phase_name and phase.tier is not None:
                 previous_tier = phase.tier
                 break
-        effective_tier = min(previous_tier + 1, 2)
+        effective_tier = previous_tier + 1
         logger.info(
             "Auto-escalating phase retry",
             extra={
@@ -779,7 +778,7 @@ async def retry_phase(
 
     background_tasks.add_task(run_retry)
 
-    tier_labels = {0: "cheapskate", 1: "default", 2: "big-brain"}
+    tier_labels = {0: "Claude Haiku", 1: "Claude Sonnet", 2: "Claude Opus", 3: "Claude (pinned)"}
     escalation_note = " (auto-escalated)" if tier is None else ""
     tier_msg = f" at tier {effective_tier} ({tier_labels.get(effective_tier, '?')}){escalation_note}"
     return PhaseRetryResponse(

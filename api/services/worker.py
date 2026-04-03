@@ -1623,10 +1623,12 @@ class JobWorker:
             """Process a single chunk through the formatter LLM."""
             async with semaphore:
                 # Verbatim preservation instruction (applies to all chunks)
-                verbatim_instruction = """CRITICAL: You MUST preserve ALL spoken dialogue. Do NOT summarize, condense, or paraphrase.
-Every sentence spoken in the transcript must appear in your output. You may remove filler words
-(um, uh) and fix grammar, but do NOT drop or merge sentences. Completeness is more important than brevity.
-If a caption is garbled or unclear, include your best reconstruction rather than dropping it. NEVER silently omit content."""
+                verbatim_instruction = """CRITICAL: You MUST preserve ALL spoken dialogue VERBATIM. Do NOT summarize, condense, paraphrase, or reword.
+Every sentence spoken in the transcript must appear in your output using the speaker's actual words.
+You may remove filler words (um, uh) and fix grammar/punctuation, but do NOT rephrase, rewrite, or generate new copy.
+If the speaker said it, those exact words must appear in the output. Do NOT substitute your own phrasing.
+If a caption is garbled or unclear, include your best reconstruction rather than dropping it. NEVER silently omit content.
+SPELLING: Always use "partisan" (not "partizan"), "bipartisan" (not "bipartisan"). Program names like "Inside Wisconsin Politics" are NOT italicized."""
 
                 if chunk.index == 0:
                     # First chunk: normal formatter prompt
@@ -1649,6 +1651,7 @@ The previous section ended with:
 {chunk.overlap_prefix}
 ---
 Continue formatting from where the previous section left off. Do NOT repeat content from the overlap above.
+CRITICAL: Pay careful attention to which speaker is talking. Use the overlap above to identify who was speaking last and maintain correct attribution. Getting the wrong name on a statement is worse than using a generic label.
 
 Using the following analysis as guidance:
 ---
