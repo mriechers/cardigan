@@ -119,6 +119,7 @@ class JobUpdate(BaseModel):
     media_id: Optional[str] = None
     duration_minutes: Optional[float] = Field(None, description="Transcript duration in minutes")
     word_count: Optional[int] = Field(None, description="Transcript word count")
+    content_type: Optional[str] = Field(None, description="Detected content type: 'full', 'short', or 'clip'")
     phases: Optional[List[JobPhase]] = Field(None, description="Replace all phases")
     phase_update: Optional[PhaseUpdate] = Field(None, description="Update a single phase")
 
@@ -166,6 +167,9 @@ class Job(BaseModel):
         None, description="Transcript duration in minutes (from SRT or estimated)"
     )
     word_count: Optional[int] = Field(None, description="Transcript word count")
+    content_type: Optional[str] = Field(
+        None, description="Detected content type: 'full', 'short', or 'clip'"
+    )
     outputs: Optional[JobOutputs] = Field(None, description="Output files from manifest")
 
     class Config:

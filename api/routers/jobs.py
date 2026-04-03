@@ -6,10 +6,11 @@ Provides endpoints for job detail retrieval, updates, and control operations.
 import logging
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
@@ -476,6 +477,155 @@ async def get_sst_metadata(job_id: int):
     except Exception as e:
         logger.error(f"Failed to fetch SST metadata: {e}")
         raise HTTPException(status_code=502, detail="Failed to fetch metadata from Airtable")
+
+
+class KeywordReportUploadResponse(BaseModel):
+    """Response for keyword report upload."""
+
+    filename: str
+    version: int
+    message: str
+
+
+class KeywordReportInfo(BaseModel):
+    """Info about a single keyword report file."""
+
+    filename: str
+    version: int
+    uploaded_at: Optional[str] = None
+
+
+class KeywordReportsListResponse(BaseModel):
+    """Response for listing keyword reports."""
+
+    reports: List[KeywordReportInfo]
+
+
+@router.post("/{job_id}/keyword-report", response_model=KeywordReportUploadResponse)
+async def upload_keyword_report(
+    job_id: int,
+    file: UploadFile = File(..., description="SEMRush keyword export CSV or text file"),
+):
+    """Upload a SEMRush keyword report CSV for a job.
+
+    Saves the file as keyword_report_v{N}.md in the job's project directory,
+    prepending a markdown header with upload timestamp and source filename.
+    The version number auto-increments from existing files.
+
+    Args:
+        job_id: Job ID to attach the report to
+        file: CSV or text file from SEMRush keyword export
+
+    Returns:
+        Filename and version number of the saved report
+
+    Raises:
+        HTTPException: 404 if job not found or no project path configured,
+                       400 if file type not allowed
+    """
+    job = await get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    if not job.project_path:
+        raise HTTPException(status_code=404, detail="Job has no output directory configured")
+
+    # Validate file type
+    allowed_content_types = {"text/csv", "text/plain", "application/csv", "application/octet-stream"}
+    original_filename = file.filename or "keyword_report.csv"
+    ext = Path(original_filename).suffix.lower()
+    if ext not in {".csv", ".txt", ".tsv"} and (file.content_type or "") not in allowed_content_types:
+        raise HTTPException(
+            status_code=400,
+            detail="Only CSV or text files are accepted for keyword reports.",
+        )
+
+    # Security: resolve project path within OUTPUT directory
+    output_dir = Path(os.getenv("OUTPUT_DIR", "OUTPUT")).resolve()
+    project_path = Path(job.project_path).resolve()
+    if not project_path.is_relative_to(output_dir):
+        raise HTTPException(status_code=400, detail="Invalid project path - outside output directory")
+
+    # Determine next version number
+    existing = sorted(project_path.glob("keyword_report_v*.md"))
+    next_version = len(existing) + 1
+
+    # Read uploaded content
+    content_bytes = await file.read()
+    csv_content = content_bytes.decode("utf-8", errors="replace")
+
+    # Build markdown document
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    md_content = f"""# SEMRush Keyword Report
+
+**Uploaded:** {timestamp}
+**Source file:** {original_filename}
+
+---
+
+{csv_content}
+"""
+
+    filename = f"keyword_report_v{next_version}.md"
+    file_path = project_path / filename
+    file_path.write_text(md_content, encoding="utf-8")
+
+    logger.info(
+        "Keyword report uploaded",
+        extra={"job_id": job_id, "filename": filename, "version": next_version},
+    )
+
+    return KeywordReportUploadResponse(
+        filename=filename,
+        version=next_version,
+        message=f"Keyword report uploaded as {filename}. It will be included in the next SEO phase run.",
+    )
+
+
+@router.get("/{job_id}/keyword-reports", response_model=KeywordReportsListResponse)
+async def list_keyword_reports(job_id: int):
+    """List all uploaded keyword reports for a job.
+
+    Returns version numbers and upload timestamps for each report file.
+
+    Args:
+        job_id: Job ID to list reports for
+
+    Returns:
+        List of keyword report metadata
+
+    Raises:
+        HTTPException: 404 if job not found
+    """
+    job = await get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    if not job.project_path:
+        return KeywordReportsListResponse(reports=[])
+
+    output_dir = Path(os.getenv("OUTPUT_DIR", "OUTPUT")).resolve()
+    project_path = Path(job.project_path).resolve()
+    if not project_path.is_relative_to(output_dir) or not project_path.exists():
+        return KeywordReportsListResponse(reports=[])
+
+    reports = []
+    for f in sorted(project_path.glob("keyword_report_v*.md")):
+        match = re.match(r"^keyword_report_v(\d+)\.md$", f.name)
+        version = int(match.group(1)) if match else 0
+        # Extract upload timestamp from file header if present
+        uploaded_at = None
+        try:
+            first_lines = f.read_text(encoding="utf-8").splitlines()
+            for line in first_lines[:6]:
+                if line.startswith("**Uploaded:**"):
+                    uploaded_at = line.replace("**Uploaded:**", "").strip()
+                    break
+        except Exception:
+            pass
+        reports.append(KeywordReportInfo(filename=f.name, version=version, uploaded_at=uploaded_at))
+
+    return KeywordReportsListResponse(reports=reports)
 
 
 class PhaseRetryRequest(BaseModel):

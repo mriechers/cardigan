@@ -175,7 +175,7 @@ OUTPUT/{project}/analyst_output.md
 **Next Steps:** This document will be used by the formatter agent to create a clean, readable transcript, and by the copy-editor to refine metadata for publication.
 ```
 
-## Analysis Guidelines
+## Guidelines
 
 ### Theme Identification
 
@@ -216,7 +216,7 @@ OUTPUT/{project}/analyst_output.md
 - Are there missing sections or timecode gaps?
 - Is visual description present where needed (for accessibility)?
 
-## Handling Edge Cases
+### Handling Edge Cases
 
 ### Missing or Incomplete Captions
 
@@ -240,7 +240,7 @@ If program name or format is ambiguous:
 2. Note uncertainty in Production Notes
 3. Suggest user verify before publishing
 
-## Integration with Downstream Agents
+### Integration with Downstream Agents
 
 Your brainstorming document is used by:
 

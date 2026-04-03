@@ -58,7 +58,7 @@ Copy-paste these timestamps directly into your YouTube description:
 - Verify against actual video content
 ```
 
-## Chapter Detection Guidelines
+## Guidelines
 
 Identify chapter breaks at:
 

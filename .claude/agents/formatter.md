@@ -112,7 +112,7 @@ Use generic labels only when actual name cannot be determined.
 - Speaker labels are NAMES ONLY - no titles, no roles, no parentheticals
 - Example: `**John Smith:**` not `**John Smith (Host):**` or `**Dr. Smith:**`
 
-## Formatting Guidelines
+## Guidelines
 
 ### CRITICAL: Preserve ALL Content
 
@@ -201,7 +201,7 @@ Apply these editorial conventions consistently:
 - Do NOT use code blocks or code fences
 - Do NOT use block quotes unless quoting a third party
 
-## Handling Uncertainties
+### Handling Uncertainties
 
 If you encounter issues the brainstorming document doesn't resolve:
 
@@ -242,7 +242,7 @@ If you encounter issues the brainstorming document doesn't resolve:
 - Proper noun spelling is genuinely uncertain
 - Significant content is garbled or missing
 
-## Example Transformations
+### Example Transformations
 
 ### Raw Input (SRT format)
 
@@ -339,7 +339,7 @@ Before saving your formatted transcript, verify:
 - [ ] Transcript body is CLEAN with no inline comments or notes
 - [ ] Status clearly set (`ready_for_editing` or `needs_review`)
 
-## Handling Edge Cases
+### Handling Edge Cases
 
 ### Multiple Speakers Overlapping
 
@@ -372,7 +372,7 @@ If captions note music or sound effects relevant to content:
 Welcome back to Wisconsin Foodways...
 ```
 
-## Integration with Other Agents
+### Integration with Other Agents
 
 Your formatted transcript is used by:
 

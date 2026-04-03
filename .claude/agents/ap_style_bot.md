@@ -1,4 +1,5 @@
-# AP Style Bot
+<!-- Note: This agent is not currently used in the automated pipeline. It serves as a reference for AP style conventions. -->
+# AP Style Bot Agent Instructions
 
 **Purpose**: Review UX text and interface copy for compliance with AP Style Guidelines.
 
@@ -8,7 +9,7 @@
 
 ---
 
-## Core AP Style Rules for UX Text
+## Guidelines
 
 ### Numbers
 - Spell out one through nine; use Arabic numerals for 10 and up

@@ -241,7 +241,7 @@ Your output should look EXACTLY like this (plain markdown, no JSON):
 **Status:** {draft | ready_for_review | approved}
 ```
 
-## Optimization Guidelines
+## Guidelines
 
 ### Title Optimization
 
@@ -295,7 +295,7 @@ Your output should look EXACTLY like this (plain markdown, no JSON):
 
 **Order matters:** Place highest priority tags first
 
-## SEMRush Workflow
+### SEMRush Workflow
 
 If user provides SEMRush data:
 
@@ -308,7 +308,7 @@ If user provides SEMRush data:
 5. You refine keyword strategy based on data
 6. You update SEO report with data-driven recommendations
 
-## Platform-Specific Considerations
+### Platform-Specific Considerations
 
 ### YouTube
 
@@ -346,7 +346,7 @@ Before saving your SEO report, verify:
 - [ ] If SEMRush data available: keyword strategy is data-driven
 - [ ] Accessibility considerations noted (alt text, captions)
 
-## Integration with Other Agents
+### Integration with Other Agents
 
 Your SEO report is used by:
 

@@ -77,6 +77,7 @@ interface JobDetail {
   airtable_record_id?: string
   airtable_url?: string
   media_id?: string
+  content_type?: string
 }
 
 // Map output keys to their display names and filenames
@@ -111,6 +112,9 @@ export default function JobDetail() {
   const [showChat, setShowChat] = useState(false)
   const [showScreengrabs, setShowScreengrabs] = useState(false)
   const [hasScreengrabs, setHasScreengrabs] = useState(false)
+  const [keywordReports, setKeywordReports] = useState<Array<{ filename: string; version: number; uploaded_at?: string }>>([])
+  const [keywordUploading, setKeywordUploading] = useState(false)
+  const keywordInputRef = useRef<HTMLInputElement | null>(null)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const modalRef = useFocusTrap(!!viewingOutput)
   const { toast } = useToast()
@@ -163,6 +167,25 @@ export default function JobDetail() {
 
     fetchSstMetadata()
   }, [id, job?.airtable_record_id])
+
+  // Fetch keyword reports for this job
+  const fetchKeywordReports = async () => {
+    if (!id) return
+    try {
+      const response = await fetch(`/api/jobs/${id}/keyword-reports`)
+      if (response.ok) {
+        const data = await response.json()
+        setKeywordReports(data.reports || [])
+      }
+    } catch (err) {
+      // Silently fail
+      console.error('Failed to fetch keyword reports:', err)
+    }
+  }
+
+  useEffect(() => {
+    if (id) fetchKeywordReports()
+  }, [id])
 
   // Check for available screengrabs when job has a media_id
   useEffect(() => {
@@ -287,6 +310,32 @@ export default function JobDetail() {
     handleRetryPhase(retryModal.outputKey, tier, retryFeedback)
   }
 
+  const handleKeywordUpload = async (file: File) => {
+    setKeywordUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const response = await fetch(`/api/jobs/${id}/keyword-report`, {
+        method: 'POST',
+        body: formData,
+      })
+      if (response.ok) {
+        const data = await response.json()
+        toast(`Keyword report uploaded: ${data.filename}`, 'success')
+        await fetchKeywordReports()
+      } else {
+        const data = await response.json()
+        toast(data.detail || 'Failed to upload keyword report', 'error')
+      }
+    } catch (err) {
+      console.error('Failed to upload keyword report:', err)
+      toast('Failed to upload keyword report', 'error')
+    } finally {
+      setKeywordUploading(false)
+      if (keywordInputRef.current) keywordInputRef.current.value = ''
+    }
+  }
+
   const closeModal = () => {
     setViewingOutput(null)
     // Return focus to trigger button
@@ -382,9 +431,21 @@ export default function JobDetail() {
           >
             &#8592; Back
           </button>
-          <h1 className="text-2xl font-bold text-white">
-            {job.project_name}
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-white">
+              {job.project_name}
+            </h1>
+            {job.content_type === 'short' && (
+              <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-rose-600 text-white">
+                Short
+              </span>
+            )}
+            {job.content_type === 'clip' && (
+              <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-amber-600 text-white">
+                Clip
+              </span>
+            )}
+          </div>
           <p className="text-gray-400">
             Job #{job.id}
             {job.current_phase && job.status === 'in_progress' && (
@@ -751,6 +812,48 @@ export default function JobDetail() {
           </div>
         </div>
       )}
+
+      {/* Keyword Report Upload */}
+      <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-medium text-white">SEMRush Keyword Report</h2>
+          <div className="flex items-center gap-2">
+            <input
+              ref={keywordInputRef}
+              type="file"
+              accept=".csv,.txt,.tsv"
+              className="hidden"
+              id="keyword-report-input"
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (file) handleKeywordUpload(file)
+              }}
+            />
+            <label
+              htmlFor="keyword-report-input"
+              className={`px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-sm cursor-pointer transition-colors ${keywordUploading ? 'opacity-50 pointer-events-none' : ''}`}
+            >
+              {keywordUploading ? 'Uploading...' : 'Upload Report'}
+            </label>
+          </div>
+        </div>
+        {keywordReports.length === 0 ? (
+          <p className="text-sm text-gray-500">
+            No keyword reports uploaded. Upload a SEMRush CSV export to enrich the SEO phase.
+          </p>
+        ) : (
+          <ul className="space-y-1">
+            {keywordReports.map((report) => (
+              <li key={report.filename} className="flex items-center justify-between text-sm">
+                <span className="text-gray-300 font-mono">{report.filename}</span>
+                {report.uploaded_at && (
+                  <span className="text-gray-500 text-xs">{report.uploaded_at}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
       {/* Screengrabs (inline) */}
       {job.media_id && (
