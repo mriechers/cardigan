@@ -68,6 +68,10 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
     "gpt-4o": {"input": 2.50, "output": 10.00},
     "gpt-4o-mini": {"input": 0.15, "output": 0.60},
     "claude-3-5-sonnet-latest": {"input": 3.00, "output": 15.00},
+    # Claude via OpenRouter — tier 0/1/2 (pricing per 1M tokens)
+    "anthropic/claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.00},
+    "anthropic/claude-sonnet-4-5-20250514": {"input": 3.00, "output": 15.00},
+    "anthropic/claude-opus-4-5-20250514": {"input": 15.00, "output": 75.00},
     "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
     "gemini-1.5-flash-8b": {"input": 0.0375, "output": 0.15},
     "gemini-1.5-pro": {"input": 1.25, "output": 5.00},

@@ -396,6 +396,8 @@ class JobWorker:
                             "tokens": p.get("tokens", 0),
                             "completed_at": p.get("completed_at"),
                         }
+                        if feedback:
+                            prev_run["feedback"] = feedback
                         previous_runs = p.get("previous_runs") or []
                         previous_runs.append(prev_run)
                         p["previous_runs"] = previous_runs
@@ -2275,6 +2277,15 @@ Output a QA report with:
 ---
 
 Provide a detailed analysis document."""
+            editorial_feedback = context.get("_editorial_feedback")
+            if editorial_feedback:
+                prompt += f"""
+
+## Editorial Feedback
+
+The editor reviewed the previous analysis and requests these changes:
+
+{editorial_feedback}"""
             return prompt
 
         elif phase_name == "formatter":
@@ -2303,6 +2314,15 @@ Please format this transcript:
 ---
 {transcript}
 ---"""
+            editorial_feedback = context.get("_editorial_feedback")
+            if editorial_feedback:
+                prompt += f"""
+
+## Editorial Feedback
+
+The editor reviewed the formatted transcript and requests these changes:
+
+{editorial_feedback}"""
             return prompt
 
         elif phase_name == "seo":
@@ -2322,17 +2342,36 @@ And this formatted transcript:
 ---
 
 Generate SEO metadata as a markdown report."""
+            editorial_feedback = context.get("_editorial_feedback")
+            if editorial_feedback:
+                prompt += f"""
+
+## Editorial Feedback
+
+The editor reviewed the SEO metadata and requests these changes:
+
+{editorial_feedback}"""
             return prompt
 
         elif phase_name == "copy_editor":
             formatted = context.get("formatter_output", "")
-            return f"""Please review and polish this formatted transcript:
+            prompt = f"""Please review and polish this formatted transcript:
 
 ---
 {formatted}
 ---
 
 Apply PBS style guidelines and improve readability while preserving speaker voice."""
+            editorial_feedback = context.get("_editorial_feedback")
+            if editorial_feedback:
+                prompt += f"""
+
+## Editorial Feedback
+
+The editor reviewed the copy-edited transcript and requests these changes:
+
+{editorial_feedback}"""
+            return prompt
 
         elif phase_name == "manager":
             analysis = context.get("analyst_output", "")
@@ -2391,6 +2430,15 @@ The system performed an automated word-count completeness check on the formatter
 ---
 
 Review all outputs against PBS Wisconsin quality standards and provide your QA report."""
+            editorial_feedback = context.get("_editorial_feedback")
+            if editorial_feedback:
+                prompt += f"""
+
+## Editorial Feedback
+
+The editor reviewed the QA report and requests these changes:
+
+{editorial_feedback}"""
             return prompt
 
         elif phase_name == "timestamp":

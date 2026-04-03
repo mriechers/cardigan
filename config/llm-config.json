@@ -78,7 +78,7 @@
       "type": "openrouter",
       "endpoint": "https://openrouter.ai/api/v1/chat/completions",
       "preset": "ai-editorial-assistant",
-      "fallback_model": "google/gemini-2.5-flash",
+      "fallback_model": "anthropic/claude-sonnet-4-5-20250514",
       "api_key_env": "OPENROUTER_API_KEY",
       "timeout": 180,
       "cost_per_project": 0.02
@@ -87,7 +87,7 @@
       "type": "openrouter",
       "endpoint": "https://openrouter.ai/api/v1/chat/completions",
       "preset": "ai-editorial-assistant-big-brain",
-      "fallback_model": "google/gemini-2.5-flash",
+      "fallback_model": "anthropic/claude-opus-4-5-20250514",
       "api_key_env": "OPENROUTER_API_KEY",
       "timeout": 300,
       "cost_per_project": 0.1
@@ -96,7 +96,7 @@
       "type": "openrouter",
       "endpoint": "https://openrouter.ai/api/v1/chat/completions",
       "preset": "ai-editorial-assistant-cheapskate",
-      "fallback_model": "google/gemini-2.5-flash",
+      "fallback_model": "anthropic/claude-haiku-4-5-20251001",
       "api_key_env": "OPENROUTER_API_KEY",
       "timeout": 300,
       "cost_per_project": 0.0,
@@ -135,9 +135,9 @@
       "openrouter-big-brain"
     ],
     "tier_labels": [
-      "cheapskate",
-      "default",
-      "big-brain"
+      "Claude Haiku",
+      "Claude Sonnet",
+      "Claude Opus"
     ],
     "duration_thresholds": [
       {
@@ -185,31 +185,31 @@
   },
   "openrouter_presets": {
     "ai-editorial-assistant": {
-      "description": "General use - balanced cost/quality",
+      "description": "Default tier — Claude Sonnet via OpenRouter",
       "models": [
+        "anthropic/claude-sonnet-4-5-20250514",
         "google/gemini-3-flash-preview",
-        "anthropic/claude-sonnet-4.5",
         "openai/gpt-5.1-codex-mini"
       ],
-      "models_verified": "2026-01-29"
+      "models_verified": "2026-04-02"
     },
     "ai-editorial-assistant-big-brain": {
-      "description": "Complex reasoning - higher quality models",
+      "description": "Big Brain tier — Claude Opus via OpenRouter",
       "models": [
+        "anthropic/claude-opus-4-5-20250514",
         "google/gemini-3-pro-preview",
-        "openai/gpt-5.1-codex",
-        "anthropic/claude-opus-4.5"
+        "openai/gpt-5.1-codex"
       ],
-      "models_verified": "2026-01-29"
+      "models_verified": "2026-04-02"
     },
     "ai-editorial-assistant-cheapskate": {
-      "description": "Free tier models for simple formatting tasks",
+      "description": "Cheapskate tier — Claude Haiku via OpenRouter",
       "models": [
+        "anthropic/claude-haiku-4-5-20251001",
         "openai/gpt-oss-120b",
-        "moonshotai/kimi-k2-0711",
-        "nvidia/nemotron-nano-12b-v2-vl"
+        "moonshotai/kimi-k2-0711"
       ],
-      "models_verified": "2026-01-29"
+      "models_verified": "2026-04-02"
     }
   },
   "safety": {

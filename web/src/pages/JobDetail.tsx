@@ -18,6 +18,7 @@ interface PreviousRun {
   cost?: number
   tokens?: number
   completed_at?: string
+  feedback?: string
 }
 
 interface JobPhase {
@@ -104,6 +105,9 @@ export default function JobDetail() {
   const [sstMetadata, setSstMetadata] = useState<SSTMetadata | null>(null)
   const [sstLoading, setSstLoading] = useState(false)
   const [retryingPhase, setRetryingPhase] = useState<string | null>(null)
+  const [retryModal, setRetryModal] = useState<{ outputKey: string; label: string } | null>(null)
+  const [retryFeedback, setRetryFeedback] = useState('')
+  const [retryTier, setRetryTier] = useState<string>('')
   const [showChat, setShowChat] = useState(false)
   const [showScreengrabs, setShowScreengrabs] = useState(false)
   const [hasScreengrabs, setHasScreengrabs] = useState(false)
@@ -235,11 +239,20 @@ export default function JobDetail() {
     }
   }
 
-  const handleRetryPhase = async (outputKey: string) => {
+  const handleRetryPhase = async (outputKey: string, tier?: number, feedback?: string) => {
     setRetryingPhase(outputKey)
+    setRetryModal(null)
+    setRetryFeedback('')
+    setRetryTier('')
     try {
+      const body: { tier?: number; feedback?: string } = {}
+      if (tier !== undefined) body.tier = tier
+      if (feedback && feedback.trim()) body.feedback = feedback.trim()
+
       const response = await fetch(`/api/jobs/${id}/phases/${outputKey}/retry`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
       })
       if (response.ok) {
         toast('Phase retry started. Refresh in a moment to see results.', 'success')
@@ -260,6 +273,18 @@ export default function JobDetail() {
     } finally {
       setRetryingPhase(null)
     }
+  }
+
+  const openRetryModal = (outputKey: string, label: string) => {
+    setRetryModal({ outputKey, label })
+    setRetryFeedback('')
+    setRetryTier('')
+  }
+
+  const submitRetryModal = () => {
+    if (!retryModal) return
+    const tier = retryTier !== '' ? parseInt(retryTier, 10) : undefined
+    handleRetryPhase(retryModal.outputKey, tier, retryFeedback)
   }
 
   const closeModal = () => {
@@ -696,12 +721,23 @@ export default function JobDetail() {
                     <span className="mr-2">&#128196;</span>
                     {label}
                   </button>
+                  <a
+                    href={`/api/jobs/${id}/outputs/${actualFilename}?download=true`}
+                    download={actualFilename}
+                    className="px-2 py-2 bg-gray-600 hover:bg-blue-600 text-gray-300 hover:text-white transition-colors"
+                    aria-label={`Download ${label}`}
+                    title={`Download ${label}`}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                  </a>
                   <button
-                    onClick={() => handleRetryPhase(key)}
+                    onClick={() => openRetryModal(key, label)}
                     disabled={isRetrying || retryingPhase !== null}
                     className="px-2 py-2 bg-gray-600 hover:bg-orange-600 rounded-r-md text-sm text-gray-300 hover:text-white transition-colors disabled:opacity-50"
                     aria-label={`Retry ${label}`}
-                    title={`Regenerate ${label} (escalates to next tier)`}
+                    title={`Regenerate ${label}`}
                   >
                     {isRetrying ? (
                       <span className="animate-spin">&#8635;</span>
@@ -820,6 +856,80 @@ export default function JobDetail() {
           })()}
         </div>
       </div>
+
+      {/* Phase Retry Modal */}
+      {retryModal && (
+        <div
+          className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
+          onClick={() => setRetryModal(null)}
+        >
+          <div
+            className="bg-gray-900 rounded-lg border border-gray-700 w-full max-w-md"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="retry-modal-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+              <h3 id="retry-modal-title" className="text-base font-medium text-white">
+                Retry: {retryModal.label}
+              </h3>
+              <button
+                onClick={() => setRetryModal(null)}
+                className="text-gray-400 hover:text-white text-2xl leading-none"
+                aria-label="Close retry dialog"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div>
+                <label htmlFor="retry-tier" className="block text-sm text-gray-300 mb-1">
+                  Model tier
+                </label>
+                <select
+                  id="retry-tier"
+                  value={retryTier}
+                  onChange={(e) => setRetryTier(e.target.value)}
+                  className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                >
+                  <option value="">Auto-escalate (recommended)</option>
+                  <option value="0">Cheapskate (tier 0)</option>
+                  <option value="1">Default (tier 1)</option>
+                  <option value="2">Big Brain (tier 2)</option>
+                </select>
+              </div>
+              <div>
+                <label htmlFor="retry-feedback" className="block text-sm text-gray-300 mb-1">
+                  Editorial feedback <span className="text-gray-500">(optional)</span>
+                </label>
+                <textarea
+                  id="retry-feedback"
+                  value={retryFeedback}
+                  onChange={(e) => setRetryFeedback(e.target.value)}
+                  placeholder="Optional: describe what to change..."
+                  rows={4}
+                  className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 resize-y"
+                />
+              </div>
+              <div className="flex gap-3 justify-end pt-1">
+                <button
+                  onClick={() => setRetryModal(null)}
+                  className="px-4 py-2 text-sm text-gray-300 hover:text-white transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={submitRetryModal}
+                  className="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white text-sm rounded transition-colors"
+                >
+                  Retry
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Output Viewer Modal */}
       {viewingOutput && (

@@ -11,7 +11,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from api.models.events import EventCreate, EventData, EventType, SessionEvent
 from api.models.job import Job, JobStatus, JobUpdate, PhaseStatus
@@ -355,7 +355,7 @@ async def get_job_events(job_id: int):
 
 
 @router.get("/{job_id}/outputs/{filename}")
-async def get_job_output(job_id: int, filename: str):
+async def get_job_output(job_id: int, filename: str, download: bool = Query(default=False)):
     """Retrieve an output file for a specific job.
 
     Returns the contents of a generated output file (markdown, json, etc.).
@@ -364,6 +364,7 @@ async def get_job_output(job_id: int, filename: str):
     Args:
         job_id: Job ID to get output for
         filename: Name of the output file (e.g., analyst_output.md)
+        download: If True, set Content-Disposition header to trigger browser download
 
     Returns:
         File contents as plain text
@@ -417,10 +418,11 @@ async def get_job_output(job_id: int, filename: str):
     content = file_path.read_text(encoding="utf-8")
 
     # Determine content type
-    if filename.endswith(".json"):
-        return PlainTextResponse(content, media_type="application/json")
-    else:
-        return PlainTextResponse(content, media_type="text/markdown")
+    media_type = "application/json" if filename.endswith(".json") else "text/markdown"
+    headers = {}
+    if download:
+        headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return PlainTextResponse(content, media_type=media_type, headers=headers)
 
 
 @router.get("/{job_id}/sst-metadata", response_model=SSTMetadata)
@@ -476,6 +478,23 @@ async def get_sst_metadata(job_id: int):
         raise HTTPException(status_code=502, detail="Failed to fetch metadata from Airtable")
 
 
+class PhaseRetryRequest(BaseModel):
+    """Request body for phase retry with optional tier override and editorial feedback."""
+
+    tier: Optional[int] = Field(
+        None,
+        ge=0,
+        le=2,
+        description="Force specific tier: 0=cheapskate, 1=default, 2=big-brain. "
+        "If not specified, auto-escalates from the tier previously used.",
+    )
+    feedback: Optional[str] = Field(
+        None,
+        description="Editorial feedback to guide the retry (e.g., 'add a chapter for topic X', "
+        "'merge the first two chapters'). Injected into the agent prompt.",
+    )
+
+
 class PhaseRetryResponse(BaseModel):
     """Response for phase retry request."""
 
@@ -501,31 +520,24 @@ async def retry_phase(
     job_id: int,
     phase_name: str,
     background_tasks: BackgroundTasks,
-    tier: Optional[int] = Query(
-        default=None,
-        ge=0,
-        le=2,
-        description="Force specific tier: 0=cheapskate, 1=default, 2=big-brain. "
-        "If not specified, auto-escalates from the tier previously used.",
-    ),
-    feedback: Optional[str] = Query(
-        default=None,
-        description="Editorial feedback to guide the retry (e.g., 'add a chapter for topic X', "
-        "'merge the first two chapters'). Injected into the agent prompt.",
-    ),
+    body: PhaseRetryRequest = None,
 ):
-    """Retry a single phase for a job with automatic escalation.
+    """Retry a single phase for a job with optional tier override and editorial feedback.
 
     Re-runs one output (e.g., timestamp) without re-running the entire
-    pipeline. If no tier is specified, automatically escalates to the
-    next tier above what was previously used for this phase.
+    pipeline. If no tier is specified in the request body, automatically
+    escalates to the next tier above what was previously used for this phase.
+
+    Accepts an optional JSON body with:
+      - tier: 0=cheapskate, 1=default, 2=big-brain (omit to auto-escalate)
+      - feedback: editorial guidance injected into the agent prompt
 
     Args:
         job_id: Job ID to retry a phase for
-        phase_name: Phase name (analyst, formatter, seo, manager, timestamp)
-                   OR output key (analysis, seo_metadata, timestamp_report, etc.)
-        tier: Optional tier override (0=cheapskate, 1=default, 2=big-brain).
-              If omitted, auto-escalates from previous tier.
+        phase_name: Phase name (analyst, formatter, seo, manager, timestamp,
+                    copy_editor) OR output key (analysis, seo_metadata,
+                    timestamp_report, etc.)
+        body: Optional JSON body with tier and/or feedback fields
 
     Returns:
         PhaseRetryResponse with status
@@ -533,6 +545,10 @@ async def retry_phase(
     Raises:
         HTTPException: 404 if job not found, 400 if invalid phase
     """
+    if body is None:
+        body = PhaseRetryRequest()
+    tier = body.tier
+    feedback = body.feedback
     # Map output key to phase name if needed
     if phase_name in OUTPUT_TO_PHASE:
         phase_name = OUTPUT_TO_PHASE[phase_name]
