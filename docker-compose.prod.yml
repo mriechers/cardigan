@@ -69,7 +69,7 @@ services:
       - "8080:8080"
     env_file: .env
     environment:
-      - MCP_TRANSPORT=sse
+      - MCP_TRANSPORT=http
       - EDITORIAL_API_URL=http://api:8000
       - DATABASE_PATH=/data/db/dashboard.db
       - OUTPUT_DIR=/data/output

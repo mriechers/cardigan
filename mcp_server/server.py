@@ -23,6 +23,7 @@ NOTE: Airtable access is READ-ONLY. No write operations are permitted.
 """
 
 import asyncio
+import contextlib
 import importlib.util
 import json
 import logging
@@ -1481,44 +1482,39 @@ async def main():
 
     Supports two transport modes:
     - stdio (default): For local Claude Desktop subprocess spawning
-    - sse: For Docker/HTTP environments where subprocess spawning isn't available
+    - http: For Docker/HTTP environments with Streamable HTTP transport
 
-    Set MCP_TRANSPORT=sse to use SSE transport on port 8080.
+    Set MCP_TRANSPORT=http to use Streamable HTTP transport on port 8080.
+    Legacy value MCP_TRANSPORT=sse is accepted for backward compatibility.
     """
     transport = os.environ.get("MCP_TRANSPORT", "stdio")
 
-    if transport == "sse":
-        # SSE transport for Docker/HTTP environments
+    if transport in ("http", "sse"):  # Accept "sse" for backward compat
         import uvicorn
-        from mcp.server.sse import SseServerTransport
+        from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
         from starlette.applications import Starlette
-        from starlette.responses import Response
-        from starlette.routing import Route
+        from starlette.routing import Mount
 
-        # Create SSE transport
-        sse = SseServerTransport("/messages")
+        session_manager = StreamableHTTPSessionManager(
+            app=server,
+            json_response=False,
+            stateless=False,
+            session_idle_timeout=1800,  # 30 min idle cleanup
+        )
 
-        async def handle_sse(request):
-            """Handle SSE connection endpoint."""
-            async with sse.connect_sse(request.scope, request.receive, request._send) as streams:
-                await server.run(streams[0], streams[1], server.create_initialization_options())
-            return Response()
+        @contextlib.asynccontextmanager
+        async def lifespan(app):
+            async with session_manager.run():
+                yield
 
-        async def handle_post_message(request):
-            """Handle message POST endpoint."""
-            await sse.handle_post_message(request.scope, request.receive, request._send)
-            return Response()
-
-        # Create Starlette app with SSE routes
         app = Starlette(
             debug=False,
+            lifespan=lifespan,
             routes=[
-                Route("/sse", endpoint=handle_sse),
-                Route("/messages", endpoint=handle_post_message, methods=["POST"]),
+                Mount("/mcp", app=session_manager.handle_request),
             ],
         )
 
-        # Run SSE server (must use async serve() since we're already in an event loop)
         config = uvicorn.Config(app, host="0.0.0.0", port=8080, log_level="info")
         srv = uvicorn.Server(config)
         await srv.serve()
