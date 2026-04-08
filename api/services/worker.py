@@ -541,9 +541,7 @@ class JobWorker:
 
             # Detect content type (short/clip/full) for routing decisions
             srt_path_for_detection = self._find_srt_file(job)
-            content_type = self._detect_content_type(
-                transcript_metrics, srt_path_for_detection, sst_context
-            )
+            content_type = self._detect_content_type(transcript_metrics, srt_path_for_detection, sst_context)
             logger.info(
                 "Content type detected",
                 extra={"job_id": job_id, "content_type": content_type},
@@ -1190,10 +1188,7 @@ class JobWorker:
         if sst_context:
             for field_value in sst_context.values():
                 if isinstance(field_value, str) and "Clip" in field_value:
-                    if any(
-                        marker in field_value
-                        for marker in ("Full-Length", "Livestream")
-                    ):
+                    if any(marker in field_value for marker in ("Full-Length", "Livestream")):
                         return "clip"
 
         # Check duration threshold for Shorts.

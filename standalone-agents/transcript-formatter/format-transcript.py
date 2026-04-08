@@ -26,10 +26,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-
 # ---------------------------------------------------------------------------
 # SRT parsing (self-contained — no Cardigan imports needed)
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class SRTCaption:
@@ -158,11 +158,13 @@ def split_srt_into_chunks(captions: list[SRTCaption]) -> list[Chunk]:
                 if ov_caps:
                     overlap = generate_srt(ov_caps)
 
-            chunks.append(Chunk(
-                index=len(chunks),
-                content=generate_srt(chunk_captions),
-                overlap_prefix=overlap,
-            ))
+            chunks.append(
+                Chunk(
+                    index=len(chunks),
+                    content=generate_srt(chunk_captions),
+                    overlap_prefix=overlap,
+                )
+            )
 
             chunk_start = break_idx + 1
             accumulated = 0
@@ -179,11 +181,13 @@ def split_srt_into_chunks(captions: list[SRTCaption]) -> list[Chunk]:
             ov_caps = captions[ov_start:chunk_start]
             if ov_caps:
                 overlap = generate_srt(ov_caps)
-        chunks.append(Chunk(
-            index=len(chunks),
-            content=generate_srt(remaining),
-            overlap_prefix=overlap,
-        ))
+        chunks.append(
+            Chunk(
+                index=len(chunks),
+                content=generate_srt(remaining),
+                overlap_prefix=overlap,
+            )
+        )
 
     return chunks
 
@@ -191,6 +195,7 @@ def split_srt_into_chunks(captions: list[SRTCaption]) -> list[Chunk]:
 # ---------------------------------------------------------------------------
 # Merging
 # ---------------------------------------------------------------------------
+
 
 def merge_chunks(formatted_chunks: list[str]) -> str:
     """Merge formatted outputs into a single document."""
@@ -229,7 +234,9 @@ def merge_chunks(formatted_chunks: list[str]) -> str:
             body = re.sub(r"^#\s+Formatted Transcript\s*\n?", "", body, flags=re.MULTILINE)
             body = re.sub(
                 r"^\*\*(?:Project|Program|Duration|Date|Air Date|Media ID):\*\*.*\n?",
-                "", body, flags=re.MULTILINE,
+                "",
+                body,
+                flags=re.MULTILINE,
             )
             body = re.sub(r"^---+\s*\n?", "", body.strip(), flags=re.MULTILINE)
             body = body.strip()
@@ -425,6 +432,7 @@ async def run(
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Format an SRT transcript using Gemini API with PBS Wisconsin editorial standards.",
@@ -442,14 +450,16 @@ def main():
         print(f"Error: File not found: {args.srt_file}", file=sys.stderr)
         sys.exit(1)
 
-    asyncio.run(run(
-        srt_path=args.srt_file,
-        speakers=args.speakers,
-        program=args.program,
-        output_path=args.output,
-        model=args.model,
-        max_parallel=args.parallel,
-    ))
+    asyncio.run(
+        run(
+            srt_path=args.srt_file,
+            speakers=args.speakers,
+            program=args.program,
+            output_path=args.output,
+            model=args.model,
+            max_parallel=args.parallel,
+        )
+    )
 
 
 if __name__ == "__main__":
