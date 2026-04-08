@@ -69,7 +69,7 @@ services:
       - "8080:8080"
     env_file: .env
     environment:
-      - MCP_TRANSPORT=sse
+      - MCP_TRANSPORT=http
       - EDITORIAL_API_URL=http://api:8000
       - DATABASE_PATH=/data/db/dashboard.db
       - OUTPUT_DIR=/data/output
@@ -81,6 +81,8 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
     profiles:
       - mcp
     restart: unless-stopped
@@ -108,7 +110,7 @@ services:
       - ${DOCKER_CONFIG:-/root/.docker}/config.json:/config.json:ro
     environment:
       - WATCHTOWER_CLEANUP=true
-      - WATCHTOWER_POLL_INTERVAL=300
+      - WATCHTOWER_POLL_INTERVAL=30
       # Only update containers with the watchtower.enable=true label
       - WATCHTOWER_LABEL_ENABLE=true
     restart: unless-stopped
