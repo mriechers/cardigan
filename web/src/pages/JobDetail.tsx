@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -169,7 +169,7 @@ export default function JobDetail() {
   }, [id, job?.airtable_record_id])
 
   // Fetch keyword reports for this job
-  const fetchKeywordReports = async () => {
+  const fetchKeywordReports = useCallback(async () => {
     if (!id) return
     try {
       const response = await fetch(`/api/jobs/${id}/keyword-reports`)
@@ -181,11 +181,11 @@ export default function JobDetail() {
       // Silently fail
       console.error('Failed to fetch keyword reports:', err)
     }
-  }
+  }, [id])
 
   useEffect(() => {
     if (id) fetchKeywordReports()
-  }, [id])
+  }, [id, fetchKeywordReports])
 
   // Check for available screengrabs when job has a media_id
   useEffect(() => {
