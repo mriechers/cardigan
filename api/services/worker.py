@@ -264,7 +264,7 @@ class JobWorker:
             self._heartbeat_task.cancel()
 
     async def retry_single_phase(
-        self, job_id: int, phase_name: str, force_tier: Optional[int] = None
+        self, job_id: int, phase_name: str, force_tier: Optional[int] = None, feedback: Optional[str] = None
     ) -> Dict[str, Any]:
         """Retry a single phase for a completed job.
 
@@ -275,6 +275,7 @@ class JobWorker:
             job_id: The job ID to retry a phase for
             phase_name: The phase to retry (e.g., 'timestamp', 'seo', 'analyst')
             force_tier: Optional tier override (0=cheapskate, 1=default, 2=big-brain)
+            feedback: Optional editorial feedback to guide the retry
 
         Returns:
             Dict with status, phase result, and any errors
@@ -303,6 +304,7 @@ class JobWorker:
         context = {
             "project_name": job_dict.get("project_name") or "Unknown",
             "transcript_file": job_dict.get("transcript_file", ""),
+            "project_path": project_path,
             "transcript_metrics": {
                 "word_count": job_dict.get("word_count") or 0,
                 "estimated_duration_minutes": job_dict.get("duration_minutes") or 0,
@@ -350,6 +352,14 @@ class JobWorker:
                 },
             )
 
+        # Inject editorial feedback if provided
+        if feedback:
+            context["_editorial_feedback"] = feedback
+            logger.info(
+                "Including editorial feedback in retry",
+                extra={"job_id": job_id, "phase": phase_name, "feedback_length": len(feedback)},
+            )
+
         # Run the phase
         try:
             logger.info("Retrying single phase", extra={"job_id": job_id, "phase": phase_name})
@@ -387,6 +397,8 @@ class JobWorker:
                             "tokens": p.get("tokens", 0),
                             "completed_at": p.get("completed_at"),
                         }
+                        if feedback:
+                            prev_run["feedback"] = feedback
                         previous_runs = p.get("previous_runs") or []
                         previous_runs.append(prev_run)
                         p["previous_runs"] = previous_runs
@@ -527,6 +539,28 @@ class JobWorker:
                     "SST context loaded", extra={"job_id": job_id, "sst_title": sst_context.get("title", "Unknown")}
                 )
 
+            # Detect content type (short/clip/full) for routing decisions
+            srt_path_for_detection = self._find_srt_file(job)
+            content_type = self._detect_content_type(transcript_metrics, srt_path_for_detection, sst_context)
+            logger.info(
+                "Content type detected",
+                extra={"job_id": job_id, "content_type": content_type},
+            )
+
+            # Persist content_type to the database
+            try:
+                from api.models.job import JobUpdate
+                from api.services.database import update_job
+
+                await update_job(job_id, JobUpdate(content_type=content_type))
+                # Also propagate into job dict so _should_run_timestamp_phase can read it
+                job["content_type"] = content_type
+            except Exception as e:
+                logger.warning(
+                    "Failed to persist content_type (non-fatal)",
+                    extra={"job_id": job_id, "error": str(e)},
+                )
+
             # Get existing phases or initialize
             phases = job.get("phases") or []
             if isinstance(phases, str):
@@ -539,7 +573,16 @@ class JobWorker:
                 "project_path": project_path,
                 "transcript_metrics": transcript_metrics,
                 "sst_context": sst_context,  # Add SST context to processing context
+                "content_type": content_type,  # Expose content_type for prompt building
             }
+
+            # For Shorts, force all phases to cheapskate tier (tier 0)
+            if content_type == "short":
+                context["_force_tier"] = 0
+                logger.info(
+                    "Shorts content: forcing cheapskate tier for all phases",
+                    extra={"job_id": job_id},
+                )
 
             truncation_paused = False
 
@@ -568,7 +611,9 @@ class JobWorker:
                             "forced_tier": existing_phase["metadata"]["forced_tier"],
                         },
                     )
-                else:
+                elif context.get("content_type") != "short":
+                    # Only clear _force_tier if this isn't Shorts content.
+                    # Shorts keep the cheapskate tier override set above.
                     context.pop("_force_tier", None)
 
                 # Process phase
@@ -1122,6 +1167,39 @@ class JobWorker:
         # Fall back to transcript metrics (estimated from word count)
         return transcript_metrics.get("estimated_duration_minutes", 0)
 
+    def _detect_content_type(
+        self,
+        transcript_metrics: Dict[str, Any],
+        srt_path: Optional[Path],
+        sst_context: Optional[Dict[str, Any]],
+    ) -> str:
+        """Detect the content type based on duration and SST metadata.
+
+        Returns one of: 'full', 'short', 'clip'.
+
+        Detection logic:
+        - If duration < 90 seconds (1.5 minutes) -> 'short'
+        - If SST context indicates Clip content type -> 'clip'
+        - Otherwise -> 'full'
+        """
+        # Check SST context for explicit clip classification first.
+        # Looks for Airtable picker-style fields like "Full-Length, Clip, Livestream"
+        # that contain "Clip" as a selected value.
+        if sst_context:
+            for field_value in sst_context.values():
+                if isinstance(field_value, str) and "Clip" in field_value:
+                    if any(marker in field_value for marker in ("Full-Length", "Livestream")):
+                        return "clip"
+
+        # Check duration threshold for Shorts.
+        # 90-second threshold is intentionally higher than YouTube's 60s limit
+        # to catch near-Shorts content.
+        duration_minutes = self._get_content_duration_minutes(transcript_metrics, srt_path)
+        if 0 < duration_minutes < 1.5:
+            return "short"
+
+        return "full"
+
     def _should_run_timestamp_phase(
         self, job: Dict[str, Any], transcript_metrics: Dict[str, Any], srt_path: Optional[Path]
     ) -> bool:
@@ -1129,7 +1207,8 @@ class JobWorker:
 
         Timestamp phase runs when:
         1. An SRT file exists AND
-        2. Content is 30+ minutes OR job explicitly requests it
+        2. Content is not a Short (content_type != 'short') AND
+        3. Content is 10+ minutes OR job explicitly requests it
 
         Returns:
             True if timestamp phase should run, False otherwise.
@@ -1137,6 +1216,15 @@ class JobWorker:
         # No SRT file = no timestamp phase
         if not srt_path or not srt_path.exists():
             logger.debug("Skipping timestamp phase: no SRT file", extra={"job_id": job.get("id")})
+            return False
+
+        # Shorts never get timestamp phase — too short to need chapter markers
+        content_type = job.get("content_type")
+        if content_type == "short":
+            logger.info(
+                "Skipping timestamp phase: Short content does not need chapter markers",
+                extra={"job_id": job.get("id")},
+            )
             return False
 
         # Check for explicit request in job
@@ -1530,10 +1618,12 @@ class JobWorker:
             """Process a single chunk through the formatter LLM."""
             async with semaphore:
                 # Verbatim preservation instruction (applies to all chunks)
-                verbatim_instruction = """CRITICAL: You MUST preserve ALL spoken dialogue. Do NOT summarize, condense, or paraphrase.
-Every sentence spoken in the transcript must appear in your output. You may remove filler words
-(um, uh) and fix grammar, but do NOT drop or merge sentences. Completeness is more important than brevity.
-If a caption is garbled or unclear, include your best reconstruction rather than dropping it. NEVER silently omit content."""
+                verbatim_instruction = """CRITICAL: You MUST preserve ALL spoken dialogue VERBATIM. Do NOT summarize, condense, paraphrase, or reword.
+Every sentence spoken in the transcript must appear in your output using the speaker's actual words.
+You may remove filler words (um, uh) and fix grammar/punctuation, but do NOT rephrase, rewrite, or generate new copy.
+If the speaker said it, those exact words must appear in the output. Do NOT substitute your own phrasing.
+If a caption is garbled or unclear, include your best reconstruction rather than dropping it. NEVER silently omit content.
+SPELLING: Always use "partisan" (not "partizan"), "bipartisan" (not "bipartisan"). Program names like "Inside Wisconsin Politics" are NOT italicized."""
 
                 if chunk.index == 0:
                     # First chunk: normal formatter prompt
@@ -1556,6 +1646,7 @@ The previous section ended with:
 {chunk.overlap_prefix}
 ---
 Continue formatting from where the previous section left off. Do NOT repeat content from the overlap above.
+CRITICAL: Pay careful attention to which speaker is talking. Use the overlap above to identify who was speaking last and maintain correct attribution. Getting the wrong name on a statement is worse than using a generic label.
 
 Using the following analysis as guidance:
 ---
@@ -2247,6 +2338,9 @@ Output a QA report with:
 
             sst_section += "\n*Use this context to align your analysis with existing metadata. Speaker names from SST are authoritative.*\n\n"
 
+        # Detect content type for Shorts-specific prompt adjustments
+        content_type = context.get("content_type", "full")
+
         # Load Wisconsin proper-noun reference for analyst and formatter phases
         wi_reference = ""
         if phase_name in ("analyst", "formatter"):
@@ -2255,7 +2349,14 @@ Output a QA report with:
                 wi_reference = f"\n## Wisconsin Proper-Noun Reference\n\n{wi_ref_path.read_text()}\n\n"
 
         if phase_name == "analyst":
-            prompt = """Please analyze the following transcript:
+            if content_type == "short":
+                prompt = (
+                    "This is a YouTube Short (under 90 seconds). Provide a brief analysis focused on the "
+                    "single topic. Do not create a structural breakdown — focus on identifying the core "
+                    "message, target audience, and 3-5 keywords.\n\n"
+                )
+            else:
+                prompt = """Please analyze the following transcript:
 """
             if sst_section:
                 prompt += sst_section
@@ -2266,6 +2367,15 @@ Output a QA report with:
 ---
 
 Provide a detailed analysis document."""
+            editorial_feedback = context.get("_editorial_feedback")
+            if editorial_feedback:
+                prompt += f"""
+
+## Editorial Feedback
+
+The editor reviewed the previous analysis and requests these changes:
+
+{editorial_feedback}"""
             return prompt
 
         elif phase_name == "formatter":
@@ -2294,12 +2404,28 @@ Please format this transcript:
 ---
 {transcript}
 ---"""
+            editorial_feedback = context.get("_editorial_feedback")
+            if editorial_feedback:
+                prompt += f"""
+
+## Editorial Feedback
+
+The editor reviewed the formatted transcript and requests these changes:
+
+{editorial_feedback}"""
             return prompt
 
         elif phase_name == "seo":
             analysis = context.get("analyst_output", "")
             formatted = context.get("formatter_output", "")
-            prompt = "Based on this analysis:\n\n"
+            if content_type == "short":
+                prompt = (
+                    "This is a YouTube Short. Optimize metadata for YouTube Shorts discovery: "
+                    "title under 40 characters, include #Shorts hashtag, focus on vertical video tags, "
+                    "and write a description under 200 characters.\n\n"
+                )
+            else:
+                prompt = "Based on this analysis:\n\n"
             if sst_section:
                 prompt += sst_section
             prompt += f"""---
@@ -2313,23 +2439,64 @@ And this formatted transcript:
 ---
 
 Generate SEO metadata as a markdown report."""
+            editorial_feedback = context.get("_editorial_feedback")
+            if editorial_feedback:
+                prompt += f"""
+
+## Editorial Feedback
+
+The editor reviewed the SEO metadata and requests these changes:
+
+{editorial_feedback}"""
+
+            # Inject keyword report if one exists in the project directory
+            project_path = context.get("project_path")
+            if project_path:
+                keyword_reports = sorted(Path(project_path).glob("keyword_report_v*.md"))
+                if keyword_reports:
+                    latest_report = keyword_reports[-1].read_text(encoding="utf-8")
+                    prompt += f"""
+
+## SEMRush Keyword Data
+
+The following keyword report was uploaded for this project. Use this data to inform your SEO recommendations — prioritize keywords with high search volume and low competition.
+
+---
+{latest_report}
+---"""
+
             return prompt
 
         elif phase_name == "copy_editor":
             formatted = context.get("formatter_output", "")
-            return f"""Please review and polish this formatted transcript:
+            prompt = f"""Please review and polish this formatted transcript:
 
 ---
 {formatted}
 ---
 
 Apply PBS style guidelines and improve readability while preserving speaker voice."""
+            editorial_feedback = context.get("_editorial_feedback")
+            if editorial_feedback:
+                prompt += f"""
+
+## Editorial Feedback
+
+The editor reviewed the copy-edited transcript and requests these changes:
+
+{editorial_feedback}"""
+            return prompt
 
         elif phase_name == "manager":
             analysis = context.get("analyst_output", "")
             formatted = context.get("formatter_output", "")
             seo = context.get("seo_output", "")
             prompt = "Please perform a QA review of the following pipeline outputs.\n\n"
+            if content_type == "short":
+                prompt += (
+                    "NOTE: This is a YouTube Short. QA standards are relaxed — "
+                    "shorter analysis and simplified SEO are expected.\n\n"
+                )
 
             # Add completeness check results if available
             completeness = context.get("completeness_check")
@@ -2382,6 +2549,15 @@ The system performed an automated word-count completeness check on the formatter
 ---
 
 Review all outputs against PBS Wisconsin quality standards and provide your QA report."""
+            editorial_feedback = context.get("_editorial_feedback")
+            if editorial_feedback:
+                prompt += f"""
+
+## Editorial Feedback
+
+The editor reviewed the QA report and requests these changes:
+
+{editorial_feedback}"""
             return prompt
 
         elif phase_name == "timestamp":
@@ -2420,6 +2596,17 @@ Output a timestamp report with TWO sections:
 2. **YouTube Format** - Simple list like "0:00 Introduction" for video descriptions
 
 Follow the exact format specified in your system instructions."""
+
+            # Inject editorial feedback if present
+            editorial_feedback = context.get("_editorial_feedback")
+            if editorial_feedback:
+                prompt += f"""
+
+## Editorial Feedback
+
+The editor reviewed the previous timestamp output and provided the following feedback. Incorporate these changes:
+
+{editorial_feedback}"""
             return prompt
 
         return f"Process the following:\n\n{transcript}"

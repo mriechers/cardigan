@@ -36,7 +36,17 @@ interface ScreengrabsBoxProps {
 
 // Airtable URL constants
 const AIRTABLE_BASE_ID = 'appZ2HGwhiifQToB6'
-const AIRTABLE_SST_TABLE_ID = 'tblTKFOwTvK7xw1H5'
+const AIRTABLE_SST_PAGE_ID = 'pagmlseGxLHMXLLBX'
+
+function buildAirtableSstUrl(recordId: string): string {
+  const detail = btoa(JSON.stringify({
+    pageId: AIRTABLE_SST_PAGE_ID,
+    rowId: recordId,
+    showComments: false,
+    queryOriginHint: null,
+  }))
+  return `https://airtable.com/${AIRTABLE_BASE_ID}/pagCh7J2dYzqPC3bH?detail=${detail}`
+}
 
 export default function ScreengrabsBox({ mediaId }: ScreengrabsBoxProps) {
   const [screengrabs, setScreengrabs] = useState<ScreengrabFile[]>([])
@@ -138,7 +148,7 @@ export default function ScreengrabsBox({ mediaId }: ScreengrabsBoxProps) {
         </div>
         {sstRecordId && (
           <a
-            href={`https://airtable.com/${AIRTABLE_BASE_ID}/${AIRTABLE_SST_TABLE_ID}/${sstRecordId}`}
+            href={buildAirtableSstUrl(sstRecordId)}
             target="_blank"
             rel="noopener noreferrer"
             className="text-gray-400 hover:text-gray-300 text-xs flex items-center space-x-1"
@@ -183,15 +193,31 @@ export default function ScreengrabsBox({ mediaId }: ScreengrabsBoxProps) {
               >
                 {/* Thumbnail */}
                 <div className="aspect-video bg-gray-950 relative">
-                  <img
-                    src={screengrab.remote_url}
-                    alt={screengrab.filename}
-                    className="w-full h-full object-cover"
-                    loading="lazy"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🖼</text></svg>'
-                    }}
-                  />
+                  <a
+                    href={screengrab.remote_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block w-full h-full cursor-pointer"
+                    aria-label={`View full size: ${screengrab.filename}`}
+                  >
+                    <img
+                      src={screengrab.remote_url}
+                      alt={screengrab.filename}
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                      crossOrigin="anonymous"
+                      onError={(e) => {
+                        const img = e.target as HTMLImageElement
+                        // Retry without crossOrigin if CORS fails
+                        if (img.crossOrigin) {
+                          img.crossOrigin = ''
+                          img.src = screengrab.remote_url
+                        } else {
+                          img.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">%F0%9F%96%BC</text></svg>'
+                        }
+                      }}
+                    />
+                  </a>
                 </div>
 
                 {/* Info & Actions */}
