@@ -2341,7 +2341,6 @@ Output a QA report with:
         # Detect content type for Shorts-specific prompt adjustments
         content_type = context.get("content_type", "full")
 
-
         # Load Wisconsin proper-noun reference for analyst and formatter phases
         wi_reference = ""
         if phase_name in ("analyst", "formatter"):
