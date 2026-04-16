@@ -138,3 +138,70 @@ async def test_save_keyword_report_completes_within_timeout(project_with_manifes
         timeout=5.0,
     )
     assert "✅" in result[0].text
+
+
+@pytest.mark.asyncio
+async def test_validate_copy_all_valid(output_dir):
+    """validate_copy should report all fields valid when under limits."""
+    from mcp_server.server import handle_validate_copy
+
+    result = await handle_validate_copy({
+        "title": "Wisconsin Life | Alice Good Café in Verona",
+        "short_description": "In Verona, Alice Good brews Colombian coffee and community.",
+        "long_description": "Alice Good Café in Verona is more than a coffee shop.",
+    })
+    text = result[0].text
+    assert "✅" in text
+    assert "Yes" in text  # "All valid: ✅ Yes"
+
+
+@pytest.mark.asyncio
+async def test_validate_copy_over_limit(output_dir):
+    """validate_copy should flag fields that exceed character limits."""
+    from mcp_server.server import handle_validate_copy
+
+    result = await handle_validate_copy({
+        "title": "X" * 85,
+        "short_description": "X" * 105,
+        "long_description": "OK",
+    })
+    text = result[0].text
+    assert "❌" in text
+    assert "OVER LIMIT" in text
+    assert "85" in text
+
+
+@pytest.mark.asyncio
+async def test_validate_copy_partial_fields(output_dir):
+    """validate_copy should work with only some fields provided."""
+    from mcp_server.server import handle_validate_copy
+
+    result = await handle_validate_copy({
+        "title": "Just a title",
+    })
+    text = result[0].text
+    assert "12" in text
+    assert "Error" not in text
+
+
+@pytest.mark.asyncio
+async def test_validate_copy_with_keywords(output_dir):
+    """validate_copy should count keywords when provided."""
+    from mcp_server.server import handle_validate_copy
+
+    result = await handle_validate_copy({
+        "title": "Test Title",
+        "keywords": "coffee, Verona, Wisconsin, fair trade, community",
+    })
+    text = result[0].text
+    assert "5" in text  # 5 keywords
+
+
+@pytest.mark.asyncio
+async def test_validate_copy_empty(output_dir):
+    """validate_copy should handle no fields gracefully."""
+    from mcp_server.server import handle_validate_copy
+
+    result = await handle_validate_copy({})
+    text = result[0].text
+    assert "Error" in text or "at least one" in text.lower()

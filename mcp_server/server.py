@@ -494,6 +494,19 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="validate_copy",
+            description="Validate metadata field lengths against PBS character limits. Returns counts and pass/fail for each field. Use before finalizing any revision.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Release title to validate (limit: 80 chars)"},
+                    "short_description": {"type": "string", "description": "Short description to validate (limit: 100 chars)"},
+                    "long_description": {"type": "string", "description": "Long description to validate (limit: 350 chars)"},
+                    "keywords": {"type": "string", "description": "Keywords string to validate (optional, returns count)"},
+                },
+            },
+        ),
+        Tool(
             name="get_sst_metadata",
             description="Fetch current metadata from Airtable SST (Single Source of Truth) by Media ID. Returns title, descriptions, keywords, and character count status. Use this to get the LIVE Airtable data for a project.",
             inputSchema={
@@ -745,6 +758,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         return await handle_read_project_file(arguments)
     elif name == "search_projects":
         return await handle_search_projects(arguments)
+    elif name == "validate_copy":
+        return await handle_validate_copy(arguments)
     elif name == "get_sst_metadata":
         return await handle_get_sst_metadata(arguments)
     elif name == "submit_processing_job":
@@ -1372,6 +1387,46 @@ async def handle_get_sst_metadata(arguments: dict) -> list[TextContent]:
 
     if sst_data.get("program"):
         lines.append(f"**Episode/Segment:** {sst_data['program']}")
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def handle_validate_copy(arguments: dict) -> list[TextContent]:
+    """Validate metadata field lengths against PBS character limits."""
+    LIMITS = {
+        "title": 80,
+        "short_description": 100,
+        "long_description": 350,
+    }
+
+    title = arguments.get("title")
+    short_description = arguments.get("short_description")
+    long_description = arguments.get("long_description")
+    keywords = arguments.get("keywords")
+
+    if not any([title, short_description, long_description, keywords]):
+        return [TextContent(type="text", text="Error: At least one field (title, short_description, long_description, or keywords) is required.")]
+
+    lines = ["# Copy Validation Results\n"]
+    all_valid = True
+
+    for field_name, limit in LIMITS.items():
+        value = arguments.get(field_name)
+        if value is not None:
+            length = len(value)
+            valid = length <= limit
+            status = "✅" if valid else f"❌ OVER LIMIT by {length - limit}"
+            if not valid:
+                all_valid = False
+            lines.append(f"**{field_name.replace('_', ' ').title()}:** {length}/{limit} chars {status}")
+        else:
+            lines.append(f"**{field_name.replace('_', ' ').title()}:** (not provided)")
+
+    if keywords is not None:
+        keyword_list = [k.strip() for k in keywords.split(",") if k.strip()]
+        lines.append(f"\n**Keywords:** {len(keyword_list)} keywords provided")
+
+    lines.append(f"\n**All valid:** {'✅ Yes' if all_valid else '❌ No — fix fields marked OVER LIMIT'}")
 
     return [TextContent(type="text", text="\n".join(lines))]
 
