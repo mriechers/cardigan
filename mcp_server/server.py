@@ -1024,31 +1024,47 @@ async def handle_save_revision(arguments: dict) -> list[TextContent]:
     if not project_name or not content:
         return [TextContent(type="text", text="Error: project_name and content are required")]
 
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(_save_revision_sync, project_name, content),
+            timeout=15.0,
+        )
+        return [TextContent(type="text", text=result)]
+    except asyncio.TimeoutError:
+        return [
+            TextContent(
+                type="text",
+                text=f"Error: Save timed out after 15 seconds for project '{project_name}'. "
+                "The file system may be slow or unresponsive. Please retry.",
+            )
+        ]
+    except Exception as e:
+        return [TextContent(type="text", text=f"Error saving revision: {e}")]
+
+
+def _save_revision_sync(project_name: str, content: str) -> str:
+    """Synchronous file write for save_revision, run in a thread."""
     project_path, was_created = ensure_project_folder(project_name)
 
-    # Get next version number
     version = get_next_version(project_path, "copy_revision")
     filename = f"copy_revision_v{version}.md"
     filepath = project_path / filename
 
-    # Save the file
     filepath.write_text(content)
 
-    # Update manifest
     manifest = load_manifest(project_name)
     if manifest:
         if "revisions" not in manifest:
             manifest["revisions"] = []
-        manifest["revisions"].append({"version": version, "filename": filename, "saved_at": datetime.now().isoformat()})
+        manifest["revisions"].append({
+            "version": version,
+            "filename": filename,
+            "saved_at": datetime.now().isoformat(),
+        })
         save_manifest(project_name, manifest)
 
     created_note = f"\n📁 New project folder created for '{project_name}'" if was_created else ""
-    return [
-        TextContent(
-            type="text",
-            text=f"✅ Saved revision as `{filename}` in OUTPUT/{project_name}/\n\nVersion: v{version}\nPath: {filepath}{created_note}",
-        )
-    ]
+    return f"✅ Saved revision as `{filename}` in OUTPUT/{project_name}/\n\nVersion: v{version}\nPath: {filepath}{created_note}"
 
 
 async def handle_save_keyword_report(arguments: dict) -> list[TextContent]:
