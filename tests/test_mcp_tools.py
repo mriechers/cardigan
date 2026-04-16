@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from mcp_server.server import handle_save_revision
+from mcp_server.server import handle_save_keyword_report, handle_save_revision
 
 
 @pytest.fixture
@@ -98,6 +98,43 @@ async def test_save_revision_completes_within_timeout(project_with_manifest):
             "project_name": project_name,
             "content": "Timeout test content",
         }),
+        timeout=5.0,
+    )
+    assert "✅" in result[0].text
+
+
+@pytest.mark.asyncio
+async def test_save_keyword_report_succeeds(project_with_manifest):
+    """save_keyword_report should write a file and update manifest."""
+    project_name, project_path = project_with_manifest
+    result = await handle_save_keyword_report({
+        "project_name": project_name,
+        "content": "# Keywords\nTest keyword report.",
+    })
+    assert "✅" in result[0].text
+    assert "keyword_report_v1.md" in result[0].text
+
+    assert (project_path / "keyword_report_v1.md").exists()
+    manifest = json.loads((project_path / "manifest.json").read_text())
+    assert len(manifest["keyword_reports"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_save_keyword_report_auto_versions(project_with_manifest):
+    """save_keyword_report should auto-increment version numbers."""
+    project_name, project_path = project_with_manifest
+
+    await handle_save_keyword_report({"project_name": project_name, "content": "Report 1"})
+    result = await handle_save_keyword_report({"project_name": project_name, "content": "Report 2"})
+    assert "keyword_report_v2.md" in result[0].text
+
+
+@pytest.mark.asyncio
+async def test_save_keyword_report_completes_within_timeout(project_with_manifest):
+    """save_keyword_report should complete within a reasonable time."""
+    project_name, _ = project_with_manifest
+    result = await asyncio.wait_for(
+        handle_save_keyword_report({"project_name": project_name, "content": "Timeout test"}),
         timeout=5.0,
     )
     assert "✅" in result[0].text
