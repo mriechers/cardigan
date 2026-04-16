@@ -550,6 +550,17 @@ async def list_tools() -> list[Tool]:
                 "required": ["project_name"],
             },
         ),
+        Tool(
+            name="list_revisions",
+            description="Show the version history of copy revisions and keyword reports for a project. Includes version numbers, filenames, and timestamps.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_name": {"type": "string", "description": "The project ID (e.g., '2WLI1209HD')"},
+                },
+                "required": ["project_name"],
+            },
+        ),
     ]
 
 
@@ -777,6 +788,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         return await handle_submit_processing_job(arguments)
     elif name == "list_project_files":
         return await handle_list_project_files(arguments)
+    elif name == "list_revisions":
+        return await handle_list_revisions(arguments)
     else:
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -1637,6 +1650,62 @@ async def handle_list_project_files(arguments: dict) -> list[TextContent]:
         lines.append("")
 
     lines.append(f"**Total:** {len(all_files)} files")
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def handle_list_revisions(arguments: dict) -> list[TextContent]:
+    """Show version history for a project's revisions and keyword reports."""
+    project_name = arguments.get("project_name")
+    if not project_name:
+        return [TextContent(type="text", text="Error: project_name is required")]
+
+    project_path = get_project_path(project_name)
+    if not project_path.exists():
+        return [TextContent(type="text", text=f"Error: Project '{project_name}' not found in OUTPUT/")]
+
+    manifest = load_manifest(project_name)
+    revisions = manifest.get("revisions", []) if manifest else []
+    keyword_reports = manifest.get("keyword_reports", []) if manifest else []
+
+    if not revisions and not keyword_reports:
+        return [TextContent(type="text", text=f"# Revision History for {project_name}\n\nNo revisions or keyword reports saved yet.")]
+
+    lines = [f"# Revision History for {project_name}\n"]
+
+    if revisions:
+        lines.append(f"## Copy Revisions ({len(revisions)})")
+        for rev in reversed(revisions):  # Most recent first
+            version = rev.get("version", "?")
+            filename = rev.get("filename", "unknown")
+            saved_at = rev.get("saved_at", "unknown")
+            filepath = project_path / filename
+            size_note = ""
+            if filepath.exists():
+                size = filepath.stat().st_size
+                size_note = f" — {size / 1024:.1f} KB" if size >= 1024 else f" — {size:,} bytes"
+            else:
+                size_note = " — file missing"
+            lines.append(f"- **v{version}**: `{filename}` (saved {saved_at}){size_note}")
+        lines.append("")
+
+    if keyword_reports:
+        lines.append(f"## Keyword Reports ({len(keyword_reports)})")
+        for report in reversed(keyword_reports):
+            version = report.get("version", "?")
+            filename = report.get("filename", "unknown")
+            saved_at = report.get("saved_at", "unknown")
+            filepath = project_path / filename
+            size_note = ""
+            if filepath.exists():
+                size = filepath.stat().st_size
+                size_note = f" — {size / 1024:.1f} KB" if size >= 1024 else f" — {size:,} bytes"
+            else:
+                size_note = " — file missing"
+            lines.append(f"- **v{version}**: `{filename}` (saved {saved_at}){size_note}")
+        lines.append("")
+
+    lines.append("Use `read_project_file(project_name, filename)` to read any revision.")
 
     return [TextContent(type="text", text="\n".join(lines))]
 

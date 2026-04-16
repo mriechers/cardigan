@@ -254,3 +254,46 @@ async def test_list_project_files_empty_project(output_dir):
     result = await handle_list_project_files({"project_name": project_name})
     text = result[0].text
     assert "manifest.json" in text
+
+
+@pytest.mark.asyncio
+async def test_list_revisions_with_history(project_with_manifest):
+    """list_revisions should show revision and keyword report history."""
+    from mcp_server.server import handle_list_revisions
+
+    project_name, project_path = project_with_manifest
+
+    # Create some revisions via the actual save tool
+    await handle_save_revision({"project_name": project_name, "content": "Rev 1"})
+    await handle_save_revision({"project_name": project_name, "content": "Rev 2"})
+    await handle_save_keyword_report({"project_name": project_name, "content": "KW 1"})
+
+    result = await handle_list_revisions({"project_name": project_name})
+    text = result[0].text
+
+    assert "v1" in text
+    assert "v2" in text
+    assert "copy_revision" in text
+    assert "keyword_report" in text
+
+
+@pytest.mark.asyncio
+async def test_list_revisions_empty_project(project_with_manifest):
+    """list_revisions should report no revisions for a fresh project."""
+    from mcp_server.server import handle_list_revisions
+
+    project_name, _ = project_with_manifest
+
+    result = await handle_list_revisions({"project_name": project_name})
+    text = result[0].text
+    assert "no revisions" in text.lower() or "No revisions" in text
+
+
+@pytest.mark.asyncio
+async def test_list_revisions_missing_project(output_dir):
+    """list_revisions should return error for nonexistent project."""
+    from mcp_server.server import handle_list_revisions
+
+    result = await handle_list_revisions({"project_name": "nonexistent"})
+    text = result[0].text
+    assert "not found" in text.lower() or "Error" in text
