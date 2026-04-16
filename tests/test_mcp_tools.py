@@ -205,3 +205,52 @@ async def test_validate_copy_empty(output_dir):
     result = await handle_validate_copy({})
     text = result[0].text
     assert "Error" in text or "at least one" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_list_project_files_shows_all_files(project_with_manifest):
+    """list_project_files should return all files in the project folder."""
+    from mcp_server.server import handle_list_project_files
+
+    project_name, project_path = project_with_manifest
+
+    # Add some extra files to simulate a real project
+    (project_path / "copy_revision_v1.md").write_text("Revision 1")
+    (project_path / "keyword_report_v1.md").write_text("Keywords")
+    semrush_dir = project_path / "semrush"
+    semrush_dir.mkdir()
+    (semrush_dir / "export_2026-04-16.csv").write_text("keyword,volume\ncoffee,1000")
+
+    result = await handle_list_project_files({"project_name": project_name})
+    text = result[0].text
+
+    assert "analyst_output.md" in text
+    assert "copy_revision_v1.md" in text
+    assert "keyword_report_v1.md" in text
+    assert "export_2026-04-16.csv" in text
+    assert "manifest.json" in text
+
+
+@pytest.mark.asyncio
+async def test_list_project_files_missing_project(output_dir):
+    """list_project_files should return error for nonexistent project."""
+    from mcp_server.server import handle_list_project_files
+
+    result = await handle_list_project_files({"project_name": "nonexistent"})
+    text = result[0].text
+    assert "not found" in text.lower() or "Error" in text
+
+
+@pytest.mark.asyncio
+async def test_list_project_files_empty_project(output_dir):
+    """list_project_files should handle a project with only a manifest."""
+    from mcp_server.server import handle_list_project_files
+
+    project_name = "2WLIEmptyProject"
+    project_path = output_dir / project_name
+    project_path.mkdir()
+    (project_path / "manifest.json").write_text('{"project_name": "2WLIEmptyProject"}')
+
+    result = await handle_list_project_files({"project_name": project_name})
+    text = result[0].text
+    assert "manifest.json" in text

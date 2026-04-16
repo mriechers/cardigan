@@ -539,6 +539,17 @@ async def list_tools() -> list[Tool]:
                 "required": ["media_id"],
             },
         ),
+        Tool(
+            name="list_project_files",
+            description="List all files in a project folder. Shows deliverables, revisions, keyword reports, and any uploaded files (e.g., SEMRush CSVs).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_name": {"type": "string", "description": "The project ID (e.g., '2WLI1209HD')"},
+                },
+                "required": ["project_name"],
+            },
+        ),
     ]
 
 
@@ -764,6 +775,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         return await handle_get_sst_metadata(arguments)
     elif name == "submit_processing_job":
         return await handle_submit_processing_job(arguments)
+    elif name == "list_project_files":
+        return await handle_list_project_files(arguments)
     else:
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -1555,6 +1568,77 @@ async def handle_submit_processing_job(arguments: dict) -> list[TextContent]:
 
     except Exception as e:
         return [TextContent(type="text", text=f"Error submitting job: {e}")]
+
+
+async def handle_list_project_files(arguments: dict) -> list[TextContent]:
+    """List all files in a project folder with friendly grouping."""
+    project_name = arguments.get("project_name")
+    if not project_name:
+        return [TextContent(type="text", text="Error: project_name is required")]
+
+    project_path = get_project_path(project_name)
+    if not project_path.exists():
+        return [TextContent(type="text", text=f"Error: Project '{project_name}' not found in OUTPUT/")]
+
+    # Collect all files recursively
+    all_files = []
+    for file in sorted(project_path.rglob("*")):
+        if file.is_file():
+            rel_path = file.relative_to(project_path)
+            size = file.stat().st_size
+            all_files.append((str(rel_path), size))
+
+    if not all_files:
+        return [TextContent(type="text", text=f"# Files in {project_name}\n\n(empty folder)")]
+
+    # Group files
+    deliverables = []
+    revisions = []
+    keyword_reports = []
+    other = []
+
+    for rel_path, size in all_files:
+        filename = Path(rel_path).name
+        size_str = f"{size:,} bytes" if size < 1024 else f"{size / 1024:.1f} KB"
+        entry = f"- `{rel_path}` ({size_str})"
+        label = get_artifact_label(filename)
+        if label != filename:
+            entry = f"- `{rel_path}` — {label} ({size_str})"
+
+        if "copy_revision_v" in filename:
+            revisions.append(entry)
+        elif "keyword_report_v" in filename:
+            keyword_reports.append(entry)
+        elif filename in ARTIFACT_LABELS:
+            deliverables.append(entry)
+        else:
+            other.append(entry)
+
+    lines = [f"# Files in {project_name}\n"]
+
+    if deliverables:
+        lines.append("## Pipeline Deliverables")
+        lines.extend(deliverables)
+        lines.append("")
+
+    if revisions:
+        lines.append(f"## Copy Revisions ({len(revisions)})")
+        lines.extend(revisions)
+        lines.append("")
+
+    if keyword_reports:
+        lines.append(f"## Keyword Reports ({len(keyword_reports)})")
+        lines.extend(keyword_reports)
+        lines.append("")
+
+    if other:
+        lines.append("## Other Files")
+        lines.extend(other)
+        lines.append("")
+
+    lines.append(f"**Total:** {len(all_files)} files")
+
+    return [TextContent(type="text", text="\n".join(lines))]
 
 
 # =============================================================================
