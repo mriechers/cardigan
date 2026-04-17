@@ -89,7 +89,7 @@ def get_artifact_label(filename: str) -> str:
     return ARTIFACT_LABELS.get(filename, filename)
 
 
-# Airtable configuration (READ-ONLY)
+# Airtable configuration (writes restricted to WRITABLE_FIELDS via propose/review/commit)
 AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
 AIRTABLE_BASE_ID = "appZ2HGwhiifQToB6"
 AIRTABLE_TABLE_ID = "tblTKFOwTvK7xw1H5"
@@ -281,8 +281,7 @@ async def fetch_sst_context(airtable_record_id: str) -> Optional[dict]:
     """
     Fetch SST (Single Source of Truth) metadata from Airtable by record ID.
 
-    This is READ-ONLY access to the Airtable SST table.
-    No write operations are permitted.
+    This function is read-only. Writes go through patch_sst_record().
 
     Args:
         airtable_record_id: Airtable record ID (e.g., "recXXXXXXXXXXXXXX")
@@ -318,8 +317,7 @@ async def search_sst_by_media_id(media_id: str) -> Optional[dict]:
     """
     Search SST (Single Source of Truth) by Media ID.
 
-    This is READ-ONLY access to the Airtable SST table.
-    No write operations are permitted.
+    This function is read-only. Writes go through patch_sst_record().
 
     Args:
         media_id: The Media ID / project name (e.g., "2WLIEuchreWorldChampSM")
@@ -336,7 +334,9 @@ async def search_sst_by_media_id(media_id: str) -> Optional[dict]:
     # Use Airtable's filterByFormula to search by Media ID
     import urllib.parse
 
-    formula = f"{{Media ID}}='{media_id}'"
+    # Escape single quotes to prevent formula injection
+    safe_media_id = media_id.replace("'", "\\'")
+    formula = f"{{Media ID}}='{safe_media_id}'"
     encoded_formula = urllib.parse.quote(formula)
     url = f"{AIRTABLE_API_BASE}/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}?filterByFormula={encoded_formula}"
 
@@ -2023,7 +2023,7 @@ async def handle_commit_sst_edits(arguments: dict) -> list[TextContent]:
         comment_lines.append(f'- {airtable_column}: "{old}" → "{new}" ({reason})')
     comment_lines.append(f"\nSession: {datetime.now().isoformat()}")
 
-    await post_sst_comment(record_id, "\n".join(comment_lines))
+    comment_ok = await post_sst_comment(record_id, "\n".join(comment_lines))
 
     # Clear proposed edits from manifest
     manifest["proposed_edits"] = {}
@@ -2037,7 +2037,11 @@ async def handle_commit_sst_edits(arguments: dict) -> list[TextContent]:
         new = edit.get("proposed_value", "")
         lines.append(f"**{airtable_column}:** {old} → {new}")
 
-    lines.append(f"\n📝 Audit comment posted on record `{record_id}`")
+    if comment_ok:
+        lines.append(f"\n📝 Audit comment posted on record `{record_id}`")
+    else:
+        lines.append(f"\n⚠️ Fields updated but audit comment failed to post on `{record_id}`. Check Airtable manually.")
+        logger.warning(f"Failed to post audit comment on {record_id} for {media_id}")
     lines.append(f"✅ {len(proposed)} field{'s' if len(proposed) != 1 else ''} written successfully")
 
     return [TextContent(type="text", text="\n".join(lines))]

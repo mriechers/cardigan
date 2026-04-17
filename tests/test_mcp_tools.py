@@ -631,3 +631,65 @@ async def test_commit_sst_edits_no_pending(project_with_manifest):
     project_name, _ = project_with_manifest
     result = await handle_commit_sst_edits({"media_id": project_name})
     assert "no" in result[0].text.lower() or "No" in result[0].text
+
+
+@pytest.mark.asyncio
+async def test_patch_sst_record_http_error(output_dir, monkeypatch):
+    """patch_sst_record should return failure on non-200 responses."""
+    from mcp_server.server import patch_sst_record
+
+    mock_response = MagicMock()
+    mock_response.status_code = 422
+    mock_response.text = "INVALID_VALUE"
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.patch = AsyncMock(return_value=mock_response)
+
+    monkeypatch.setattr("mcp_server.server.AIRTABLE_API_KEY", "fake-key")
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: mock_client)
+
+    success, result = await patch_sst_record("recTEST123", {"Release Title": "X"})
+    assert success is False
+    assert "422" in result
+
+
+@pytest.mark.asyncio
+async def test_commit_sst_edits_patch_failure(project_with_manifest, monkeypatch):
+    """commit_sst_edits should report error when PATCH fails after concurrency check passes."""
+    from mcp_server.server import handle_commit_sst_edits, handle_propose_sst_edit
+
+    async def mock_search(media_id):
+        return {"record_id": "recTEST123", "title": "Old Title"}
+
+    monkeypatch.setattr("mcp_server.server.search_sst_by_media_id", mock_search)
+
+    project_name, project_path = project_with_manifest
+    await handle_propose_sst_edit({
+        "media_id": project_name,
+        "field": "title",
+        "proposed_value": "New Title",
+        "reason": "SEO",
+    })
+
+    # Concurrency check passes
+    async def mock_fetch(record_id):
+        return {"record_id": "recTEST123", "title": "Old Title"}
+
+    monkeypatch.setattr("mcp_server.server.fetch_sst_context", mock_fetch)
+
+    # But PATCH fails
+    async def mock_patch(record_id, fields):
+        return False, "Airtable returned 500: Internal Server Error"
+
+    monkeypatch.setattr("mcp_server.server.patch_sst_record", mock_patch)
+
+    result = await handle_commit_sst_edits({"media_id": project_name})
+    text = result[0].text
+
+    assert "Error" in text
+    assert "500" in text
+    # Staged edits should still be preserved for retry
+    manifest = json.loads((project_path / "manifest.json").read_text())
+    assert "title" in manifest.get("proposed_edits", {})
