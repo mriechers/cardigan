@@ -57,10 +57,12 @@ def project_with_manifest(output_dir):
 async def test_save_revision_succeeds(project_with_manifest):
     """save_revision should write a file and update manifest."""
     project_name, project_path = project_with_manifest
-    result = await handle_save_revision({
-        "project_name": project_name,
-        "content": "# Revision\nTest revision content.",
-    })
+    result = await handle_save_revision(
+        {
+            "project_name": project_name,
+            "content": "# Revision\nTest revision content.",
+        }
+    )
     assert len(result) == 1
     assert "✅" in result[0].text
     assert "copy_revision_v1.md" in result[0].text
@@ -99,10 +101,12 @@ async def test_save_revision_completes_within_timeout(project_with_manifest):
     """save_revision should complete within a reasonable time, not hang."""
     project_name, _ = project_with_manifest
     result = await asyncio.wait_for(
-        handle_save_revision({
-            "project_name": project_name,
-            "content": "Timeout test content",
-        }),
+        handle_save_revision(
+            {
+                "project_name": project_name,
+                "content": "Timeout test content",
+            }
+        ),
         timeout=5.0,
     )
     assert "✅" in result[0].text
@@ -112,10 +116,12 @@ async def test_save_revision_completes_within_timeout(project_with_manifest):
 async def test_save_keyword_report_succeeds(project_with_manifest):
     """save_keyword_report should write a file and update manifest."""
     project_name, project_path = project_with_manifest
-    result = await handle_save_keyword_report({
-        "project_name": project_name,
-        "content": "# Keywords\nTest keyword report.",
-    })
+    result = await handle_save_keyword_report(
+        {
+            "project_name": project_name,
+            "content": "# Keywords\nTest keyword report.",
+        }
+    )
     assert "✅" in result[0].text
     assert "keyword_report_v1.md" in result[0].text
 
@@ -150,11 +156,13 @@ async def test_validate_copy_all_valid(output_dir):
     """validate_copy should report all fields valid when under limits."""
     from mcp_server.server import handle_validate_copy
 
-    result = await handle_validate_copy({
-        "title": "Wisconsin Life | Alice Good Café in Verona",
-        "short_description": "In Verona, Alice Good brews Colombian coffee and community.",
-        "long_description": "Alice Good Café in Verona is more than a coffee shop.",
-    })
+    result = await handle_validate_copy(
+        {
+            "title": "Wisconsin Life | Alice Good Café in Verona",
+            "short_description": "In Verona, Alice Good brews Colombian coffee and community.",
+            "long_description": "Alice Good Café in Verona is more than a coffee shop.",
+        }
+    )
     text = result[0].text
     assert "✅" in text
     assert "Yes" in text  # "All valid: ✅ Yes"
@@ -165,11 +173,13 @@ async def test_validate_copy_over_limit(output_dir):
     """validate_copy should flag fields that exceed character limits."""
     from mcp_server.server import handle_validate_copy
 
-    result = await handle_validate_copy({
-        "title": "X" * 85,
-        "short_description": "X" * 105,
-        "long_description": "OK",
-    })
+    result = await handle_validate_copy(
+        {
+            "title": "X" * 85,
+            "short_description": "X" * 105,
+            "long_description": "OK",
+        }
+    )
     text = result[0].text
     assert "❌" in text
     assert "OVER LIMIT" in text
@@ -181,9 +191,11 @@ async def test_validate_copy_partial_fields(output_dir):
     """validate_copy should work with only some fields provided."""
     from mcp_server.server import handle_validate_copy
 
-    result = await handle_validate_copy({
-        "title": "Just a title",
-    })
+    result = await handle_validate_copy(
+        {
+            "title": "Just a title",
+        }
+    )
     text = result[0].text
     assert "12" in text
     assert "Error" not in text
@@ -194,10 +206,12 @@ async def test_validate_copy_with_keywords(output_dir):
     """validate_copy should count keywords when provided."""
     from mcp_server.server import handle_validate_copy
 
-    result = await handle_validate_copy({
-        "title": "Test Title",
-        "keywords": "coffee, Verona, Wisconsin, fair trade, community",
-    })
+    result = await handle_validate_copy(
+        {
+            "title": "Test Title",
+            "keywords": "coffee, Verona, Wisconsin, fair trade, community",
+        }
+    )
     text = result[0].text
     assert "5" in text  # 5 keywords
 
@@ -407,12 +421,14 @@ async def test_propose_sst_edit_stages_in_manifest(project_with_manifest, monkey
     monkeypatch.setattr("mcp_server.server.search_sst_by_media_id", mock_search)
 
     project_name, project_path = project_with_manifest
-    result = await handle_propose_sst_edit({
-        "media_id": project_name,
-        "field": "title",
-        "proposed_value": "Wisconsin Life | New Title Here",
-        "reason": "SEO improvement",
-    })
+    result = await handle_propose_sst_edit(
+        {
+            "media_id": project_name,
+            "field": "title",
+            "proposed_value": "Wisconsin Life | New Title Here",
+            "reason": "SEO improvement",
+        }
+    )
     text = result[0].text
     assert "Wisconsin Life | New Title Here" in text
     assert "✅" in text  # under 80 char limit
@@ -436,13 +452,19 @@ async def test_propose_sst_edit_rejects_disallowed_field(project_with_manifest, 
     monkeypatch.setattr("mcp_server.server.search_sst_by_media_id", mock_search)
 
     project_name, _ = project_with_manifest
-    result = await handle_propose_sst_edit({
-        "media_id": project_name,
-        "field": "status",
-        "proposed_value": "Complete",
-        "reason": "Done",
-    })
-    assert "not writable" in result[0].text.lower() or "not allowed" in result[0].text.lower() or "allowed fields" in result[0].text.lower()
+    result = await handle_propose_sst_edit(
+        {
+            "media_id": project_name,
+            "field": "status",
+            "proposed_value": "Complete",
+            "reason": "Done",
+        }
+    )
+    assert (
+        "not writable" in result[0].text.lower()
+        or "not allowed" in result[0].text.lower()
+        or "allowed fields" in result[0].text.lower()
+    )
 
 
 @pytest.mark.asyncio
@@ -456,12 +478,14 @@ async def test_propose_sst_edit_warns_over_limit(project_with_manifest, monkeypa
     monkeypatch.setattr("mcp_server.server.search_sst_by_media_id", mock_search)
 
     project_name, _ = project_with_manifest
-    result = await handle_propose_sst_edit({
-        "media_id": project_name,
-        "field": "title",
-        "proposed_value": "X" * 85,
-        "reason": "Testing",
-    })
+    result = await handle_propose_sst_edit(
+        {
+            "media_id": project_name,
+            "field": "title",
+            "proposed_value": "X" * 85,
+            "reason": "Testing",
+        }
+    )
     text = result[0].text
     assert "❌" in text or "OVER" in text
 
@@ -478,14 +502,22 @@ async def test_propose_sst_edit_multiple_fields(project_with_manifest, monkeypat
 
     project_name, project_path = project_with_manifest
 
-    await handle_propose_sst_edit({
-        "media_id": project_name, "field": "title",
-        "proposed_value": "New Title", "reason": "Better",
-    })
-    await handle_propose_sst_edit({
-        "media_id": project_name, "field": "short_description",
-        "proposed_value": "New short desc", "reason": "Clearer",
-    })
+    await handle_propose_sst_edit(
+        {
+            "media_id": project_name,
+            "field": "title",
+            "proposed_value": "New Title",
+            "reason": "Better",
+        }
+    )
+    await handle_propose_sst_edit(
+        {
+            "media_id": project_name,
+            "field": "short_description",
+            "proposed_value": "New short desc",
+            "reason": "Clearer",
+        }
+    )
 
     manifest = json.loads((project_path / "manifest.json").read_text())
     assert "title" in manifest["proposed_edits"]
@@ -504,14 +536,22 @@ async def test_review_proposed_edits_shows_diff(project_with_manifest, monkeypat
 
     project_name, _ = project_with_manifest
 
-    await handle_propose_sst_edit({
-        "media_id": project_name, "field": "title",
-        "proposed_value": "New Title", "reason": "Better SEO",
-    })
-    await handle_propose_sst_edit({
-        "media_id": project_name, "field": "short_description",
-        "proposed_value": "New short", "reason": "Clearer",
-    })
+    await handle_propose_sst_edit(
+        {
+            "media_id": project_name,
+            "field": "title",
+            "proposed_value": "New Title",
+            "reason": "Better SEO",
+        }
+    )
+    await handle_propose_sst_edit(
+        {
+            "media_id": project_name,
+            "field": "short_description",
+            "proposed_value": "New short",
+            "reason": "Clearer",
+        }
+    )
 
     result = await handle_review_proposed_edits({"media_id": project_name})
     text = result[0].text
@@ -546,12 +586,14 @@ async def test_commit_sst_edits_writes_and_comments(project_with_manifest, monke
     monkeypatch.setattr("mcp_server.server.search_sst_by_media_id", mock_search)
 
     project_name, project_path = project_with_manifest
-    await handle_propose_sst_edit({
-        "media_id": project_name,
-        "field": "title",
-        "proposed_value": "New Title",
-        "reason": "SEO",
-    })
+    await handle_propose_sst_edit(
+        {
+            "media_id": project_name,
+            "field": "title",
+            "proposed_value": "New Title",
+            "reason": "SEO",
+        }
+    )
 
     # Mock concurrency re-fetch (returns same value as when proposed — no conflict)
     async def mock_fetch(record_id):
@@ -599,12 +641,14 @@ async def test_commit_sst_edits_concurrency_conflict(project_with_manifest, monk
     monkeypatch.setattr("mcp_server.server.search_sst_by_media_id", mock_search)
 
     project_name, project_path = project_with_manifest
-    await handle_propose_sst_edit({
-        "media_id": project_name,
-        "field": "title",
-        "proposed_value": "New Title",
-        "reason": "SEO",
-    })
+    await handle_propose_sst_edit(
+        {
+            "media_id": project_name,
+            "field": "title",
+            "proposed_value": "New Title",
+            "reason": "SEO",
+        }
+    )
 
     # Mock concurrency re-fetch — returns DIFFERENT value (someone edited Airtable)
     async def mock_fetch(record_id):
@@ -666,12 +710,14 @@ async def test_commit_sst_edits_patch_failure(project_with_manifest, monkeypatch
     monkeypatch.setattr("mcp_server.server.search_sst_by_media_id", mock_search)
 
     project_name, project_path = project_with_manifest
-    await handle_propose_sst_edit({
-        "media_id": project_name,
-        "field": "title",
-        "proposed_value": "New Title",
-        "reason": "SEO",
-    })
+    await handle_propose_sst_edit(
+        {
+            "media_id": project_name,
+            "field": "title",
+            "proposed_value": "New Title",
+            "reason": "SEO",
+        }
+    )
 
     # Concurrency check passes
     async def mock_fetch(record_id):

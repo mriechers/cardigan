@@ -576,9 +576,18 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "title": {"type": "string", "description": "Release title to validate (limit: 80 chars)"},
-                    "short_description": {"type": "string", "description": "Short description to validate (limit: 100 chars)"},
-                    "long_description": {"type": "string", "description": "Long description to validate (limit: 350 chars)"},
-                    "keywords": {"type": "string", "description": "Keywords string to validate (optional, returns count)"},
+                    "short_description": {
+                        "type": "string",
+                        "description": "Short description to validate (limit: 100 chars)",
+                    },
+                    "long_description": {
+                        "type": "string",
+                        "description": "Long description to validate (limit: 350 chars)",
+                    },
+                    "keywords": {
+                        "type": "string",
+                        "description": "Keywords string to validate (optional, returns count)",
+                    },
                 },
             },
         ),
@@ -646,8 +655,16 @@ async def list_tools() -> list[Tool]:
                     "media_id": {"type": "string", "description": "The Media ID / project name"},
                     "field": {
                         "type": "string",
-                        "enum": ["title", "short_description", "long_description", "keywords",
-                                 "social_description", "social_tags", "facebook_description", "hashtags"],
+                        "enum": [
+                            "title",
+                            "short_description",
+                            "long_description",
+                            "keywords",
+                            "social_description",
+                            "social_tags",
+                            "facebook_description",
+                            "hashtags",
+                        ],
                         "description": "Which metadata field to edit",
                     },
                     "proposed_value": {"type": "string", "description": "The new value for this field"},
@@ -1220,11 +1237,13 @@ def _save_revision_sync(project_name: str, content: str) -> str:
     if manifest:
         if "revisions" not in manifest:
             manifest["revisions"] = []
-        manifest["revisions"].append({
-            "version": version,
-            "filename": filename,
-            "saved_at": datetime.now().isoformat(),
-        })
+        manifest["revisions"].append(
+            {
+                "version": version,
+                "filename": filename,
+                "saved_at": datetime.now().isoformat(),
+            }
+        )
         save_manifest(project_name, manifest)
 
     created_note = f"\n📁 New project folder created for '{project_name}'" if was_created else ""
@@ -1271,11 +1290,13 @@ def _save_keyword_report_sync(project_name: str, content: str) -> str:
     if manifest:
         if "keyword_reports" not in manifest:
             manifest["keyword_reports"] = []
-        manifest["keyword_reports"].append({
-            "version": version,
-            "filename": filename,
-            "saved_at": datetime.now().isoformat(),
-        })
+        manifest["keyword_reports"].append(
+            {
+                "version": version,
+                "filename": filename,
+                "saved_at": datetime.now().isoformat(),
+            }
+        )
         save_manifest(project_name, manifest)
 
     created_note = f"\n📁 New project folder created for '{project_name}'" if was_created else ""
@@ -1554,7 +1575,12 @@ async def handle_validate_copy(arguments: dict) -> list[TextContent]:
     keywords = arguments.get("keywords")
 
     if not any([title, short_description, long_description, keywords]):
-        return [TextContent(type="text", text="Error: At least one field (title, short_description, long_description, or keywords) is required.")]
+        return [
+            TextContent(
+                type="text",
+                text="Error: At least one field (title, short_description, long_description, or keywords) is required.",
+            )
+        ]
 
     lines = ["# Copy Validation Results\n"]
     all_valid = True
@@ -1792,7 +1818,11 @@ async def handle_list_revisions(arguments: dict) -> list[TextContent]:
     keyword_reports = manifest.get("keyword_reports", []) if manifest else []
 
     if not revisions and not keyword_reports:
-        return [TextContent(type="text", text=f"# Revision History for {project_name}\n\nNo revisions or keyword reports saved yet.")]
+        return [
+            TextContent(
+                type="text", text=f"# Revision History for {project_name}\n\nNo revisions or keyword reports saved yet."
+            )
+        ]
 
     lines = [f"# Revision History for {project_name}\n"]
 
@@ -1902,8 +1932,8 @@ async def handle_propose_sst_edit(arguments: dict) -> list[TextContent]:
         f"**Proposed:** {proposed_value}{limit_status}",
         f"**Reason:** {reason}",
         f"\n✅ Staged in manifest ({staged_count} edit{'s' if staged_count != 1 else ''} pending)",
-        f"\nUse `review_proposed_edits(\"{media_id}\")` to see all pending changes.",
-        f"Use `commit_sst_edits(\"{media_id}\")` when ready to write to Airtable.",
+        f'\nUse `review_proposed_edits("{media_id}")` to see all pending changes.',
+        f'Use `commit_sst_edits("{media_id}")` when ready to write to Airtable.',
     ]
 
     return [TextContent(type="text", text="\n".join(lines))]
@@ -1919,7 +1949,12 @@ async def handle_review_proposed_edits(arguments: dict) -> list[TextContent]:
     proposed = manifest.get("proposed_edits", {}) if manifest else {}
 
     if not proposed:
-        return [TextContent(type="text", text=f"# Proposed Edits for {media_id}\n\nNo pending edits. Use `propose_sst_edit` to stage changes.")]
+        return [
+            TextContent(
+                type="text",
+                text=f"# Proposed Edits for {media_id}\n\nNo pending edits. Use `propose_sst_edit` to stage changes.",
+            )
+        ]
 
     lines = [f"# Proposed Edits for {media_id}\n"]
     lines.append(f"**{len(proposed)} edit{'s' if len(proposed) != 1 else ''} staged**\n")
@@ -1945,7 +1980,7 @@ async def handle_review_proposed_edits(arguments: dict) -> list[TextContent]:
         lines.append("")
 
     lines.append("---")
-    lines.append(f"Use `commit_sst_edits(\"{media_id}\")` to write these changes to Airtable.")
+    lines.append(f'Use `commit_sst_edits("{media_id}")` to write these changes to Airtable.')
     lines.append("Use `propose_sst_edit` to modify or add more changes.")
 
     return [TextContent(type="text", text="\n".join(lines))]
@@ -1961,7 +1996,11 @@ async def handle_commit_sst_edits(arguments: dict) -> list[TextContent]:
     proposed = manifest.get("proposed_edits", {}) if manifest else {}
 
     if not proposed:
-        return [TextContent(type="text", text=f"No pending edits for {media_id}. Use `propose_sst_edit` to stage changes first.")]
+        return [
+            TextContent(
+                type="text", text=f"No pending edits for {media_id}. Use `propose_sst_edit` to stage changes first."
+            )
+        ]
 
     # All proposals should reference the same record
     record_id = None
@@ -1976,7 +2015,12 @@ async def handle_commit_sst_edits(arguments: dict) -> list[TextContent]:
     # Optimistic concurrency check: re-fetch current values
     current_data = await fetch_sst_context(record_id)
     if not current_data:
-        return [TextContent(type="text", text="Error: Could not re-fetch Airtable record for concurrency check. Record may have been deleted.")]
+        return [
+            TextContent(
+                type="text",
+                text="Error: Could not re-fetch Airtable record for concurrency check. Record may have been deleted.",
+            )
+        ]
 
     # Check for conflicts
     conflicts = []
@@ -2011,7 +2055,12 @@ async def handle_commit_sst_edits(arguments: dict) -> list[TextContent]:
     # Write to Airtable
     success, result = await patch_sst_record(record_id, patch_fields)
     if not success:
-        return [TextContent(type="text", text=f"Error writing to Airtable: {result}\n\nYour staged edits are still saved. You can retry with `commit_sst_edits(\"{media_id}\")`.")]
+        return [
+            TextContent(
+                type="text",
+                text=f'Error writing to Airtable: {result}\n\nYour staged edits are still saved. You can retry with `commit_sst_edits("{media_id}")`.',
+            )
+        ]
 
     # Post audit comment
     comment_lines = ["📝 Agent edit (Cardigan copy editor)\n\nFields updated:"]
