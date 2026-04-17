@@ -636,6 +636,25 @@ async def list_tools() -> list[Tool]:
                 "required": ["project_name"],
             },
         ),
+        Tool(
+            name="propose_sst_edit",
+            description="Stage a proposed edit to an Airtable SST field. Does NOT write to Airtable yet — just stages the change locally for review. Call review_proposed_edits to see all staged changes, then commit_sst_edits to write them.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "media_id": {"type": "string", "description": "The Media ID / project name"},
+                    "field": {
+                        "type": "string",
+                        "enum": ["title", "short_description", "long_description", "keywords",
+                                 "social_description", "social_tags", "facebook_description", "hashtags"],
+                        "description": "Which metadata field to edit",
+                    },
+                    "proposed_value": {"type": "string", "description": "The new value for this field"},
+                    "reason": {"type": "string", "description": "Why this change is being made (for audit trail)"},
+                },
+                "required": ["media_id", "field", "proposed_value", "reason"],
+            },
+        ),
     ]
 
 
@@ -865,6 +884,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         return await handle_list_project_files(arguments)
     elif name == "list_revisions":
         return await handle_list_revisions(arguments)
+    elif name == "propose_sst_edit":
+        return await handle_propose_sst_edit(arguments)
     else:
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -1781,6 +1802,82 @@ async def handle_list_revisions(arguments: dict) -> list[TextContent]:
         lines.append("")
 
     lines.append("Use `read_project_file(project_name, filename)` to read any revision.")
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def handle_propose_sst_edit(arguments: dict) -> list[TextContent]:
+    """Stage a proposed edit to an Airtable SST field."""
+    media_id = arguments.get("media_id")
+    field = arguments.get("field")
+    proposed_value = arguments.get("proposed_value")
+    reason = arguments.get("reason")
+
+    if not all([media_id, field, proposed_value, reason]):
+        return [TextContent(type="text", text="Error: media_id, field, proposed_value, and reason are all required.")]
+
+    # Enforce allowlist
+    if field not in WRITABLE_FIELDS:
+        allowed = ", ".join(sorted(WRITABLE_FIELDS.keys()))
+        return [TextContent(type="text", text=f"Error: Field '{field}' is not writable. Allowed fields: {allowed}")]
+
+    airtable_column, field_id, char_limit = WRITABLE_FIELDS[field]
+
+    # Fetch current value from Airtable
+    sst_data = await search_sst_by_media_id(media_id)
+    if not sst_data:
+        return [TextContent(type="text", text=f"Error: No SST record found for Media ID '{media_id}'")]
+
+    record_id = sst_data.get("record_id")
+    current_value = sst_data.get(field, "")
+
+    # Validate character limit
+    length = len(proposed_value)
+    limit_status = ""
+    if char_limit:
+        if length <= char_limit:
+            limit_status = f" ({length}/{char_limit} chars ✅)"
+        else:
+            limit_status = f" ({length}/{char_limit} chars ❌ OVER LIMIT by {length - char_limit})"
+    else:
+        limit_status = f" ({length} chars)"
+
+    # Stage in manifest
+    project_path, was_created = ensure_project_folder(media_id)
+    manifest = load_manifest(media_id) or {
+        "project_name": media_id,
+        "origin": "editor",
+        "created_at": datetime.now().isoformat(),
+        "phases": [],
+        "outputs": {},
+    }
+
+    if "proposed_edits" not in manifest:
+        manifest["proposed_edits"] = {}
+
+    manifest["proposed_edits"][field] = {
+        "airtable_column": airtable_column,
+        "current_value": current_value or "",
+        "proposed_value": proposed_value,
+        "reason": reason,
+        "record_id": record_id,
+        "staged_at": datetime.now().isoformat(),
+    }
+    save_manifest(media_id, manifest)
+
+    # Build response
+    current_display = current_value or "(empty)"
+    staged_count = len(manifest["proposed_edits"])
+
+    lines = [
+        f"# Proposed Edit: {airtable_column}\n",
+        f"**Current:** {current_display}",
+        f"**Proposed:** {proposed_value}{limit_status}",
+        f"**Reason:** {reason}",
+        f"\n✅ Staged in manifest ({staged_count} edit{'s' if staged_count != 1 else ''} pending)",
+        f"\nUse `review_proposed_edits(\"{media_id}\")` to see all pending changes.",
+        f"Use `commit_sst_edits(\"{media_id}\")` when ready to write to Airtable.",
+    ]
 
     return [TextContent(type="text", text="\n".join(lines))]
 

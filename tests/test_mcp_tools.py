@@ -394,3 +394,99 @@ async def test_post_sst_comment_success(output_dir, monkeypatch):
 
     success = await post_sst_comment("recTEST123", "Test comment")
     assert success is True
+
+
+@pytest.mark.asyncio
+async def test_propose_sst_edit_stages_in_manifest(project_with_manifest, monkeypatch):
+    """propose_sst_edit should store the proposal in manifest.json."""
+    from mcp_server.server import handle_propose_sst_edit
+
+    async def mock_search(media_id):
+        return {"record_id": "recTEST123", "title": "Old Title", "short_description": "Old short"}
+
+    monkeypatch.setattr("mcp_server.server.search_sst_by_media_id", mock_search)
+
+    project_name, project_path = project_with_manifest
+    result = await handle_propose_sst_edit({
+        "media_id": project_name,
+        "field": "title",
+        "proposed_value": "Wisconsin Life | New Title Here",
+        "reason": "SEO improvement",
+    })
+    text = result[0].text
+    assert "Wisconsin Life | New Title Here" in text
+    assert "✅" in text  # under 80 char limit
+
+    manifest = json.loads((project_path / "manifest.json").read_text())
+    assert "proposed_edits" in manifest
+    assert "title" in manifest["proposed_edits"]
+    assert manifest["proposed_edits"]["title"]["proposed_value"] == "Wisconsin Life | New Title Here"
+    assert manifest["proposed_edits"]["title"]["current_value"] == "Old Title"
+    assert manifest["proposed_edits"]["title"]["record_id"] == "recTEST123"
+
+
+@pytest.mark.asyncio
+async def test_propose_sst_edit_rejects_disallowed_field(project_with_manifest, monkeypatch):
+    """propose_sst_edit should reject fields not in the allowlist."""
+    from mcp_server.server import handle_propose_sst_edit
+
+    async def mock_search(media_id):
+        return {"record_id": "recTEST123"}
+
+    monkeypatch.setattr("mcp_server.server.search_sst_by_media_id", mock_search)
+
+    project_name, _ = project_with_manifest
+    result = await handle_propose_sst_edit({
+        "media_id": project_name,
+        "field": "status",
+        "proposed_value": "Complete",
+        "reason": "Done",
+    })
+    assert "not writable" in result[0].text.lower() or "not allowed" in result[0].text.lower() or "allowed fields" in result[0].text.lower()
+
+
+@pytest.mark.asyncio
+async def test_propose_sst_edit_warns_over_limit(project_with_manifest, monkeypatch):
+    """propose_sst_edit should warn when proposed value exceeds character limit."""
+    from mcp_server.server import handle_propose_sst_edit
+
+    async def mock_search(media_id):
+        return {"record_id": "recTEST123", "title": "Old"}
+
+    monkeypatch.setattr("mcp_server.server.search_sst_by_media_id", mock_search)
+
+    project_name, _ = project_with_manifest
+    result = await handle_propose_sst_edit({
+        "media_id": project_name,
+        "field": "title",
+        "proposed_value": "X" * 85,
+        "reason": "Testing",
+    })
+    text = result[0].text
+    assert "❌" in text or "OVER" in text
+
+
+@pytest.mark.asyncio
+async def test_propose_sst_edit_multiple_fields(project_with_manifest, monkeypatch):
+    """propose_sst_edit should allow staging multiple fields."""
+    from mcp_server.server import handle_propose_sst_edit
+
+    async def mock_search(media_id):
+        return {"record_id": "recTEST123", "title": "Old Title", "short_description": "Old short"}
+
+    monkeypatch.setattr("mcp_server.server.search_sst_by_media_id", mock_search)
+
+    project_name, project_path = project_with_manifest
+
+    await handle_propose_sst_edit({
+        "media_id": project_name, "field": "title",
+        "proposed_value": "New Title", "reason": "Better",
+    })
+    await handle_propose_sst_edit({
+        "media_id": project_name, "field": "short_description",
+        "proposed_value": "New short desc", "reason": "Clearer",
+    })
+
+    manifest = json.loads((project_path / "manifest.json").read_text())
+    assert "title" in manifest["proposed_edits"]
+    assert "short_description" in manifest["proposed_edits"]
