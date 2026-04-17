@@ -19,7 +19,8 @@ Tools provided:
 Connects to the FastAPI backend on localhost:8000 for job metadata,
 and reads/writes directly to the OUTPUT folder for content.
 
-NOTE: Airtable access is READ-ONLY. No write operations are permitted.
+NOTE: Airtable writes are restricted to allowlisted fields via the
+propose/review/commit workflow. See WRITABLE_FIELDS for the allowlist.
 """
 
 import asyncio
