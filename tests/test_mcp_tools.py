@@ -533,3 +533,101 @@ async def test_review_proposed_edits_empty(project_with_manifest):
     result = await handle_review_proposed_edits({"media_id": project_name})
     text = result[0].text
     assert "no" in text.lower() or "No" in text
+
+
+@pytest.mark.asyncio
+async def test_commit_sst_edits_writes_and_comments(project_with_manifest, monkeypatch):
+    """commit_sst_edits should PATCH Airtable and post an audit comment."""
+    from mcp_server.server import handle_commit_sst_edits, handle_propose_sst_edit
+
+    async def mock_search(media_id):
+        return {"record_id": "recTEST123", "title": "Old Title"}
+
+    monkeypatch.setattr("mcp_server.server.search_sst_by_media_id", mock_search)
+
+    project_name, project_path = project_with_manifest
+    await handle_propose_sst_edit({
+        "media_id": project_name,
+        "field": "title",
+        "proposed_value": "New Title",
+        "reason": "SEO",
+    })
+
+    # Mock concurrency re-fetch (returns same value as when proposed — no conflict)
+    async def mock_fetch(record_id):
+        return {"record_id": "recTEST123", "title": "Old Title"}
+
+    monkeypatch.setattr("mcp_server.server.fetch_sst_context", mock_fetch)
+
+    # Mock the write
+    async def mock_patch(record_id, fields):
+        return True, {"id": record_id, "fields": fields}
+
+    monkeypatch.setattr("mcp_server.server.patch_sst_record", mock_patch)
+
+    # Mock the comment
+    comment_posted = []
+
+    async def mock_comment(record_id, text):
+        comment_posted.append(text)
+        return True
+
+    monkeypatch.setattr("mcp_server.server.post_sst_comment", mock_comment)
+
+    result = await handle_commit_sst_edits({"media_id": project_name})
+    text = result[0].text
+
+    assert "✅" in text
+    assert "New Title" in text
+    assert len(comment_posted) == 1
+    assert "Old Title" in comment_posted[0]
+    assert "New Title" in comment_posted[0]
+
+    # Verify proposed_edits cleared from manifest
+    manifest = json.loads((project_path / "manifest.json").read_text())
+    assert manifest.get("proposed_edits", {}) == {}
+
+
+@pytest.mark.asyncio
+async def test_commit_sst_edits_concurrency_conflict(project_with_manifest, monkeypatch):
+    """commit_sst_edits should refuse if Airtable values changed since proposal."""
+    from mcp_server.server import handle_commit_sst_edits, handle_propose_sst_edit
+
+    async def mock_search(media_id):
+        return {"record_id": "recTEST123", "title": "Old Title"}
+
+    monkeypatch.setattr("mcp_server.server.search_sst_by_media_id", mock_search)
+
+    project_name, project_path = project_with_manifest
+    await handle_propose_sst_edit({
+        "media_id": project_name,
+        "field": "title",
+        "proposed_value": "New Title",
+        "reason": "SEO",
+    })
+
+    # Mock concurrency re-fetch — returns DIFFERENT value (someone edited Airtable)
+    async def mock_fetch(record_id):
+        return {"record_id": "recTEST123", "title": "Manually Edited Title"}
+
+    monkeypatch.setattr("mcp_server.server.fetch_sst_context", mock_fetch)
+
+    result = await handle_commit_sst_edits({"media_id": project_name})
+    text = result[0].text
+
+    assert "conflict" in text.lower() or "changed" in text.lower()
+    assert "Manually Edited Title" in text
+
+    # Verify proposed_edits NOT cleared (user can re-propose)
+    manifest = json.loads((project_path / "manifest.json").read_text())
+    assert "title" in manifest.get("proposed_edits", {})
+
+
+@pytest.mark.asyncio
+async def test_commit_sst_edits_no_pending(project_with_manifest):
+    """commit_sst_edits should report no pending edits."""
+    from mcp_server.server import handle_commit_sst_edits
+
+    project_name, _ = project_with_manifest
+    result = await handle_commit_sst_edits({"media_id": project_name})
+    assert "no" in result[0].text.lower() or "No" in result[0].text

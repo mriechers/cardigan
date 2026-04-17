@@ -666,6 +666,17 @@ async def list_tools() -> list[Tool]:
                 "required": ["media_id"],
             },
         ),
+        Tool(
+            name="commit_sst_edits",
+            description="Write all staged edits to Airtable. Checks that no fields were changed since proposal (optimistic concurrency). Posts an audit comment on the record. ALWAYS show the user the output of review_proposed_edits before calling this.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "media_id": {"type": "string", "description": "The Media ID / project name"},
+                },
+                "required": ["media_id"],
+            },
+        ),
     ]
 
 
@@ -899,6 +910,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         return await handle_propose_sst_edit(arguments)
     elif name == "review_proposed_edits":
         return await handle_review_proposed_edits(arguments)
+    elif name == "commit_sst_edits":
+        return await handle_commit_sst_edits(arguments)
     else:
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -1933,6 +1946,98 @@ async def handle_review_proposed_edits(arguments: dict) -> list[TextContent]:
     lines.append("---")
     lines.append(f"Use `commit_sst_edits(\"{media_id}\")` to write these changes to Airtable.")
     lines.append("Use `propose_sst_edit` to modify or add more changes.")
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def handle_commit_sst_edits(arguments: dict) -> list[TextContent]:
+    """Write all staged edits to Airtable with concurrency checking and audit."""
+    media_id = arguments.get("media_id")
+    if not media_id:
+        return [TextContent(type="text", text="Error: media_id is required")]
+
+    manifest = load_manifest(media_id)
+    proposed = manifest.get("proposed_edits", {}) if manifest else {}
+
+    if not proposed:
+        return [TextContent(type="text", text=f"No pending edits for {media_id}. Use `propose_sst_edit` to stage changes first.")]
+
+    # All proposals should reference the same record
+    record_id = None
+    for edit in proposed.values():
+        record_id = edit.get("record_id")
+        if record_id:
+            break
+
+    if not record_id:
+        return [TextContent(type="text", text="Error: No Airtable record ID found in staged edits.")]
+
+    # Optimistic concurrency check: re-fetch current values
+    current_data = await fetch_sst_context(record_id)
+    if not current_data:
+        return [TextContent(type="text", text="Error: Could not re-fetch Airtable record for concurrency check. Record may have been deleted.")]
+
+    # Check for conflicts
+    conflicts = []
+    for field_key, edit in proposed.items():
+        expected_current = edit.get("current_value", "")
+        actual_current = current_data.get(field_key, "") or ""
+        if expected_current != actual_current:
+            airtable_column = edit.get("airtable_column", field_key)
+            conflicts.append(
+                f"**{airtable_column}:**\n"
+                f"  Expected: {expected_current or '(empty)'}\n"
+                f"  Actual now: {actual_current or '(empty)'}"
+            )
+
+    if conflicts:
+        lines = [
+            f"# ⚠️ Concurrency Conflict for {media_id}\n",
+            "The following fields were changed in Airtable since you staged your edits:\n",
+            *conflicts,
+            "\n**Your staged edits were NOT applied.**",
+            "Please review the current values, then use `propose_sst_edit` to re-stage with updated context.",
+        ]
+        return [TextContent(type="text", text="\n".join(lines))]
+
+    # Build the PATCH payload using Airtable column names
+    patch_fields = {}
+    for field_key, edit in proposed.items():
+        airtable_column = edit.get("airtable_column")
+        if airtable_column:
+            patch_fields[airtable_column] = edit["proposed_value"]
+
+    # Write to Airtable
+    success, result = await patch_sst_record(record_id, patch_fields)
+    if not success:
+        return [TextContent(type="text", text=f"Error writing to Airtable: {result}\n\nYour staged edits are still saved. You can retry with `commit_sst_edits(\"{media_id}\")`.")]
+
+    # Post audit comment
+    comment_lines = ["📝 Agent edit (Cardigan copy editor)\n\nFields updated:"]
+    for field_key, edit in proposed.items():
+        airtable_column = edit.get("airtable_column", field_key)
+        old = edit.get("current_value", "(empty)") or "(empty)"
+        new = edit.get("proposed_value", "")
+        reason = edit.get("reason", "")
+        comment_lines.append(f'- {airtable_column}: "{old}" → "{new}" ({reason})')
+    comment_lines.append(f"\nSession: {datetime.now().isoformat()}")
+
+    await post_sst_comment(record_id, "\n".join(comment_lines))
+
+    # Clear proposed edits from manifest
+    manifest["proposed_edits"] = {}
+    save_manifest(media_id, manifest)
+
+    # Build confirmation response
+    lines = [f"# ✅ Airtable Updated for {media_id}\n"]
+    for field_key, edit in proposed.items():
+        airtable_column = edit.get("airtable_column", field_key)
+        old = edit.get("current_value", "(empty)") or "(empty)"
+        new = edit.get("proposed_value", "")
+        lines.append(f"**{airtable_column}:** {old} → {new}")
+
+    lines.append(f"\n📝 Audit comment posted on record `{record_id}`")
+    lines.append(f"✅ {len(proposed)} field{'s' if len(proposed) != 1 else ''} written successfully")
 
     return [TextContent(type="text", text="\n".join(lines))]
 
