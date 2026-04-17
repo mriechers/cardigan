@@ -6,11 +6,16 @@ using a temporary OUTPUT directory to isolate filesystem operations.
 
 import asyncio
 import json
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from mcp_server.server import handle_save_keyword_report, handle_save_revision
+from mcp_server.server import (
+    WRITABLE_FIELDS,
+    _extract_sst_fields,
+    handle_save_keyword_report,
+    handle_save_revision,
+)
 
 
 @pytest.fixture
@@ -297,3 +302,95 @@ async def test_list_revisions_missing_project(output_dir):
     result = await handle_list_revisions({"project_name": "nonexistent"})
     text = result[0].text
     assert "not found" in text.lower() or "Error" in text
+
+
+def test_writable_fields_allowlist():
+    """WRITABLE_FIELDS should contain exactly the approved fields."""
+    assert "title" in WRITABLE_FIELDS
+    assert "short_description" in WRITABLE_FIELDS
+    assert "long_description" in WRITABLE_FIELDS
+    assert "keywords" in WRITABLE_FIELDS
+    assert "social_description" in WRITABLE_FIELDS
+    assert "social_tags" in WRITABLE_FIELDS
+    assert "facebook_description" in WRITABLE_FIELDS
+    assert "hashtags" in WRITABLE_FIELDS
+    assert "status" not in WRITABLE_FIELDS
+    assert "producer" not in WRITABLE_FIELDS
+    assert "media_id" not in WRITABLE_FIELDS
+
+
+def test_extract_sst_fields_includes_social():
+    """_extract_sst_fields should extract social media fields."""
+    record = {
+        "id": "recTEST123",
+        "fields": {
+            "Media ID": "2WLITestSM",
+            "Release Title": "Test Title",
+            "Short Description": "Test short",
+            "Long Description": "Test long",
+            "General Keywords/Tags": "kw1, kw2",
+            "Social Media Description": "Social desc",
+            "Social Media Tags": "social tags",
+            "Facebook Description": "FB desc",
+            "Hashtags": "#test #hashtag",
+        },
+    }
+    result = _extract_sst_fields(record)
+    assert result["social_description"] == "Social desc"
+    assert result["social_tags"] == "social tags"
+    assert result["facebook_description"] == "FB desc"
+    assert result["hashtags"] == "#test #hashtag"
+
+
+@pytest.mark.asyncio
+async def test_patch_sst_record_success(output_dir, monkeypatch):
+    """patch_sst_record should PATCH the Airtable record and return True."""
+    from mcp_server.server import patch_sst_record
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"id": "recTEST123", "fields": {"Release Title": "New Title"}}
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.patch = AsyncMock(return_value=mock_response)
+
+    monkeypatch.setattr("mcp_server.server.AIRTABLE_API_KEY", "fake-key")
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: mock_client)
+
+    success, result = await patch_sst_record("recTEST123", {"Release Title": "New Title"})
+    assert success is True
+    mock_client.patch.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_patch_sst_record_no_api_key(output_dir, monkeypatch):
+    """patch_sst_record should fail gracefully without an API key."""
+    from mcp_server.server import patch_sst_record
+
+    monkeypatch.setattr("mcp_server.server.AIRTABLE_API_KEY", None)
+
+    success, result = await patch_sst_record("recTEST123", {"Release Title": "New"})
+    assert success is False
+    assert "not configured" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_post_sst_comment_success(output_dir, monkeypatch):
+    """post_sst_comment should POST a comment to the Airtable record."""
+    from mcp_server.server import post_sst_comment
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(return_value=mock_response)
+
+    monkeypatch.setattr("mcp_server.server.AIRTABLE_API_KEY", "fake-key")
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: mock_client)
+
+    success = await post_sst_comment("recTEST123", "Test comment")
+    assert success is True

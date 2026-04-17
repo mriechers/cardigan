@@ -94,6 +94,19 @@ AIRTABLE_BASE_ID = "appZ2HGwhiifQToB6"
 AIRTABLE_TABLE_ID = "tblTKFOwTvK7xw1H5"
 AIRTABLE_API_BASE = "https://api.airtable.com/v0"
 
+# Writable field allowlist — ONLY these fields can be written to Airtable.
+# Everything else is read-only. Format: key -> (airtable_column, field_id, char_limit or None)
+WRITABLE_FIELDS: dict[str, tuple[str, str, int | None]] = {
+    "title": ("Release Title", "fldXqxjjxR4z5IJv6", 80),
+    "short_description": ("Short Description", "fldDwTtKlOCdgKHpW", 100),
+    "long_description": ("Long Description", "fld6HsWiKL77bFqo1", 350),
+    "keywords": ("General Keywords/Tags", "fldjdPEXZyvx3rc6Y", None),
+    "social_description": ("Social Media Description", "fldntHlzk6PfIT5k2", None),
+    "social_tags": ("Social Media Tags", "fldcenwfu4nEWjPbt", None),
+    "facebook_description": ("Facebook Description", "fldnprt2bJEsndv96", None),
+    "hashtags": ("Hashtags", "fldYSGo5EBidQYL7W", None),
+}
+
 # Initialize MCP server
 server = Server("cardigan")
 
@@ -365,10 +378,72 @@ def _extract_sst_fields(record: dict) -> dict:
         "sd_status": fields.get("SD Character Count"),
         "ld_status": fields.get("LD Character Count"),
         "special_thanks": fields.get("Episode Special Thanks"),
+        "social_description": fields.get("Social Media Description"),
+        "social_tags": fields.get("Social Media Tags"),
+        "facebook_description": fields.get("Facebook Description"),
+        "hashtags": fields.get("Hashtags"),
     }
 
     # Remove None values
     return {k: v for k, v in sst_context.items() if v is not None}
+
+
+async def patch_sst_record(record_id: str, fields: dict[str, str]) -> tuple[bool, str]:
+    """Write fields to an Airtable SST record via PATCH.
+
+    Args:
+        record_id: Airtable record ID (e.g., "recXXXXXXXX")
+        fields: Dict of {Airtable column name: value} to write
+
+    Returns:
+        Tuple of (success: bool, message_or_error: str)
+    """
+    if not AIRTABLE_API_KEY:
+        return False, "AIRTABLE_API_KEY not configured"
+
+    url = f"{AIRTABLE_API_BASE}/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}/{record_id}"
+    headers = {
+        "Authorization": f"Bearer {AIRTABLE_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {"fields": fields}
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.patch(url, headers=headers, json=payload)
+            if response.status_code == 200:
+                return True, response.json()
+            return False, f"Airtable returned {response.status_code}: {response.text}"
+    except Exception as e:
+        return False, f"Error writing to Airtable: {e}"
+
+
+async def post_sst_comment(record_id: str, text: str) -> bool:
+    """Post a comment on an Airtable SST record for audit trail.
+
+    Args:
+        record_id: Airtable record ID
+        text: Comment text
+
+    Returns:
+        True if comment was posted successfully, False otherwise.
+    """
+    if not AIRTABLE_API_KEY:
+        return False
+
+    url = f"{AIRTABLE_API_BASE}/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}/{record_id}/comments"
+    headers = {
+        "Authorization": f"Bearer {AIRTABLE_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {"text": text}
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(url, headers=headers, json=payload)
+            return response.status_code == 200
+    except Exception:
+        return False
 
 
 # =============================================================================
