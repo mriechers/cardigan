@@ -11,6 +11,13 @@ interface PhaseModelStats {
   success_rate: number
 }
 
+interface EscalationReasonBreakdown {
+  timeout: number
+  api_error: number
+  truncation: number
+  other: number
+}
+
 interface PhaseStats {
   phase: string
   total_completions: number
@@ -20,6 +27,7 @@ interface PhaseStats {
   success_rate: number
   escalation_rate: number
   models: PhaseModelStats[]
+  escalation_reasons?: EscalationReasonBreakdown
 }
 
 interface PhaseStatsResponse {
@@ -33,6 +41,33 @@ interface PhaseStatsResponse {
   escalation_summary: {
     by_phase: Record<string, { base_tier: number; escalated: number; rate: number }>
   }
+}
+
+interface PhaseCostEfficiency {
+  phase: string
+  base_tier: number
+  base_tier_label: string
+  total_runs: number
+  runs_at_base: number
+  runs_escalated: number
+  avg_cost_at_base: number
+  avg_cost_when_escalated: number
+  escalation_waste: number
+  total_cost: number
+  recommendation: string | null
+  suggested_tier: number | null
+}
+
+interface CostEfficiencyResponse {
+  phases: PhaseCostEfficiency[]
+  period_days: number
+  total_escalation_waste: number
+}
+
+interface RoutingConfig {
+  tier_labels: string[]
+  tiers: string[]
+  phase_base_tiers: Record<string, number>
 }
 
 interface PhaseStatsWidgetProps {
@@ -55,26 +90,56 @@ const PHASE_INFO: Record<string, { name: string; icon: string }> = {
  */
 export default function PhaseStatsWidget({ className = '' }: PhaseStatsWidgetProps) {
   const [stats, setStats] = useState<PhaseStatsResponse | null>(null)
+  const [costEfficiency, setCostEfficiency] = useState<CostEfficiencyResponse | null>(null)
+  const [routingConfig, setRoutingConfig] = useState<RoutingConfig | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [days, setDays] = useState(30)
   const [expandedPhase, setExpandedPhase] = useState<string | null>(null)
+  const [upgradingPhase, setUpgradingPhase] = useState<string | null>(null)
 
   const fetchStats = async () => {
     setLoading(true)
     try {
-      const response = await fetch(`/api/langfuse/phase-stats?days=${days}`)
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      const [statsRes, costRes, routingRes] = await Promise.all([
+        fetch(`/api/langfuse/phase-stats?days=${days}`),
+        fetch(`/api/langfuse/cost-efficiency?days=${days}`),
+        fetch('/api/config/routing'),
+      ])
+      if (!statsRes.ok) {
+        throw new Error(`HTTP ${statsRes.status}: ${statsRes.statusText}`)
       }
-      const data = await response.json()
-      setStats(data)
+      const statsData = await statsRes.json()
+      setStats(statsData)
+      if (costRes.ok) {
+        setCostEfficiency(await costRes.json())
+      }
+      if (routingRes.ok) {
+        setRoutingConfig(await routingRes.json())
+      }
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch stats')
       setStats(null)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const upgradeTier = async (phase: string, newTier: number) => {
+    setUpgradingPhase(phase)
+    try {
+      const response = await fetch('/api/config/routing', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phase_base_tiers: { [phase]: newTier } }),
+      })
+      if (response.ok) {
+        // Re-fetch stats to reflect the change
+        await fetchStats()
+      }
+    } finally {
+      setUpgradingPhase(null)
     }
   }
 
@@ -264,6 +329,42 @@ export default function PhaseStatsWidget({ className = '' }: PhaseStatsWidgetPro
                     {/* Expanded details */}
                     {isExpanded && (
                       <div className="px-3 pb-3 border-t border-gray-800">
+                        {/* Configured tier */}
+                        {routingConfig && (
+                          <div className="mt-3 flex items-center gap-2 text-xs">
+                            <span className="text-gray-500">Configured:</span>
+                            {(() => {
+                              const configuredTier = routingConfig.phase_base_tiers?.[phase.phase] ?? 0
+                              const configuredLabel = routingConfig.tier_labels?.[configuredTier] ?? `tier-${configuredTier}`
+                              const TIER_COLORS: Record<number, string> = {
+                                0: 'bg-green-500/20 text-green-400',
+                                1: 'bg-cyan-500/20 text-cyan-400',
+                                2: 'bg-purple-500/20 text-purple-400',
+                                3: 'bg-blue-500/20 text-blue-400',
+                              }
+                              return (
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] ${TIER_COLORS[configuredTier] ?? 'bg-gray-500/20 text-gray-400'}`}>
+                                  {configuredLabel}
+                                </span>
+                              )
+                            })()}
+                            {/* Flag if models used don't match configured tier's expected models */}
+                            {(() => {
+                              const configuredTier = routingConfig.phase_base_tiers?.[phase.phase] ?? 0
+                              const actualTiers = phase.models.filter(m => m.tier !== null).map(m => m.tier!)
+                              const hasHigherTier = actualTiers.some(t => t > configuredTier)
+                              if (hasHigherTier && phase.escalation_rate > 0) {
+                                return (
+                                  <span className="text-yellow-500 text-[10px]">
+                                    — {phase.escalation_rate}% ran above configured tier
+                                  </span>
+                                )
+                              }
+                              return null
+                            })()}
+                          </div>
+                        )}
+
                         <div className="mt-3 space-y-2">
                           <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">
                             Model Breakdown
@@ -276,11 +377,10 @@ export default function PhaseStatsWidget({ className = '' }: PhaseStatsWidgetPro
                               <div className="flex items-center space-x-2">
                                 {model.tier_label && (
                                   <span className={`px-1.5 py-0.5 rounded text-[10px] ${
-                                    model.tier_label === 'big-brain'
-                                      ? 'bg-purple-500/20 text-purple-400'
-                                      : model.tier_label === 'cheapskate'
-                                      ? 'bg-green-500/20 text-green-400'
-                                      : 'bg-cyan-500/20 text-cyan-400'
+                                    model.tier === 2 ? 'bg-purple-500/20 text-purple-400'
+                                    : model.tier === 3 ? 'bg-blue-500/20 text-blue-400'
+                                    : model.tier === 0 ? 'bg-green-500/20 text-green-400'
+                                    : 'bg-cyan-500/20 text-cyan-400'
                                   }`}>
                                     {model.tier_label}
                                   </span>
@@ -304,21 +404,80 @@ export default function PhaseStatsWidget({ className = '' }: PhaseStatsWidgetPro
                           ))}
                         </div>
 
-                        {/* Insights for problematic phases */}
-                        {(phase.success_rate < 95 || phase.escalation_rate > 30) && (
-                          <div className="mt-3 p-2 bg-yellow-900/20 border border-yellow-500/30 rounded text-xs">
-                            {phase.success_rate < 95 && (
-                              <p className="text-yellow-400">
-                                ⚠️ Low success rate - consider using a more capable base model
-                              </p>
-                            )}
-                            {phase.escalation_rate > 30 && phase.escalation_rate < 100 && (
-                              <p className="text-yellow-400">
-                                ⚠️ High escalation rate - base tier may be underpowered for this task
-                              </p>
-                            )}
+                        {/* Escalation Reasons */}
+                        {phase.escalation_rate > 0 && phase.escalation_reasons && (
+                          <div className="mt-3">
+                            <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">
+                              Escalation Reasons
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {phase.escalation_reasons.timeout > 0 && (
+                                <span className="px-2 py-0.5 rounded text-[11px] bg-orange-500/20 text-orange-400">
+                                  timeout: {phase.escalation_reasons.timeout}
+                                </span>
+                              )}
+                              {phase.escalation_reasons.api_error > 0 && (
+                                <span className="px-2 py-0.5 rounded text-[11px] bg-red-500/20 text-red-400">
+                                  api_error: {phase.escalation_reasons.api_error}
+                                </span>
+                              )}
+                              {phase.escalation_reasons.truncation > 0 && (
+                                <span className="px-2 py-0.5 rounded text-[11px] bg-yellow-500/20 text-yellow-400">
+                                  truncation: {phase.escalation_reasons.truncation}
+                                </span>
+                              )}
+                              {phase.escalation_reasons.other > 0 && (
+                                <span className="px-2 py-0.5 rounded text-[11px] bg-gray-600/50 text-gray-400">
+                                  other: {phase.escalation_reasons.other}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         )}
+
+                        {/* Cost efficiency insights */}
+                        {(() => {
+                          const ce = costEfficiency?.phases.find(p => p.phase === phase.phase)
+                          const hasIssue = phase.success_rate < 95 || (ce?.recommendation)
+                          if (!hasIssue) return null
+                          return (
+                            <div className="mt-3 p-2 bg-yellow-900/20 border border-yellow-500/30 rounded text-xs space-y-1.5">
+                              {phase.success_rate < 95 && (
+                                <p className="text-yellow-400">
+                                  Low success rate ({phase.success_rate}%) — consider a more capable base model
+                                </p>
+                              )}
+                              {ce?.recommendation && (
+                                <div>
+                                  <p className="text-yellow-400">{ce.recommendation}</p>
+                                  <div className="mt-1.5 flex items-center gap-3 text-gray-400">
+                                    <span className="font-mono">
+                                      Base avg: {formatCost(ce.avg_cost_at_base)}
+                                    </span>
+                                    <span className="font-mono">
+                                      Escalated avg: {formatCost(ce.avg_cost_when_escalated)}
+                                    </span>
+                                    <span className="font-mono">
+                                      Waste: {formatCost(ce.escalation_waste)}
+                                    </span>
+                                  </div>
+                                  {ce.suggested_tier != null && (
+                                    <button
+                                      onClick={() => upgradeTier(phase.phase, ce.suggested_tier!)}
+                                      disabled={upgradingPhase === phase.phase}
+                                      className="mt-2 px-3 py-1 bg-yellow-600/30 hover:bg-yellow-600/50 text-yellow-300 rounded text-xs transition-colors disabled:opacity-50"
+                                    >
+                                      {upgradingPhase === phase.phase
+                                        ? 'Upgrading...'
+                                        : `Upgrade ${phase.phase} to ${routingConfig?.tier_labels?.[ce.suggested_tier!] ?? `tier ${ce.suggested_tier}`}`
+                                      }
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })()}
                       </div>
                     )}
                   </div>

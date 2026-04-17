@@ -940,8 +940,14 @@ class LLMClient:
             configured_preset = backend_config.get("preset")
             fallback_model = backend_config.get("fallback_model") or backend_config.get("model")
 
-        # Get phase-to-backend mapping
+        # Get phase-to-backend mapping (legacy fallback)
         phase_backends = self.config.get("phase_backends", {})
+
+        # Get tier-based routing config (authoritative source for agent assignments)
+        routing = self.config.get("routing", {})
+        phase_base_tiers = routing.get("phase_base_tiers", {})
+        tier_labels = routing.get("tier_labels", [])
+        tiers = routing.get("tiers", [])
 
         # Get OpenRouter preset details (manually maintained)
         openrouter_presets = self.config.get("openrouter_presets", {})
@@ -954,6 +960,9 @@ class LLMClient:
             "configured_preset": configured_preset,
             "fallback_model": fallback_model,
             "phase_backends": phase_backends,
+            "phase_base_tiers": phase_base_tiers,
+            "tier_labels": tier_labels,
+            "tiers": tiers,
             "openrouter_presets": openrouter_presets,
             "last_run_totals": last_run,
         }

@@ -5,6 +5,7 @@ Provides endpoints for querying observability data:
 - GET /api/langfuse/status - Check Langfuse connection status
 - GET /api/langfuse/model-stats - Get model usage statistics from Langfuse
 - GET /api/langfuse/phase-stats - Get local phase analytics from session_stats
+- GET /api/langfuse/model-timeline - Get model drift timeline from session_stats
 """
 
 from datetime import datetime, timedelta, timezone
@@ -144,6 +145,15 @@ class PhaseModelStats(BaseModel):
     success_rate: float = Field(0.0, description="Success rate as percentage")
 
 
+class EscalationReasonBreakdown(BaseModel):
+    """Breakdown of escalation reasons for a phase."""
+
+    timeout: int = 0
+    api_error: int = 0
+    truncation: int = 0
+    other: int = 0
+
+
 class PhaseStats(BaseModel):
     """Aggregated statistics for an agent phase."""
 
@@ -155,6 +165,7 @@ class PhaseStats(BaseModel):
     success_rate: float = Field(0.0, description="Overall success rate")
     escalation_rate: float = Field(0.0, description="Percentage that escalated from base tier")
     models: List[PhaseModelStats] = Field(default_factory=list, description="Per-model breakdown")
+    escalation_reasons: Optional[EscalationReasonBreakdown] = None
 
 
 class PhaseStatsResponse(BaseModel):
@@ -219,11 +230,29 @@ async def get_phase_stats(
             GROUP BY phase, tier
         """)
 
+        # Query escalation reasons grouped by phase
+        escalation_reasons_query = text("""
+            SELECT
+                json_extract(data, '$.phase') as phase,
+                json_extract(data, '$.extra.reason') as reason,
+                COUNT(*) as count
+            FROM session_stats
+            WHERE event_type = 'phase_started'
+              AND json_extract(data, '$.extra.escalation') = 1
+              AND timestamp >= :period_start
+            GROUP BY phase, reason
+        """)
+
         completions_result = await session.execute(completions_query, {"period_start": period_start.isoformat()})
         completions = completions_result.fetchall()
 
         failures_result = await session.execute(failures_query, {"period_start": period_start.isoformat()})
         failures = failures_result.fetchall()
+
+        escalation_reasons_result = await session.execute(
+            escalation_reasons_query, {"period_start": period_start.isoformat()}
+        )
+        escalation_reason_rows = escalation_reasons_result.fetchall()
 
     # Build failure lookup: phase -> tier -> count
     failure_map: Dict[str, Dict[Optional[int], int]] = {}
@@ -234,6 +263,36 @@ async def get_phase_stats(
         if phase not in failure_map:
             failure_map[phase] = {}
         failure_map[phase][tier] = count
+
+    def _classify_reason(reason: Optional[str]) -> str:
+        if not reason:
+            return "other"
+        if "timeout" in reason.lower():
+            return "timeout"
+        if any(k in reason for k in ("error", "Error", "Exception")):
+            return "api_error"
+        if "truncat" in reason.lower():
+            return "truncation"
+        return "other"
+
+    # Build escalation reason lookup: phase -> EscalationReasonBreakdown
+    escalation_reason_map: Dict[str, EscalationReasonBreakdown] = {}
+    for row in escalation_reason_rows:
+        phase, reason, count = row[0], row[1], row[2]
+        if not phase:
+            continue
+        if phase not in escalation_reason_map:
+            escalation_reason_map[phase] = EscalationReasonBreakdown()
+        bucket = _classify_reason(reason)
+        breakdown = escalation_reason_map[phase]
+        if bucket == "timeout":
+            breakdown.timeout += count
+        elif bucket == "api_error":
+            breakdown.api_error += count
+        elif bucket == "truncation":
+            breakdown.truncation += count
+        else:
+            breakdown.other += count
 
     # Aggregate by phase
     phase_data: Dict[str, PhaseStats] = {}
@@ -303,10 +362,17 @@ async def get_phase_stats(
         if ps.total_completions > 0:
             ps.escalation_rate = round(escalated_completions / ps.total_completions * 100, 1)
 
+        # Attach escalation reasons breakdown if any exist for this phase
+        if phase_name in escalation_reason_map:
+            ps.escalation_reasons = escalation_reason_map[phase_name]
+
         escalation_summary["by_phase"][phase_name] = {
             "base_tier": base_tier_completions,
             "escalated": escalated_completions,
             "rate": ps.escalation_rate,
+            "escalation_reasons": escalation_reason_map[phase_name].model_dump()
+            if phase_name in escalation_reason_map
+            else None,
         }
 
     # Sort phases by name
@@ -322,3 +388,313 @@ async def get_phase_stats(
         total_failures=total_failures,
         escalation_summary=escalation_summary,
     )
+
+
+# ============================================================================
+# Model Drift Timeline (from session_stats table)
+# ============================================================================
+
+
+class ModelTimelineEntry(BaseModel):
+    """Usage data for a single model on a single day."""
+
+    model: str = Field(..., description="Model identifier")
+    count: int = Field(..., description="Number of completions using this model")
+    cost: float = Field(..., description="Total cost in USD for this model on this day")
+
+
+class ModelTimelineDay(BaseModel):
+    """Aggregated model usage for a single calendar day."""
+
+    date: str = Field(..., description="Date in YYYY-MM-DD format")
+    models: List[ModelTimelineEntry] = Field(
+        default_factory=list, description="Per-model breakdown for this day"
+    )
+    primary_model: Optional[str] = Field(
+        None, description="Model with the highest completion count on this day"
+    )
+    primary_changed: bool = Field(
+        False,
+        description="True if the primary model differs from the previous day's primary",
+    )
+
+
+class ModelTimelineResponse(BaseModel):
+    """Response containing daily model usage timeline."""
+
+    available: bool = Field(..., description="Whether timeline data is available")
+    days: List[ModelTimelineDay] = Field(
+        default_factory=list, description="Daily model usage, ordered by date ascending"
+    )
+    period_days: int = Field(..., description="Number of days requested")
+    all_models: List[str] = Field(
+        default_factory=list, description="All unique model names seen in this period"
+    )
+
+
+@router.get("/model-timeline", response_model=ModelTimelineResponse)
+async def get_model_timeline(
+    days: int = Query(default=30, ge=1, le=90, description="Number of days to look back"),
+):
+    """
+    Get a daily timeline of model usage to track model drift over time.
+
+    Returns per-day counts and costs for each model used, with a flag
+    indicating when the primary (most-used) model changed day-over-day.
+
+    Data comes from local SQLite session_stats, specifically phase_completed events.
+    """
+    period_start = datetime.now(timezone.utc) - timedelta(days=days)
+
+    async with get_session() as session:
+        timeline_query = text("""
+            SELECT
+                date(timestamp) as day,
+                json_extract(data, '$.model') as model,
+                COUNT(*) as count,
+                COALESCE(SUM(json_extract(data, '$.cost')), 0) as total_cost
+            FROM session_stats
+            WHERE event_type IN ('phase_completed', 'cost_update')
+              AND json_extract(data, '$.model') IS NOT NULL
+              AND timestamp >= :period_start
+            GROUP BY day, model
+            ORDER BY day ASC, count DESC
+        """)
+
+        result = await session.execute(timeline_query, {"period_start": period_start.isoformat()})
+        rows = result.fetchall()
+
+    # Build day -> list of entries
+    day_map: Dict[str, List[ModelTimelineEntry]] = {}
+    for row in rows:
+        day, model, count, cost = row
+        if not day or not model:
+            continue
+        if day not in day_map:
+            day_map[day] = []
+        day_map[day].append(
+            ModelTimelineEntry(
+                model=model,
+                count=int(count),
+                cost=round(float(cost or 0), 6),
+            )
+        )
+
+    # Collect all unique model names across the period
+    all_models_set: set = set()
+    for entries in day_map.values():
+        for entry in entries:
+            all_models_set.add(entry.model)
+
+    # Build timeline with primary_changed calculated day-over-day
+    prev_primary: Optional[str] = None
+    timeline: List[ModelTimelineDay] = []
+
+    for day in sorted(day_map.keys()):
+        entries = day_map[day]
+        # Primary model = highest count; already ordered DESC by count from SQL
+        primary = entries[0].model if entries else None
+        changed = prev_primary is not None and primary != prev_primary
+
+        timeline.append(
+            ModelTimelineDay(
+                date=day,
+                models=entries,
+                primary_model=primary,
+                primary_changed=changed,
+            )
+        )
+
+        prev_primary = primary
+
+    all_models_sorted = sorted(all_models_set)
+
+    return ModelTimelineResponse(
+        available=True,
+        days=timeline,
+        period_days=days,
+        all_models=all_models_sorted,
+    )
+
+
+# ============================================================================
+# Cost Efficiency Analysis (from session_stats table)
+# ============================================================================
+
+
+class PhaseCostEfficiency(BaseModel):
+    """Cost efficiency analysis for a single phase."""
+
+    phase: str = Field(..., description="Phase name")
+    base_tier: int = Field(..., description="Configured base tier for this phase")
+    base_tier_label: str = Field("", description="Human-readable base tier name")
+    total_runs: int = Field(0, description="Total completed runs")
+    runs_at_base: int = Field(0, description="Runs that completed at configured base tier")
+    runs_escalated: int = Field(0, description="Runs that required escalation")
+    avg_cost_at_base: float = Field(0.0, description="Average cost when completing at base tier")
+    avg_cost_when_escalated: float = Field(0.0, description="Average total cost including failed attempts + escalation")
+    escalation_waste: float = Field(0.0, description="Total cost of failed attempts that were discarded")
+    total_cost: float = Field(0.0, description="Total cost across all runs")
+    recommendation: Optional[str] = Field(None, description="Actionable recommendation if applicable")
+    suggested_tier: Optional[int] = Field(None, description="Suggested base tier if upgrade recommended")
+
+
+class CostEfficiencyResponse(BaseModel):
+    """Response containing cost efficiency analysis per phase."""
+
+    phases: List[PhaseCostEfficiency] = Field(default_factory=list)
+    period_days: int
+    total_escalation_waste: float = Field(0.0, description="Total wasted cost from failed attempts across all phases")
+
+
+@router.get("/cost-efficiency", response_model=CostEfficiencyResponse)
+async def get_cost_efficiency(
+    days: int = Query(default=30, ge=1, le=90, description="Number of days to look back"),
+):
+    """
+    Analyze cost efficiency of model tier assignments per phase.
+
+    Computes escalation waste (cost of failed attempts before tier escalation)
+    and generates recommendations for phases where upgrading the base tier
+    would reduce total cost.
+    """
+    period_start = datetime.now(timezone.utc) - timedelta(days=days)
+
+    # Load current config for base tier info
+    from api.routers.config import _load_config
+
+    config = _load_config()
+    routing = config.get("routing", {})
+    phase_base_tiers = routing.get("phase_base_tiers", {})
+    tier_labels = routing.get("tier_labels", ["cheapskate", "default", "big-brain"])
+
+    async with get_session() as session:
+        # Get completed runs with tier and cost info
+        completions_query = text("""
+            SELECT
+                json_extract(data, '$.phase') as phase,
+                json_extract(data, '$.extra.tier') as tier,
+                COALESCE(json_extract(data, '$.cost'), 0) as cost
+            FROM session_stats
+            WHERE event_type = 'phase_completed'
+              AND timestamp >= :period_start
+        """)
+
+        # Get failed attempts with cost info (these represent wasted spend)
+        failures_query = text("""
+            SELECT
+                json_extract(data, '$.phase') as phase,
+                json_extract(data, '$.extra.tier') as tier,
+                COALESCE(json_extract(data, '$.cost'), 0) as cost
+            FROM session_stats
+            WHERE event_type = 'phase_failed'
+              AND timestamp >= :period_start
+        """)
+
+        completions_result = await session.execute(completions_query, {"period_start": period_start.isoformat()})
+        completions = completions_result.fetchall()
+
+        failures_result = await session.execute(failures_query, {"period_start": period_start.isoformat()})
+        failures = failures_result.fetchall()
+
+    # Aggregate per phase
+    phase_stats: Dict[str, Dict[str, Any]] = {}
+
+    for phase, tier_raw, cost in completions:
+        if not phase:
+            continue
+        tier = int(tier_raw) if tier_raw is not None else 0
+        cost = float(cost or 0)
+
+        if phase not in phase_stats:
+            base = phase_base_tiers.get(phase, 0)
+            phase_stats[phase] = {
+                "base_tier": base,
+                "base_costs": [],
+                "escalated_costs": [],
+                "total_cost": 0.0,
+            }
+
+        ps = phase_stats[phase]
+        ps["total_cost"] += cost
+
+        if tier <= ps["base_tier"]:
+            ps["base_costs"].append(cost)
+        else:
+            ps["escalated_costs"].append(cost)
+
+    # Sum up failure costs per phase (escalation waste)
+    failure_costs: Dict[str, float] = {}
+    for phase, tier_raw, cost in failures:
+        if not phase:
+            continue
+        cost = float(cost or 0)
+        failure_costs[phase] = failure_costs.get(phase, 0) + cost
+
+    # Build response
+    results: List[PhaseCostEfficiency] = []
+    total_waste = 0.0
+
+    for phase, ps in sorted(phase_stats.items()):
+        base_tier = ps["base_tier"]
+        base_costs = ps["base_costs"]
+        escalated_costs = ps["escalated_costs"]
+        waste = failure_costs.get(phase, 0)
+        total_waste += waste
+
+        total_runs = len(base_costs) + len(escalated_costs)
+        avg_base = (sum(base_costs) / len(base_costs)) if base_costs else 0
+        avg_escalated = (
+            (sum(escalated_costs) + waste) / len(escalated_costs)
+            if escalated_costs
+            else 0
+        )
+
+        label = tier_labels[base_tier] if base_tier < len(tier_labels) else f"tier-{base_tier}"
+
+        # Generate recommendation
+        recommendation = None
+        suggested_tier = None
+        escalation_rate = (len(escalated_costs) / total_runs * 100) if total_runs > 0 else 0
+
+        if total_runs >= 3 and escalation_rate > 30 and base_tier < len(tier_labels) - 1:
+            next_tier = base_tier + 1
+            next_label = tier_labels[next_tier] if next_tier < len(tier_labels) else f"tier-{next_tier}"
+            recommendation = (
+                f"Escalated {escalation_rate:.0f}% of runs. "
+                f"Wasted {formatCost(waste)} on failed attempts over {days} days. "
+                f"Consider upgrading base tier to {next_label}."
+            )
+            suggested_tier = next_tier
+
+        results.append(
+            PhaseCostEfficiency(
+                phase=phase,
+                base_tier=base_tier,
+                base_tier_label=label,
+                total_runs=total_runs,
+                runs_at_base=len(base_costs),
+                runs_escalated=len(escalated_costs),
+                avg_cost_at_base=round(avg_base, 6),
+                avg_cost_when_escalated=round(avg_escalated, 6),
+                escalation_waste=round(waste, 6),
+                total_cost=round(ps["total_cost"], 4),
+                recommendation=recommendation,
+                suggested_tier=suggested_tier,
+            )
+        )
+
+    return CostEfficiencyResponse(
+        phases=results,
+        period_days=days,
+        total_escalation_waste=round(total_waste, 4),
+    )
+
+
+def formatCost(cost: float) -> str:
+    """Format a cost value for display in recommendations."""
+    if cost < 0.01:
+        return f"${cost:.4f}"
+    if cost < 1:
+        return f"${cost:.3f}"
+    return f"${cost:.2f}"

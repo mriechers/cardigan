@@ -78,6 +78,7 @@ interface JobDetail {
   airtable_url?: string
   media_id?: string
   content_type?: string
+  tier_override?: number | null
 }
 
 // Map output keys to their display names and filenames
@@ -114,6 +115,7 @@ export default function JobDetail() {
   const [hasScreengrabs, setHasScreengrabs] = useState(false)
   const [keywordReports, setKeywordReports] = useState<Array<{ filename: string; version: number; uploaded_at?: string }>>([])
   const [keywordUploading, setKeywordUploading] = useState(false)
+  const [tierLabels, setTierLabels] = useState<string[]>([])
   const keywordInputRef = useRef<HTMLInputElement | null>(null)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const modalRef = useFocusTrap(!!viewingOutput)
@@ -134,7 +136,21 @@ export default function JobDetail() {
       }
     }
 
+    // Fetch tier labels for dynamic display
+    const fetchTierLabels = async () => {
+      try {
+        const res = await fetch('/api/config/routing')
+        if (res.ok) {
+          const data = await res.json()
+          setTierLabels(data.tier_labels || [])
+        }
+      } catch {
+        // Non-critical — fall back to generic labels
+      }
+    }
+
     fetchJob()
+    fetchTierLabels()
 
     // Auto-refresh while job is in progress
     const interval = setInterval(() => {
@@ -445,6 +461,21 @@ export default function JobDetail() {
                 Clip
               </span>
             )}
+            {job.tier_override != null && (() => {
+              const TIER_BADGE_COLORS = [
+                'bg-green-700 text-white',
+                'bg-cyan-700 text-white',
+                'bg-purple-700 text-white',
+                'bg-blue-700 text-white',
+              ]
+              const label = tierLabels[job.tier_override] ?? `Tier ${job.tier_override}`
+              const color = TIER_BADGE_COLORS[job.tier_override] ?? 'bg-gray-700 text-white'
+              return (
+                <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${color}`} title="Job-level model tier override">
+                  Forced: {label}
+                </span>
+              )
+            })()}
           </div>
           <p className="text-gray-400">
             Job #{job.id}
@@ -725,8 +756,18 @@ export default function JobDetail() {
                       </div>
                     )}
                     {phase.tier_reason && (
-                      <div>
-                        Reason: <span className="text-gray-400">{phase.tier_reason}</span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span>Reason:</span>
+                        {/escalated|Escalated/i.test(phase.tier_reason) && (
+                          /timeout/i.test(phase.tier_reason) ? (
+                            <span className="px-1.5 py-0 rounded text-[10px] bg-orange-500/20 text-orange-400">TIMEOUT</span>
+                          ) : /error|Error|Exception/.test(phase.tier_reason) ? (
+                            <span className="px-1.5 py-0 rounded text-[10px] bg-red-500/20 text-red-400">ERROR</span>
+                          ) : /truncat/i.test(phase.tier_reason) ? (
+                            <span className="px-1.5 py-0 rounded text-[10px] bg-yellow-500/20 text-yellow-400">TRUNCATED</span>
+                          ) : null
+                        )}
+                        <span className="text-gray-400">{phase.tier_reason}</span>
                       </div>
                     )}
                   </div>
@@ -997,9 +1038,9 @@ export default function JobDetail() {
                   className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
                 >
                   <option value="">Auto-escalate (recommended)</option>
-                  <option value="0">Cheapskate (tier 0)</option>
-                  <option value="1">Default (tier 1)</option>
-                  <option value="2">Big Brain (tier 2)</option>
+                  {tierLabels.map((label, idx) => (
+                    <option key={idx} value={idx}>{label} (tier {idx})</option>
+                  ))}
                 </select>
               </div>
               <div>

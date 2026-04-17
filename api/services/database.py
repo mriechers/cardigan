@@ -90,6 +90,7 @@ jobs_table = Table(
     Column("duration_minutes", Float, nullable=True),
     Column("word_count", Integer, nullable=True),
     Column("content_type", Text, nullable=True),  # 'full', 'short', or 'clip'
+    Column("tier_override", Integer, nullable=True),  # Job-level tier override (0-3)
 )
 
 # Define session_stats table
@@ -356,6 +357,7 @@ async def create_job(job: JobCreate) -> Job:
             "phases": json.dumps(initial_phases),
             "retry_count": 0,
             "max_retries": 3,
+            "tier_override": job.tier_override,
         }
 
         # Insert job
@@ -1281,6 +1283,7 @@ def _row_to_job(row) -> Job:
         duration_minutes=getattr(row, "duration_minutes", None),
         word_count=getattr(row, "word_count", None),
         content_type=getattr(row, "content_type", None),
+        tier_override=getattr(row, "tier_override", None),
         outputs=outputs,
     )
 

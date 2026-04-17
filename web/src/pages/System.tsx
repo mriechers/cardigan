@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import ModelStatsWidget from '../components/ModelStatsWidget'
+import ModelTimelineWidget from '../components/ModelTimelineWidget'
 import PhaseStatsWidget from '../components/PhaseStatsWidget'
 import { AGENT_INFO } from '../constants/agents'
 
@@ -23,6 +24,9 @@ interface HealthStatus {
     configured_preset: string | null
     fallback_model: string | null
     phase_backends?: Record<string, string>
+    phase_base_tiers?: Record<string, number>
+    tier_labels?: string[]
+    tiers?: string[]
     openrouter_presets?: Record<string, PresetInfo>
   }
   last_run?: {
@@ -311,23 +315,28 @@ export default function System() {
         </div>
       )}
 
+      {/* Model Drift Timeline - Show when connected */}
+      {isConnected && (
+        <ModelTimelineWidget />
+      )}
+
       {/* Agent Roster - Show when connected */}
-      {isConnected && health?.llm?.phase_backends && (
+      {isConnected && health?.llm?.phase_base_tiers && (
         <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
           <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wide mb-3">
             Agent Roster
           </h3>
           <div className="space-y-3">
             {AGENT_INFO.map((agent) => {
-              const backend = health.llm?.phase_backends?.[agent.id] || 'openrouter'
-              const isBigBrain = backend.includes('big-brain')
-              const isCheapskate = backend.includes('cheapskate')
-              const badgeClass = isBigBrain
-                ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
-                : isCheapskate
-                ? 'bg-green-500/20 text-green-400 border border-green-500/30'
-                : 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
-              const tierLabel = isBigBrain ? 'big-brain' : isCheapskate ? 'cheapskate' : 'default'
+              const tier = health.llm?.phase_base_tiers?.[agent.id] ?? 0
+              const tierLabel = health.llm?.tier_labels?.[tier] ?? `tier-${tier}`
+              const TIER_BADGE_STYLES: Record<number, string> = {
+                0: 'bg-green-500/20 text-green-400 border border-green-500/30',
+                1: 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30',
+                2: 'bg-purple-500/20 text-purple-400 border border-purple-500/30',
+                3: 'bg-blue-500/20 text-blue-400 border border-blue-500/30',
+              }
+              const badgeClass = TIER_BADGE_STYLES[tier] ?? 'bg-gray-500/20 text-gray-400 border border-gray-500/30'
               return (
                 <div key={agent.id} className="flex items-start space-x-4 p-3 bg-gray-900 rounded-lg">
                   <div className="flex-shrink-0 w-10 h-10 rounded-full bg-gray-800 flex items-center justify-center text-lg">
@@ -347,9 +356,15 @@ export default function System() {
             })}
           </div>
           <p className="text-xs text-gray-500 mt-3">
-            <span className="text-purple-400">big-brain</span> = complex reasoning |{' '}
-            <span className="text-cyan-400">default</span> = balanced |{' '}
-            <span className="text-green-400">cheapskate</span> = free tier
+            {health.llm?.tier_labels?.map((label, idx) => {
+              const colors = ['text-green-400', 'text-cyan-400', 'text-purple-400', 'text-blue-400']
+              return (
+                <span key={idx}>
+                  {idx > 0 && ' | '}
+                  <span className={colors[idx] ?? 'text-gray-400'}>{label}</span>
+                </span>
+              )
+            })}
           </p>
         </div>
       )}
@@ -415,6 +430,12 @@ export default function System() {
           </div>
           <div className="text-gray-400">
             <span className="text-blue-400">GET</span> /api/langfuse/status
+          </div>
+          <div className="text-gray-400">
+            <span className="text-blue-400">GET</span> /api/langfuse/model-timeline
+          </div>
+          <div className="text-gray-400">
+            <span className="text-blue-400">GET</span> /api/langfuse/cost-efficiency
           </div>
         </div>
       </div>

@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
 from api.middleware.rate_limit import RATE_EXPENSIVE, limiter
@@ -50,6 +50,12 @@ class UploadResponse(BaseModel):
 async def upload_transcripts(
     request: Request,
     files: List[UploadFile] = File(..., description="Transcript files (.txt or .srt)"),
+    tier_override: Optional[int] = Form(
+        None,
+        ge=0,
+        le=3,
+        description="Force all phases to use this tier (0=cheapskate, 1=default, 2=big-brain, 3=pinned)",
+    ),
 ) -> UploadResponse:
     """Upload multiple transcript files and queue for processing.
 
@@ -138,6 +144,7 @@ async def upload_transcripts(
             job_create = JobCreate(
                 project_name=project_name,
                 transcript_file=file.filename or "",
+                tier_override=tier_override,
             )
 
             # Check for duplicate by media ID

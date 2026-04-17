@@ -211,15 +211,21 @@ async def update_routing_config(update: RoutingConfigUpdate):
         ]
 
     if update.phase_base_tiers is not None:
-        # Validate phases
+        # Validate phases and tiers against configured tier list
+        max_tier = len(routing.get("tiers", ["openrouter-cheapskate", "openrouter", "openrouter-big-brain"])) - 1
         for phase, tier in update.phase_base_tiers.items():
             if phase not in valid_phases:
                 raise HTTPException(
                     status_code=400, detail=f"Invalid phase: {phase}. Valid phases: {', '.join(valid_phases)}"
                 )
-            if tier < 0 or tier > 2:
-                raise HTTPException(status_code=400, detail=f"Invalid tier {tier} for {phase}. Must be 0, 1, or 2.")
-        routing["phase_base_tiers"] = update.phase_base_tiers
+            if tier < 0 or tier > max_tier:
+                tier_labels = routing.get("tier_labels", [])
+                label_hint = f" ({', '.join(f'{i}={l}' for i, l in enumerate(tier_labels))})" if tier_labels else ""
+                raise HTTPException(status_code=400, detail=f"Invalid tier {tier} for {phase}. Must be 0-{max_tier}{label_hint}.")
+        # Merge into existing tiers (PATCH semantics — don't wipe unspecified phases)
+        existing = routing.get("phase_base_tiers", {})
+        existing.update(update.phase_base_tiers)
+        routing["phase_base_tiers"] = existing
 
     if update.escalation is not None:
         routing["escalation"] = update.escalation.model_dump()

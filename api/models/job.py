@@ -86,6 +86,12 @@ class JobCreate(BaseModel):
     transcript_file: str = Field(..., description="Path to transcript file (relative to transcripts/)")
     project_path: Optional[str] = Field(None, description="Output path (auto-generated if not provided)")
     priority: Optional[int] = Field(default=0, description="Job priority (higher = sooner)")
+    tier_override: Optional[int] = Field(
+        None,
+        ge=0,
+        le=3,
+        description="Force all phases to use this tier (0=cheapskate, 1=default, 2=big-brain, 3=pinned)",
+    )
 
 
 class PhaseUpdate(BaseModel):
@@ -168,6 +174,10 @@ class Job(BaseModel):
     )
     word_count: Optional[int] = Field(None, description="Transcript word count")
     content_type: Optional[str] = Field(None, description="Detected content type: 'full', 'short', or 'clip'")
+    tier_override: Optional[int] = Field(
+        None,
+        description="Job-level tier override (0=cheapskate, 1=default, 2=big-brain, 3=pinned); null = auto",
+    )
     outputs: Optional[JobOutputs] = Field(None, description="Output files from manifest")
 
     class Config:

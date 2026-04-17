@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useToast } from './ui/Toast'
 
 interface UploadStatus {
@@ -28,7 +28,16 @@ export default function TranscriptUploader({ onUploadComplete }: TranscriptUploa
   const [uploadStatuses, setUploadStatuses] = useState<UploadStatus[]>([])
   const [isUploading, setIsUploading] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
+  const [tierOverride, setTierOverride] = useState<number | null>(null)
+  const [tierLabels, setTierLabels] = useState<string[]>([])
   const { toast } = useToast()
+
+  useEffect(() => {
+    fetch('/api/config/routing')
+      .then(res => res.ok ? res.json() : null)
+      .then(data => { if (data?.tier_labels) setTierLabels(data.tier_labels) })
+      .catch(() => {})
+  }, [])
 
   const validateFile = (file: File): string | null => {
     const ext = '.' + file.name.split('.').pop()?.toLowerCase()
@@ -113,6 +122,9 @@ export default function TranscriptUploader({ onUploadComplete }: TranscriptUploa
     files.forEach(file => {
       formData.append('files', file)
     })
+    if (tierOverride !== null) {
+      formData.append('tier_override', String(tierOverride))
+    }
 
     try {
       const response = await fetch('/api/upload/transcripts', {
@@ -275,6 +287,29 @@ export default function TranscriptUploader({ onUploadComplete }: TranscriptUploa
           </div>
         </div>
       )}
+
+      {/* Model Tier Selector */}
+      <div className="space-y-1">
+        <label className="block text-sm font-medium text-gray-300">
+          Model Tier
+        </label>
+        <select
+          value={tierOverride === null ? '' : String(tierOverride)}
+          onChange={e => setTierOverride(e.target.value === '' ? null : Number(e.target.value))}
+          disabled={isUploading}
+          className="w-full bg-gray-900 border border-gray-600 text-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <option value="">Auto (recommended)</option>
+          {tierLabels.map((label, idx) => (
+            <option key={idx} value={idx}>{label}</option>
+          ))}
+        </select>
+        {tierOverride !== null && (
+          <p className="text-xs text-amber-400">
+            All phases will use this tier. Manager/QA phase still uses big-brain regardless.
+          </p>
+        )}
+      </div>
 
       {/* Upload Button */}
       {files.length > 0 && (
