@@ -655,6 +655,17 @@ async def list_tools() -> list[Tool]:
                 "required": ["media_id", "field", "proposed_value", "reason"],
             },
         ),
+        Tool(
+            name="review_proposed_edits",
+            description="Show all staged Airtable edits for a project in a diff format. Use this to preview changes before committing with commit_sst_edits.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "media_id": {"type": "string", "description": "The Media ID / project name"},
+                },
+                "required": ["media_id"],
+            },
+        ),
     ]
 
 
@@ -886,6 +897,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         return await handle_list_revisions(arguments)
     elif name == "propose_sst_edit":
         return await handle_propose_sst_edit(arguments)
+    elif name == "review_proposed_edits":
+        return await handle_review_proposed_edits(arguments)
     else:
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -1878,6 +1891,48 @@ async def handle_propose_sst_edit(arguments: dict) -> list[TextContent]:
         f"\nUse `review_proposed_edits(\"{media_id}\")` to see all pending changes.",
         f"Use `commit_sst_edits(\"{media_id}\")` when ready to write to Airtable.",
     ]
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def handle_review_proposed_edits(arguments: dict) -> list[TextContent]:
+    """Show all staged Airtable edits for a project."""
+    media_id = arguments.get("media_id")
+    if not media_id:
+        return [TextContent(type="text", text="Error: media_id is required")]
+
+    manifest = load_manifest(media_id)
+    proposed = manifest.get("proposed_edits", {}) if manifest else {}
+
+    if not proposed:
+        return [TextContent(type="text", text=f"# Proposed Edits for {media_id}\n\nNo pending edits. Use `propose_sst_edit` to stage changes.")]
+
+    lines = [f"# Proposed Edits for {media_id}\n"]
+    lines.append(f"**{len(proposed)} edit{'s' if len(proposed) != 1 else ''} staged**\n")
+
+    for field_key, edit in proposed.items():
+        airtable_column = edit.get("airtable_column", field_key)
+        current = edit.get("current_value", "(empty)") or "(empty)"
+        proposed_val = edit.get("proposed_value", "")
+        reason = edit.get("reason", "")
+
+        limit_info = ""
+        if field_key in WRITABLE_FIELDS:
+            _, _, char_limit = WRITABLE_FIELDS[field_key]
+            if char_limit:
+                length = len(proposed_val)
+                status = "✅" if length <= char_limit else f"❌ OVER by {length - char_limit}"
+                limit_info = f" ({length}/{char_limit} {status})"
+
+        lines.append(f"## {airtable_column}")
+        lines.append(f"**Current:** {current}")
+        lines.append(f"**Proposed:** {proposed_val}{limit_info}")
+        lines.append(f"**Reason:** {reason}")
+        lines.append("")
+
+    lines.append("---")
+    lines.append(f"Use `commit_sst_edits(\"{media_id}\")` to write these changes to Airtable.")
+    lines.append("Use `propose_sst_edit` to modify or add more changes.")
 
     return [TextContent(type="text", text="\n".join(lines))]
 

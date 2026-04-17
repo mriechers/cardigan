@@ -490,3 +490,46 @@ async def test_propose_sst_edit_multiple_fields(project_with_manifest, monkeypat
     manifest = json.loads((project_path / "manifest.json").read_text())
     assert "title" in manifest["proposed_edits"]
     assert "short_description" in manifest["proposed_edits"]
+
+
+@pytest.mark.asyncio
+async def test_review_proposed_edits_shows_diff(project_with_manifest, monkeypatch):
+    """review_proposed_edits should show current vs proposed for all staged edits."""
+    from mcp_server.server import handle_propose_sst_edit, handle_review_proposed_edits
+
+    async def mock_search(media_id):
+        return {"record_id": "recTEST123", "title": "Old Title", "short_description": "Old short"}
+
+    monkeypatch.setattr("mcp_server.server.search_sst_by_media_id", mock_search)
+
+    project_name, _ = project_with_manifest
+
+    await handle_propose_sst_edit({
+        "media_id": project_name, "field": "title",
+        "proposed_value": "New Title", "reason": "Better SEO",
+    })
+    await handle_propose_sst_edit({
+        "media_id": project_name, "field": "short_description",
+        "proposed_value": "New short", "reason": "Clearer",
+    })
+
+    result = await handle_review_proposed_edits({"media_id": project_name})
+    text = result[0].text
+
+    assert "Old Title" in text
+    assert "New Title" in text
+    assert "Old short" in text
+    assert "New short" in text
+    assert "Better SEO" in text
+    assert "2" in text  # 2 edits
+
+
+@pytest.mark.asyncio
+async def test_review_proposed_edits_empty(project_with_manifest):
+    """review_proposed_edits should report no pending edits."""
+    from mcp_server.server import handle_review_proposed_edits
+
+    project_name, _ = project_with_manifest
+    result = await handle_review_proposed_edits({"media_id": project_name})
+    text = result[0].text
+    assert "no" in text.lower() or "No" in text
