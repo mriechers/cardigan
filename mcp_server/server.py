@@ -2067,7 +2067,6 @@ async def handle_commit_sst_edits(arguments: dict) -> list[TextContent]:
             )
         ]
 
-
     # Build the PATCH payload using Airtable column names
     patch_fields = {}
     for field_key, edit in proposed.items():
