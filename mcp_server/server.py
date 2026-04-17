@@ -99,7 +99,7 @@ AIRTABLE_API_BASE = "https://api.airtable.com/v0"
 # Everything else is read-only. Format: key -> (airtable_column, field_id, char_limit or None)
 WRITABLE_FIELDS: dict[str, tuple[str, str, int | None]] = {
     "title": ("Release Title", "fldXqxjjxR4z5IJv6", 80),
-    "short_description": ("Short Description", "fldDwTtKlOCdgKHpW", 100),
+    "short_description": ("Short Description", "fldDwTtKlOCdgKHpW", 90),
     "long_description": ("Long Description", "fld6HsWiKL77bFqo1", 350),
     "keywords": ("General Keywords/Tags", "fldjdPEXZyvx3rc6Y", None),
     "social_description": ("Social Media Description", "fldntHlzk6PfIT5k2", None),
@@ -119,6 +119,9 @@ server = Server("cardigan")
 
 def get_project_path(project_name: str) -> Path:
     """Get the OUTPUT path for a project."""
+    candidate = (OUTPUT_DIR / project_name).resolve()
+    if not str(candidate).startswith(str(OUTPUT_DIR.resolve())):
+        raise ValueError(f"Invalid project name: {project_name!r}")
     return OUTPUT_DIR / project_name
 
 
@@ -578,7 +581,7 @@ async def list_tools() -> list[Tool]:
                     "title": {"type": "string", "description": "Release title to validate (limit: 80 chars)"},
                     "short_description": {
                         "type": "string",
-                        "description": "Short description to validate (limit: 100 chars)",
+                        "description": "Short description to validate (limit: 90 chars)",
                     },
                     "long_description": {
                         "type": "string",
@@ -2044,6 +2047,25 @@ async def handle_commit_sst_edits(arguments: dict) -> list[TextContent]:
             "Please review the current values, then use `propose_sst_edit` to re-stage with updated context.",
         ]
         return [TextContent(type="text", text="\n".join(lines))]
+
+    # Enforce character limits before writing
+    over_limit = []
+    for field_key, edit in proposed.items():
+        if field_key in WRITABLE_FIELDS:
+            _, _, char_limit = WRITABLE_FIELDS[field_key]
+            value = edit.get("proposed_value", "")
+            if char_limit and isinstance(value, str) and len(value) > char_limit:
+                col_name = edit.get("airtable_column", field_key)
+                over_limit.append(f"  {col_name}: {len(value)}/{char_limit} chars")
+    if over_limit:
+        return [
+            TextContent(
+                type="text",
+                text="**Commit blocked** — fields exceed character limits:\n"
+                + "\n".join(over_limit)
+                + "\n\nFix them with `propose_sst_edit` before committing.",
+            )
+        ]
 
     # Build the PATCH payload using Airtable column names
     patch_fields = {}

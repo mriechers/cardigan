@@ -1188,8 +1188,7 @@ class JobWorker:
         if sst_context:
             for field_value in sst_context.values():
                 if isinstance(field_value, str) and "Clip" in field_value:
-                    if any(marker in field_value for marker in ("Full-Length", "Livestream")):
-                        return "clip"
+                    return "clip"
 
         # Check duration threshold for Shorts.
         # 90-second threshold is intentionally higher than YouTube's 60s limit
