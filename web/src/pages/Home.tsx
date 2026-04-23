@@ -87,30 +87,31 @@ export default function Home() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-white">Dashboard</h1>
+      <h1 className="text-2xl font-display font-bold text-white">Dashboard</h1>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <StatCard
-          label="Pending"
-          value={stats?.pending ?? 0}
-          color="text-status-pending"
-        />
-        <StatCard
-          label="Processing"
-          value={stats?.in_progress ?? 0}
-          color="text-status-processing"
-        />
-        <StatCard
-          label="Completed"
-          value={stats?.completed ?? 0}
-          color="text-status-completed"
-        />
-        <StatCard
-          label="Failed"
-          value={stats?.failed ?? 0}
-          color="text-status-failed"
-        />
+      {/* Queue Summary — single compact row, not 4 cards */}
+      <div className="flex items-center gap-6 px-4 py-3 bg-surface-850 rounded-lg border border-surface-700">
+        <span className="text-sm font-medium text-surface-300">Queue</span>
+        <div className="flex items-center gap-4 text-sm">
+          <span>
+            <span className="font-mono font-medium text-status-pending">{stats?.pending ?? 0}</span>
+            <span className="text-surface-400 ml-1">pending</span>
+          </span>
+          <span>
+            <span className="font-mono font-medium text-status-processing">{stats?.in_progress ?? 0}</span>
+            <span className="text-surface-400 ml-1">processing</span>
+          </span>
+          <span>
+            <span className="font-mono font-medium text-status-completed">{stats?.completed ?? 0}</span>
+            <span className="text-surface-400 ml-1">done</span>
+          </span>
+          {(stats?.failed ?? 0) > 0 && (
+            <span>
+              <span className="font-mono font-medium text-status-failed">{stats?.failed}</span>
+              <span className="text-surface-400 ml-1">failed</span>
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Recent Jobs */}
@@ -126,8 +127,11 @@ export default function Home() {
         </div>
         <div className="divide-y divide-surface-700">
           {recentJobs.length === 0 ? (
-            <div className="px-4 py-8 text-center text-surface-300">
-              No jobs in queue
+            <div className="px-6 py-12 text-center">
+              <p className="text-surface-300 font-medium">No jobs in the queue</p>
+              <p className="text-surface-400 text-sm mt-1">
+                Upload transcripts from the <Link to="/ready" className="text-pbs-400 hover:text-pbs-300">Ready for Work</Link> page to get started.
+              </p>
             </div>
           ) : (
             recentJobs.map((job) => (
@@ -137,12 +141,19 @@ export default function Home() {
                 className="block px-4 py-3 hover:bg-surface-800 transition-colors"
               >
                 <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-white font-medium">
-                      {job.project_name}
-                    </div>
-                    <div className="text-sm text-surface-400" title={formatTimestamp(job.queued_at + 'Z')}>
-                      {formatRelativeTime(job.queued_at + 'Z')}
+                  <div className="flex items-center gap-3">
+                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                      job.status === 'completed' ? 'bg-status-completed' :
+                      job.status === 'in_progress' ? 'bg-status-processing animate-pulse' :
+                      job.status === 'failed' ? 'bg-status-failed' :
+                      job.status === 'pending' ? 'bg-status-pending' :
+                      'bg-surface-500'
+                    }`} />
+                    <div>
+                      <div className="text-white font-medium">{job.project_name}</div>
+                      <div className="text-sm text-surface-400" title={formatTimestamp(job.queued_at + 'Z')}>
+                        {formatRelativeTime(job.queued_at + 'Z')}
+                      </div>
                     </div>
                   </div>
                   <span className={`text-sm font-medium ${getStatusTextColor(job.status)}`}>
@@ -154,23 +165,6 @@ export default function Home() {
           )}
         </div>
       </div>
-    </div>
-  )
-}
-
-function StatCard({
-  label,
-  value,
-  color,
-}: {
-  label: string
-  value: number
-  color: string
-}) {
-  return (
-    <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
-      <div className="text-sm text-surface-300">{label}</div>
-      <div className={`text-3xl font-bold ${color}`}>{value}</div>
     </div>
   )
 }
