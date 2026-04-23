@@ -274,7 +274,7 @@ export default function Queue() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-white">Job Queue</h1>
-          <span className="text-gray-400 text-sm">
+          <span className="text-surface-400 text-sm">
             {total} job{total !== 1 ? 's' : ''}
             {filter !== 'all' && ` (${filter.replace('_', ' ')})`}
             {debouncedSearch && ` matching "${debouncedSearch}"`}
@@ -286,7 +286,7 @@ export default function Queue() {
           {/* Upload Button */}
           <button
             onClick={() => setShowUploader(!showUploader)}
-            className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-md transition-colors"
+            className="px-3 py-1.5 text-sm bg-pbs-500 hover:bg-pbs-400 text-white rounded-md transition-colors"
             title="Upload transcript files"
           >
             {showUploader ? 'Hide Upload' : '+ Upload'}
@@ -310,14 +310,14 @@ export default function Queue() {
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Search by filename..."
-              className="bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 w-64 pr-8"
+              className="bg-surface-800 border border-surface-700 rounded-lg px-4 py-2 text-white placeholder-surface-400 focus:outline-none focus:border-pbs-500 w-64 pr-8"
               aria-describedby="queue-search-desc"
             />
             {searchInput && (
               <button
                 type="button"
                 onClick={clearSearch}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-surface-400 hover:text-white"
                 aria-label="Clear search"
               >
                 ✕
@@ -336,7 +336,7 @@ export default function Queue() {
       )}
 
       {/* Filter Tabs */}
-      <div className="flex items-center space-x-1 bg-gray-800 rounded-lg p-1 w-fit">
+      <div className="flex items-center space-x-1 bg-surface-800 rounded-lg p-1 w-fit">
         {['all', 'pending', 'in_progress', 'completed', 'failed', 'cancelled'].map((status) => {
           const count = stats
             ? status === 'all'
@@ -350,8 +350,8 @@ export default function Queue() {
               onClick={() => handleFilterChange(status)}
               className={`px-3 py-1.5 text-sm rounded-md transition-colors flex items-center space-x-1.5 ${
                 filter === status
-                  ? 'bg-gray-700 text-white'
-                  : 'text-gray-400 hover:text-white'
+                  ? 'bg-surface-700 text-white'
+                  : 'text-surface-400 hover:text-white'
               }`}
             >
               <span>{status === 'all' ? 'All' : status.replace('_', ' ')}</span>
@@ -359,8 +359,8 @@ export default function Queue() {
                 <span
                   className={`px-1.5 py-0.5 text-xs rounded-full ${
                     filter === status
-                      ? 'bg-gray-600 text-gray-200'
-                      : 'bg-gray-700 text-gray-400'
+                      ? 'bg-surface-600 text-surface-200'
+                      : 'bg-surface-700 text-surface-400'
                   }`}
                 >
                   {count}
@@ -375,15 +375,15 @@ export default function Queue() {
       {loading ? (
         <SkeletonQueue />
       ) : (
-        <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+        <div className="bg-surface-800 rounded-lg border border-surface-700 overflow-hidden">
         {jobs.length === 0 ? (
-          <div className="px-4 py-8 text-center text-gray-300">
+          <div className="px-4 py-8 text-center text-surface-300">
             No jobs found
           </div>
         ) : (
           <table className="w-full">
-            <thead className="bg-gray-850 border-b border-gray-700">
-              <tr className="text-left text-sm text-gray-300">
+            <thead className="bg-surface-850 border-b border-surface-700">
+              <tr className="text-left text-sm text-surface-300">
                 <th className="px-4 py-3 font-medium">ID</th>
                 <th className="px-4 py-3 font-medium">Transcript</th>
                 <th className="px-4 py-3 font-medium">Status</th>
@@ -393,16 +393,16 @@ export default function Queue() {
                 <th className="px-4 py-3 font-medium">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-700">
+            <tbody className="divide-y divide-surface-700">
               {jobs.map((job) => (
                 <tr
                   key={job.id}
-                  className="hover:bg-gray-750 transition-colors"
+                  className="hover:bg-surface-800 transition-colors"
                 >
                   <td className="px-4 py-3">
                     <Link
                       to={`/jobs/${job.id}`}
-                      className="text-blue-400 hover:text-blue-300"
+                      className="text-pbs-400 hover:text-pbs-300"
                     >
                       #{job.id}
                     </Link>
@@ -419,16 +419,16 @@ export default function Queue() {
                       {job.status}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-300 text-sm">
+                  <td className="px-4 py-3 text-surface-300 text-sm">
                     {job.current_phase || '-'}
                   </td>
                   <td
-                    className="px-4 py-3 text-gray-300 text-sm"
+                    className="px-4 py-3 text-surface-300 text-sm"
                     title={formatTimestamp(job.queued_at + 'Z')}
                   >
                     {formatRelativeTime(job.queued_at + 'Z')}
                   </td>
-                  <td className="px-4 py-3 text-gray-300 text-sm">
+                  <td className="px-4 py-3 text-surface-300 text-sm">
                     {job.priority}
                   </td>
                   <td className="px-4 py-3">
@@ -437,7 +437,7 @@ export default function Queue() {
                         <>
                           <button
                             onClick={() => handlePrioritize(job.id)}
-                            className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors"
+                            className="px-2 py-1 text-xs bg-pbs-500 hover:bg-pbs-400 text-white rounded transition-colors"
                             title="Move to top of queue"
                           >
                             ↑ Prioritize
@@ -452,12 +452,12 @@ export default function Queue() {
                         </>
                       )}
                       {job.status === 'in_progress' && (
-                        <span className="text-xs text-gray-300">Processing...</span>
+                        <span className="text-xs text-surface-300">Processing...</span>
                       )}
                       {['completed', 'failed', 'cancelled'].includes(job.status) && (
                         <Link
                           to={`/jobs/${job.id}`}
-                          className="text-xs text-gray-300 hover:text-white"
+                          className="text-xs text-surface-300 hover:text-white"
                         >
                           View details
                         </Link>
@@ -478,17 +478,17 @@ export default function Queue() {
           <button
             onClick={() => setPage(p => Math.max(1, p - 1))}
             disabled={page === 1}
-            className="px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-700 transition-colors"
+            className="px-4 py-2 bg-surface-800 border border-surface-700 rounded-lg text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-surface-700 transition-colors"
           >
             ← Previous
           </button>
-          <span className="text-gray-400">
+          <span className="text-surface-400">
             Page {page} of {totalPages}
           </span>
           <button
             onClick={() => setPage(p => Math.min(totalPages, p + 1))}
             disabled={page === totalPages}
-            className="px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-700 transition-colors"
+            className="px-4 py-2 bg-surface-800 border border-surface-700 rounded-lg text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-surface-700 transition-colors"
           >
             Next →
           </button>

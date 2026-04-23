@@ -166,7 +166,7 @@ export default function TranscriptUploader({ onUploadComplete }: TranscriptUploa
 
   const getStatusIcon = (status: UploadStatus) => {
     if (status.uploading) {
-      return <span className="text-blue-400 animate-spin">⟳</span>
+      return <span className="text-pbs-400 animate-spin">⟳</span>
     }
     if (status.success) {
       return <span className="text-green-400">✓</span>
@@ -175,13 +175,13 @@ export default function TranscriptUploader({ onUploadComplete }: TranscriptUploa
   }
 
   return (
-    <div className="bg-gray-800 rounded-lg border border-gray-700 p-6 space-y-4">
+    <div className="bg-surface-800 rounded-lg border border-surface-700 p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold text-white">Upload Transcripts</h3>
         {files.length > 0 && !isUploading && (
           <button
             onClick={clearAll}
-            className="text-sm text-gray-400 hover:text-white transition-colors"
+            className="text-sm text-surface-400 hover:text-white transition-colors"
           >
             Clear all
           </button>
@@ -196,13 +196,13 @@ export default function TranscriptUploader({ onUploadComplete }: TranscriptUploa
         className={`
           border-2 border-dashed rounded-lg p-8 text-center transition-colors
           ${isDragging
-            ? 'border-blue-500 bg-blue-500/10'
-            : 'border-gray-600 hover:border-gray-500 bg-gray-900/50'
+            ? 'border-pbs-500 bg-pbs-400/10'
+            : 'border-surface-600 hover:border-surface-400 bg-surface-900/50'
           }
         `}
       >
         <div className="space-y-2">
-          <p className="text-gray-300">
+          <p className="text-surface-300">
             Drag and drop transcript files here, or
           </p>
           <label className="inline-block">
@@ -214,11 +214,11 @@ export default function TranscriptUploader({ onUploadComplete }: TranscriptUploa
               className="hidden"
               disabled={isUploading}
             />
-            <span className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg cursor-pointer transition-colors inline-block">
+            <span className="px-4 py-2 bg-pbs-500 hover:bg-pbs-400 text-white rounded-lg cursor-pointer transition-colors inline-block">
               Browse files
             </span>
           </label>
-          <p className="text-sm text-gray-400">
+          <p className="text-sm text-surface-400">
             .txt or .srt files, up to {MAX_FILE_SIZE / 1024 / 1024}MB each, max {MAX_BATCH_SIZE} files
           </p>
         </div>
@@ -227,7 +227,7 @@ export default function TranscriptUploader({ onUploadComplete }: TranscriptUploa
       {/* File List */}
       {files.length > 0 && (
         <div className="space-y-2">
-          <h4 className="text-sm font-medium text-gray-300">
+          <h4 className="text-sm font-medium text-surface-300">
             {files.length} file{files.length !== 1 ? 's' : ''} ready to upload
           </h4>
           <div className="space-y-1 max-h-64 overflow-y-auto">
@@ -236,12 +236,12 @@ export default function TranscriptUploader({ onUploadComplete }: TranscriptUploa
               return (
                 <div
                   key={idx}
-                  className="flex items-center justify-between bg-gray-900 rounded px-3 py-2 text-sm"
+                  className="flex items-center justify-between bg-surface-900 rounded px-3 py-2 text-sm"
                 >
                   <div className="flex items-center space-x-2 flex-1 min-w-0">
                     {status && getStatusIcon(status)}
-                    <span className="text-gray-300 truncate">{file.name}</span>
-                    <span className="text-gray-500 text-xs whitespace-nowrap">
+                    <span className="text-surface-300 truncate">{file.name}</span>
+                    <span className="text-surface-400 text-xs whitespace-nowrap">
                       ({(file.size / 1024).toFixed(1)} KB)
                     </span>
                   </div>
@@ -249,7 +249,7 @@ export default function TranscriptUploader({ onUploadComplete }: TranscriptUploa
                     {status?.success && status.job_id && (
                       <a
                         href={`/jobs/${status.job_id}`}
-                        className="text-blue-400 hover:text-blue-300 text-xs whitespace-nowrap"
+                        className="text-pbs-400 hover:text-pbs-300 text-xs whitespace-nowrap"
                       >
                         Job #{status.job_id}
                       </a>
@@ -262,7 +262,7 @@ export default function TranscriptUploader({ onUploadComplete }: TranscriptUploa
                     {!isUploading && !status && (
                       <button
                         onClick={() => removeFile(idx)}
-                        className="text-gray-500 hover:text-red-400 transition-colors"
+                        className="text-surface-400 hover:text-red-400 transition-colors"
                         aria-label="Remove file"
                       >
                         ✕
@@ -284,7 +284,7 @@ export default function TranscriptUploader({ onUploadComplete }: TranscriptUploa
           className={`
             w-full py-2 px-4 rounded-lg font-medium transition-colors
             ${isUploading
-              ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+              ? 'bg-surface-700 text-surface-400 cursor-not-allowed'
               : 'bg-green-600 hover:bg-green-500 text-white'
             }
           `}

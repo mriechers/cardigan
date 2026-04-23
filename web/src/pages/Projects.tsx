@@ -234,15 +234,15 @@ export default function Projects() {
     switch (status) {
       case 'completed': return <span className="text-green-400">✓</span>
       case 'failed': return <span className="text-red-400">✗</span>
-      case 'in_progress': return <span className="text-blue-400 animate-pulse">●</span>
-      default: return <span className="text-gray-400">○</span>
+      case 'in_progress': return <span className="text-pbs-400 animate-pulse">●</span>
+      default: return <span className="text-surface-400">○</span>
     }
   }
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-gray-300">Loading projects...</div>
+        <div className="text-surface-300">Loading projects...</div>
       </div>
     )
   }
@@ -253,7 +253,7 @@ export default function Projects() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-white">Completed Projects</h1>
-          <span className="text-gray-400 text-sm">
+          <span className="text-surface-400 text-sm">
             {total} project{total !== 1 ? 's' : ''}
             {search && ` matching "${search}"`}
           </span>
@@ -269,14 +269,14 @@ export default function Projects() {
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Search by filename..."
-              className="bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 w-64"
+              className="bg-surface-800 border border-surface-700 rounded-lg px-4 py-2 text-white placeholder-surface-400 focus:outline-none focus:border-pbs-500 w-64"
               aria-describedby="projects-search-desc"
             />
             {search && (
               <button
                 type="button"
                 onClick={clearSearch}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-surface-400 hover:text-white"
                 aria-label="Clear search"
               >
                 ✕
@@ -288,7 +288,7 @@ export default function Projects() {
           </div>
           <button
             type="submit"
-            className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg transition-colors"
+            className="bg-pbs-500 hover:bg-pbs-400 text-white px-4 py-2 rounded-lg transition-colors"
           >
             Search
           </button>
@@ -296,9 +296,9 @@ export default function Projects() {
       </div>
 
       {jobs.length === 0 ? (
-        <div className="bg-gray-800 rounded-lg border border-gray-700 p-8 text-center">
-          <p className="text-gray-300">No completed projects yet.</p>
-          <p className="text-gray-400 text-sm mt-2">
+        <div className="bg-surface-800 rounded-lg border border-surface-700 p-8 text-center">
+          <p className="text-surface-300">No completed projects yet.</p>
+          <p className="text-surface-400 text-sm mt-2">
             Projects will appear here once jobs finish processing.
           </p>
         </div>
@@ -306,7 +306,7 @@ export default function Projects() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Project List */}
           <div className="space-y-3">
-            <h2 className="text-sm font-medium text-gray-400 uppercase tracking-wide">
+            <h2 className="text-sm font-medium text-surface-400 uppercase tracking-wide">
               Projects
             </h2>
             <div className="space-y-2">
@@ -316,15 +316,15 @@ export default function Projects() {
                   onClick={() => selectProject(job)}
                   className={`w-full text-left p-4 rounded-lg border transition-colors ${
                     selectedProject?.id === job.id
-                      ? 'bg-blue-900/30 border-blue-500/50'
-                      : 'bg-gray-800 border-gray-700 hover:border-gray-600'
+                      ? 'bg-pbs-900/30 border-pbs-500/50'
+                      : 'bg-surface-800 border-surface-700 hover:border-surface-600'
                   }`}
                 >
                   <div className="flex items-center justify-between">
                     <div>
                       <div className="font-medium text-white">{job.project_name}</div>
                       <div
-                        className="text-sm text-gray-400"
+                        className="text-sm text-surface-400"
                         title={job.completed_at ? formatTimestamp(job.completed_at) : undefined}
                       >
                         {job.completed_at ? formatRelativeTime(job.completed_at) : 'Processing...'}
@@ -334,7 +334,7 @@ export default function Projects() {
                       <div className="text-green-400 font-mono text-sm">
                         {formatCost(job.actual_cost || 0)}
                       </div>
-                      <div className="text-xs text-gray-400">total cost</div>
+                      <div className="text-xs text-surface-400">total cost</div>
                     </div>
                   </div>
                 </button>
@@ -347,12 +347,12 @@ export default function Projects() {
             {selectedProject ? (
               <>
                 <div className="flex items-center justify-between">
-                  <h2 className="text-sm font-medium text-gray-400 uppercase tracking-wide">
+                  <h2 className="text-sm font-medium text-surface-400 uppercase tracking-wide">
                     Project Details
                   </h2>
                   <Link
                     to={`/jobs/${selectedProject.id}`}
-                    className="text-sm text-blue-400 hover:text-blue-300"
+                    className="text-sm text-pbs-400 hover:text-pbs-300"
                   >
                     View full job →
                   </Link>
@@ -360,11 +360,11 @@ export default function Projects() {
 
                 {/* SST Context from Airtable */}
                 {loadingSst ? (
-                  <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
-                    <div className="text-gray-400 text-sm">Loading metadata...</div>
+                  <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
+                    <div className="text-surface-400 text-sm">Loading metadata...</div>
                   </div>
                 ) : sstMetadata && (
-                  <div className="bg-gray-800 rounded-lg border border-gray-700 p-4 space-y-3">
+                  <div className="bg-surface-800 rounded-lg border border-surface-700 p-4 space-y-3">
                     {/* Title Row */}
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
@@ -374,7 +374,7 @@ export default function Projects() {
                           </h3>
                         )}
                         {sstMetadata.media_id && (
-                          <span className="text-xs text-gray-400 font-mono">
+                          <span className="text-xs text-surface-400 font-mono">
                             {sstMetadata.media_id}
                           </span>
                         )}
@@ -384,7 +384,7 @@ export default function Projects() {
                           href={sstMetadata.airtable_url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-xs text-blue-400 hover:text-blue-300 whitespace-nowrap"
+                          className="text-xs text-pbs-400 hover:text-pbs-300 whitespace-nowrap"
                         >
                           SST →
                         </a>
@@ -393,7 +393,7 @@ export default function Projects() {
 
                     {/* Description */}
                     {sstMetadata.short_description && (
-                      <p className="text-sm text-gray-300 line-clamp-3">
+                      <p className="text-sm text-surface-300 line-clamp-3">
                         {sstMetadata.short_description}
                       </p>
                     )}
@@ -406,7 +406,7 @@ export default function Projects() {
                             href={sstMetadata.media_manager_url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-blue-400 hover:text-blue-300"
+                            className="text-pbs-400 hover:text-pbs-300"
                           >
                             PBS Website
                           </a>
@@ -427,15 +427,15 @@ export default function Projects() {
                 )}
 
                 {/* Phase Stats */}
-                <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
-                  <h3 className="text-sm font-medium text-gray-400 mb-3">
+                <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
+                  <h3 className="text-sm font-medium text-surface-400 mb-3">
                     Agent Phases
                   </h3>
                   <div className="space-y-2">
                     {selectedProject.phases?.map((phase, idx) => (
                       <div
                         key={idx}
-                        className="flex items-center justify-between py-2 border-b border-gray-700 last:border-0"
+                        className="flex items-center justify-between py-2 border-b border-surface-700 last:border-0"
                       >
                         <div className="flex items-center space-x-3">
                           {getPhaseIcon(phase.status)}
@@ -445,7 +445,7 @@ export default function Projects() {
                           <span className="text-green-400 font-mono">
                             {formatCost(phase.cost || 0)}
                           </span>
-                          <span className="text-gray-400">
+                          <span className="text-surface-400">
                             {(phase.tokens || 0).toLocaleString()} tokens
                           </span>
                         </div>
@@ -455,21 +455,21 @@ export default function Projects() {
                 </div>
 
                 {/* Artifacts */}
-                <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
-                  <h3 className="text-sm font-medium text-gray-400 mb-3">
+                <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
+                  <h3 className="text-sm font-medium text-surface-400 mb-3">
                     Artifacts
                   </h3>
                   {artifacts.length === 0 ? (
-                    <div className="text-gray-300 text-sm">No artifacts found</div>
+                    <div className="text-surface-300 text-sm">No artifacts found</div>
                   ) : (
                     <div className="space-y-1">
                       {artifacts.map((artifact, idx) => (
                         <div
                           key={idx}
-                          className="flex items-center justify-between py-2 px-3 rounded hover:bg-gray-700/50"
+                          className="flex items-center justify-between py-2 px-3 rounded hover:bg-surface-700/50"
                         >
                           <div className="flex items-center space-x-3">
-                            <span className="text-gray-400">
+                            <span className="text-surface-400">
                               {artifact.type === 'directory' ? '📁' : '📄'}
                             </span>
                             <span className="text-white text-sm">
@@ -479,7 +479,7 @@ export default function Projects() {
                           <button
                             onClick={(e) => handleViewArtifact(artifact, e)}
                             disabled={loadingArtifact}
-                            className="text-blue-400 hover:text-blue-300 text-sm disabled:opacity-50"
+                            className="text-pbs-400 hover:text-pbs-300 text-sm disabled:opacity-50"
                             aria-label={`View ${artifact.label}`}
                           >
                             {loadingArtifact ? 'Loading...' : 'View →'}
@@ -496,8 +496,8 @@ export default function Projects() {
                 )}
 
                 {/* Project Path */}
-                <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
-                  <h3 className="text-sm font-medium text-gray-400 mb-2">
+                <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
+                  <h3 className="text-sm font-medium text-surface-400 mb-2">
                     Output Location
                   </h3>
                   <code className="text-sm text-emerald-400 font-mono break-all">
@@ -506,8 +506,8 @@ export default function Projects() {
                 </div>
               </>
             ) : (
-              <div className="bg-gray-800 rounded-lg border border-gray-700 p-8 text-center">
-                <p className="text-gray-300">
+              <div className="bg-surface-800 rounded-lg border border-surface-700 p-8 text-center">
+                <p className="text-surface-300">
                   Select a project to view details and artifacts
                 </p>
               </div>
@@ -522,17 +522,17 @@ export default function Projects() {
           <button
             onClick={() => setPage(p => Math.max(1, p - 1))}
             disabled={page === 1}
-            className="px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-700 transition-colors"
+            className="px-4 py-2 bg-surface-800 border border-surface-700 rounded-lg text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-surface-700 transition-colors"
           >
             ← Previous
           </button>
-          <span className="text-gray-400">
+          <span className="text-surface-400">
             Page {page} of {totalPages}
           </span>
           <button
             onClick={() => setPage(p => Math.min(totalPages, p + 1))}
             disabled={page === totalPages}
-            className="px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-700 transition-colors"
+            className="px-4 py-2 bg-surface-800 border border-surface-700 rounded-lg text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-surface-700 transition-colors"
           >
             Next →
           </button>
@@ -547,23 +547,23 @@ export default function Projects() {
         >
           <div
             ref={modalRef}
-            className="bg-gray-900 rounded-lg border border-gray-700 w-full max-w-4xl max-h-[90vh] flex flex-col"
+            className="bg-surface-900 rounded-lg border border-surface-700 w-full max-w-4xl max-h-[90vh] flex flex-col"
             role="dialog"
             aria-modal="true"
             aria-labelledby="artifact-modal-title"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-surface-700">
               <h3 id="artifact-modal-title" className="text-lg font-medium text-white">
                 {viewingArtifact.label}
-                <span className="ml-2 text-sm text-gray-400 font-mono font-normal">
+                <span className="ml-2 text-sm text-surface-400 font-mono font-normal">
                   {viewingArtifact.name}
                 </span>
               </h3>
               <button
                 onClick={closeModal}
-                className="text-gray-400 hover:text-white text-2xl leading-none"
+                className="text-surface-400 hover:text-white text-2xl leading-none"
                 aria-label="Close artifact viewer"
               >
                 &times;
@@ -572,11 +572,11 @@ export default function Projects() {
             {/* Modal Content */}
             <div className="flex-1 overflow-auto p-4">
               {viewingArtifact.isJson ? (
-                <pre className="text-sm text-gray-300 whitespace-pre-wrap font-mono">
+                <pre className="text-sm text-surface-300 whitespace-pre-wrap font-mono">
                   {JSON.stringify(JSON.parse(viewingArtifact.content), null, 2)}
                 </pre>
               ) : (
-                <div className="prose prose-invert prose-sm max-w-none prose-table:border-collapse prose-th:border prose-th:border-gray-600 prose-th:p-2 prose-th:bg-gray-800 prose-td:border prose-td:border-gray-700 prose-td:p-2">
+                <div className="prose prose-invert prose-sm max-w-none prose-table:border-collapse prose-th:border prose-th:border-surface-600 prose-th:p-2 prose-th:bg-surface-800 prose-td:border prose-td:border-surface-700 prose-td:p-2">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{viewingArtifact.content}</ReactMarkdown>
                 </div>
               )}

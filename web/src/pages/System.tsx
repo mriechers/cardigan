@@ -105,7 +105,7 @@ export default function System() {
               }`}>
                 {isConnected ? 'API Connected' : 'API Offline'}
               </h2>
-              <p className="text-sm text-gray-400">
+              <p className="text-sm text-surface-400">
                 {isConnected
                   ? 'Backend server is responding normally'
                   : error || 'Unable to reach the API server'
@@ -116,7 +116,7 @@ export default function System() {
           <button
             onClick={checkConnection}
             disabled={checking}
-            className="px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white rounded-md text-sm transition-colors"
+            className="px-4 py-2 bg-surface-700 hover:bg-surface-600 disabled:opacity-50 text-white rounded-md text-sm transition-colors"
           >
             {checking ? 'Checking...' : 'Check Now'}
           </button>
@@ -125,7 +125,7 @@ export default function System() {
 
       {/* Troubleshooting Section - Only show when offline */}
       {!isConnected && (
-        <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+        <div className="bg-surface-800 rounded-lg border border-surface-700 p-6">
           <h2 className="text-lg font-semibold text-white mb-4">Troubleshooting</h2>
 
           <div className="space-y-4">
@@ -133,10 +133,10 @@ export default function System() {
               <span className="text-yellow-400 font-mono">1.</span>
               <div>
                 <p className="text-white font-medium">Check if the API server is running</p>
-                <p className="text-sm text-gray-400 mt-1">
+                <p className="text-sm text-surface-400 mt-1">
                   The API should be running on port 8000. Open a terminal and run:
                 </p>
-                <pre className="mt-2 bg-gray-900 rounded p-3 text-sm text-green-400 font-mono overflow-x-auto">
+                <pre className="mt-2 bg-surface-900 rounded p-3 text-sm text-green-400 font-mono overflow-x-auto">
                   lsof -i :8000
                 </pre>
               </div>
@@ -146,10 +146,10 @@ export default function System() {
               <span className="text-yellow-400 font-mono">2.</span>
               <div>
                 <p className="text-white font-medium">Start the API server</p>
-                <p className="text-sm text-gray-400 mt-1">
+                <p className="text-sm text-surface-400 mt-1">
                   Navigate to the project root and start the server:
                 </p>
-                <pre className="mt-2 bg-gray-900 rounded p-3 text-sm text-green-400 font-mono overflow-x-auto">
+                <pre className="mt-2 bg-surface-900 rounded p-3 text-sm text-green-400 font-mono overflow-x-auto">
 {`cd /Users/mriechers/Developer/ai-editorial-assistant-v3
 ./venv/bin/uvicorn api.main:app --reload --port 8000`}
                 </pre>
@@ -160,7 +160,7 @@ export default function System() {
               <span className="text-yellow-400 font-mono">3.</span>
               <div>
                 <p className="text-white font-medium">Check for errors in the API logs</p>
-                <p className="text-sm text-gray-400 mt-1">
+                <p className="text-sm text-surface-400 mt-1">
                   If the server crashed, check the terminal where it was running for error messages.
                   Common issues include database migrations or missing dependencies.
                 </p>
@@ -171,10 +171,10 @@ export default function System() {
               <span className="text-yellow-400 font-mono">4.</span>
               <div>
                 <p className="text-white font-medium">Run database migrations</p>
-                <p className="text-sm text-gray-400 mt-1">
+                <p className="text-sm text-surface-400 mt-1">
                   If there are schema errors, run Alembic migrations:
                 </p>
-                <pre className="mt-2 bg-gray-900 rounded p-3 text-sm text-green-400 font-mono overflow-x-auto">
+                <pre className="mt-2 bg-surface-900 rounded p-3 text-sm text-green-400 font-mono overflow-x-auto">
                   ./venv/bin/alembic upgrade head
                 </pre>
               </div>
@@ -186,8 +186,8 @@ export default function System() {
       {/* System Info - Show when connected */}
       {isConnected && health && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
-            <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wide mb-3">
+          <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
+            <h3 className="text-sm font-medium text-surface-400 uppercase tracking-wide mb-3">
               LLM Configuration
             </h3>
             <div className="space-y-2">
@@ -201,7 +201,7 @@ export default function System() {
                     label="Model Preset"
                     value={health.llm.configured_preset}
                   />
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="text-xs text-surface-400 mt-1">
                     OpenRouter selects from preset's model pool
                   </p>
                 </>
@@ -212,8 +212,8 @@ export default function System() {
                 />
               )}
               {health.llm?.active_model && (
-                <div className="pt-2 border-t border-gray-700 mt-2">
-                  <div className="text-xs text-gray-500 mb-1">Currently processing with:</div>
+                <div className="pt-2 border-t border-surface-700 mt-2">
+                  <div className="text-xs text-surface-400 mb-1">Currently processing with:</div>
                   <InfoRow
                     label="Active Model"
                     value={health.llm.active_model}
@@ -223,8 +223,8 @@ export default function System() {
             </div>
           </div>
 
-          <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
-            <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wide mb-3">
+          <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
+            <h3 className="text-sm font-medium text-surface-400 uppercase tracking-wide mb-3">
               Queue Status
             </h3>
             <div className="space-y-2">
@@ -243,16 +243,16 @@ export default function System() {
 
       {/* OpenRouter Presets - Show when connected */}
       {isConnected && health?.llm?.openrouter_presets && Object.keys(health.llm.openrouter_presets).length > 0 && (
-        <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
+        <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wide">
+            <h3 className="text-sm font-medium text-surface-400 uppercase tracking-wide">
               OpenRouter Presets
             </h3>
             <a
               href="https://openrouter.ai/settings/presets"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-blue-400 hover:text-blue-300 flex items-center space-x-1"
+              className="text-xs text-pbs-400 hover:text-pbs-300 flex items-center space-x-1"
             >
               <span>Manage Presets</span>
               <span>↗</span>
@@ -279,17 +279,17 @@ export default function System() {
                       {presetName.replace('ai-editorial-assistant-', '').replace('ai-editorial-assistant', 'default')}
                     </span>
                   </div>
-                  <p className="text-xs text-gray-500 mb-2">{preset.description}</p>
+                  <p className="text-xs text-surface-400 mb-2">{preset.description}</p>
                   <div className="space-y-1">
                     {preset.models.map((model, idx) => (
-                      <div key={idx} className="text-xs font-mono text-gray-400 flex items-center space-x-2">
-                        <span className="text-gray-600">{idx + 1}.</span>
+                      <div key={idx} className="text-xs font-mono text-surface-400 flex items-center space-x-2">
+                        <span className="text-surface-600">{idx + 1}.</span>
                         <span>{model}</span>
                       </div>
                     ))}
                   </div>
                   {preset.models_verified && (
-                    <p className="text-[10px] text-gray-600 mt-2">
+                    <p className="text-[10px] text-surface-600 mt-2">
                       Verified {new Date(preset.models_verified + 'T00:00:00').toLocaleDateString()}
                     </p>
                   )}
@@ -297,7 +297,7 @@ export default function System() {
               )
             })}
           </div>
-          <p className="text-xs text-gray-600 mt-3 italic">
+          <p className="text-xs text-surface-600 mt-3 italic">
             Model lists are maintained locally. Update config/llm-config.json when presets change on OpenRouter.
           </p>
         </div>
@@ -313,8 +313,8 @@ export default function System() {
 
       {/* Agent Roster - Show when connected */}
       {isConnected && health?.llm?.phase_backends && (
-        <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
-          <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wide mb-3">
+        <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
+          <h3 className="text-sm font-medium text-surface-400 uppercase tracking-wide mb-3">
             Agent Roster
           </h3>
           <div className="space-y-3">
@@ -329,8 +329,8 @@ export default function System() {
                 : 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
               const tierLabel = isBigBrain ? 'big-brain' : isCheapskate ? 'cheapskate' : 'default'
               return (
-                <div key={agent.id} className="flex items-start space-x-4 p-3 bg-gray-900 rounded-lg">
-                  <div className="flex-shrink-0 w-10 h-10 rounded-full bg-gray-800 flex items-center justify-center text-lg">
+                <div key={agent.id} className="flex items-start space-x-4 p-3 bg-surface-900 rounded-lg">
+                  <div className="flex-shrink-0 w-10 h-10 rounded-full bg-surface-800 flex items-center justify-center text-lg">
                     {agent.icon}
                   </div>
                   <div className="flex-grow min-w-0">
@@ -340,13 +340,13 @@ export default function System() {
                         {tierLabel}
                       </span>
                     </div>
-                    <p className="text-sm text-gray-400 mt-1">{agent.description}</p>
+                    <p className="text-sm text-surface-400 mt-1">{agent.description}</p>
                   </div>
                 </div>
               )
             })}
           </div>
-          <p className="text-xs text-gray-500 mt-3">
+          <p className="text-xs text-surface-400 mt-3">
             <span className="text-purple-400">big-brain</span> = complex reasoning |{' '}
             <span className="text-cyan-400">default</span> = balanced |{' '}
             <span className="text-green-400">cheapskate</span> = free tier
@@ -355,24 +355,24 @@ export default function System() {
       )}
 
       {/* Connection Log */}
-      <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
-        <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wide mb-3">
+      <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
+        <h3 className="text-sm font-medium text-surface-400 uppercase tracking-wide mb-3">
           Connection Log
         </h3>
         {logs.length === 0 ? (
-          <p className="text-gray-500 text-sm">No connection attempts yet</p>
+          <p className="text-surface-400 text-sm">No connection attempts yet</p>
         ) : (
           <div className="space-y-1">
             {logs.map((log, i) => (
               <div key={i} className="flex items-center space-x-3 text-sm font-mono">
-                <span className="text-gray-600">
+                <span className="text-surface-600">
                   {log.timestamp.toLocaleTimeString()}
                 </span>
                 <span className={log.success ? 'text-green-400' : 'text-red-400'}>
                   {log.success ? 'OK' : 'FAIL'}
                 </span>
                 {log.latency && (
-                  <span className="text-gray-500">{log.latency}ms</span>
+                  <span className="text-surface-400">{log.latency}ms</span>
                 )}
                 {log.error && (
                   <span className="text-red-400 truncate">{log.error}</span>
@@ -384,37 +384,37 @@ export default function System() {
       </div>
 
       {/* API Endpoints Reference */}
-      <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
-        <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wide mb-3">
+      <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
+        <h3 className="text-sm font-medium text-surface-400 uppercase tracking-wide mb-3">
           API Endpoints
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm font-mono">
-          <div className="text-gray-400">
-            <span className="text-blue-400">GET</span> /api/system/health
+          <div className="text-surface-400">
+            <span className="text-pbs-400">GET</span> /api/system/health
           </div>
-          <div className="text-gray-400">
+          <div className="text-surface-400">
             <span className="text-green-400">POST</span> /api/queue/
           </div>
-          <div className="text-gray-400">
-            <span className="text-blue-400">GET</span> /api/queue/
+          <div className="text-surface-400">
+            <span className="text-pbs-400">GET</span> /api/queue/
           </div>
-          <div className="text-gray-400">
-            <span className="text-blue-400">GET</span> /api/queue/stats
+          <div className="text-surface-400">
+            <span className="text-pbs-400">GET</span> /api/queue/stats
           </div>
-          <div className="text-gray-400">
-            <span className="text-blue-400">GET</span> /api/jobs/:id
+          <div className="text-surface-400">
+            <span className="text-pbs-400">GET</span> /api/jobs/:id
           </div>
-          <div className="text-gray-400">
+          <div className="text-surface-400">
             <span className="text-yellow-400">PATCH</span> /api/jobs/:id
           </div>
-          <div className="text-gray-400">
-            <span className="text-blue-400">GET</span> /api/langfuse/model-stats
+          <div className="text-surface-400">
+            <span className="text-pbs-400">GET</span> /api/langfuse/model-stats
           </div>
-          <div className="text-gray-400">
-            <span className="text-blue-400">GET</span> /api/langfuse/phase-stats
+          <div className="text-surface-400">
+            <span className="text-pbs-400">GET</span> /api/langfuse/phase-stats
           </div>
-          <div className="text-gray-400">
-            <span className="text-blue-400">GET</span> /api/langfuse/status
+          <div className="text-surface-400">
+            <span className="text-pbs-400">GET</span> /api/langfuse/status
           </div>
         </div>
       </div>
@@ -425,7 +425,7 @@ export default function System() {
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between">
-      <span className="text-gray-400">{label}</span>
+      <span className="text-surface-400">{label}</span>
       <span className="text-white font-mono">{value}</span>
     </div>
   )

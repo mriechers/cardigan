@@ -59,13 +59,13 @@ export default function StatusBar() {
     : 0
 
   return (
-    <div className="bg-gray-950 border-b border-gray-800 px-4 py-2">
+    <div className="bg-surface-950 border-b border-surface-800 px-4 py-2">
       <div className="max-w-7xl mx-auto flex items-center justify-between text-xs">
         {/* Left: System Status + Queue Summary */}
         <div className="flex items-center space-x-4">
           <Link
             to="/system"
-            className="flex items-center space-x-2 hover:bg-gray-800 px-2 py-1 rounded transition-colors"
+            className="flex items-center space-x-2 hover:bg-surface-800 px-2 py-1 rounded transition-colors"
             title="View system status and diagnostics"
           >
             <div
@@ -73,7 +73,7 @@ export default function StatusBar() {
                 error ? 'bg-red-500 animate-pulse' : 'bg-green-500'
               }`}
             />
-            <span className={error ? 'text-red-400' : 'text-gray-300'}>
+            <span className={error ? 'text-red-400' : 'text-surface-300'}>
               {error ? 'Offline' : 'Connected'}
             </span>
           </Link>
@@ -82,13 +82,13 @@ export default function StatusBar() {
           {health?.queue && (
             <Link
               to="/queue"
-              className="flex items-center space-x-2 text-gray-300 hover:bg-gray-800 px-2 py-1 rounded transition-colors"
+              className="flex items-center space-x-2 text-surface-300 hover:bg-surface-800 px-2 py-1 rounded transition-colors"
               title={`${health.queue.pending} pending, ${health.queue.in_progress} processing`}
             >
               <span className="text-yellow-400 font-medium">{queueTotal}</span>
               <span>in queue</span>
               {health.queue.in_progress > 0 && (
-                <span className="text-blue-400 animate-pulse">●</span>
+                <span className="text-pbs-400 animate-pulse">●</span>
               )}
             </Link>
           )}
@@ -97,7 +97,7 @@ export default function StatusBar() {
         {/* Center: Expandable Details Toggle */}
         <button
           onClick={() => setExpanded(!expanded)}
-          className="flex items-center space-x-1 text-gray-400 hover:text-gray-200 px-2 py-1 rounded hover:bg-gray-800 transition-colors"
+          className="flex items-center space-x-1 text-surface-400 hover:text-surface-200 px-2 py-1 rounded hover:bg-surface-800 transition-colors"
           aria-expanded={expanded}
           aria-label={expanded ? 'Hide system details' : 'Show system details'}
         >
@@ -108,7 +108,7 @@ export default function StatusBar() {
         </button>
 
         {/* Right: Last Updated */}
-        <div className="flex items-center text-gray-400">
+        <div className="flex items-center text-surface-400">
           {lastUpdated && (
             <span title="Last health check">
               {formatTime(lastUpdated)}
@@ -119,15 +119,15 @@ export default function StatusBar() {
 
       {/* Expanded Details Panel */}
       {expanded && (
-        <div className="max-w-7xl mx-auto mt-2 pt-2 border-t border-gray-800 flex items-center justify-between text-xs">
+        <div className="max-w-7xl mx-auto mt-2 pt-2 border-t border-surface-800 flex items-center justify-between text-xs">
           {/* Queue Details */}
           {health?.queue && (
-            <div className="flex items-center space-x-4 text-gray-300">
+            <div className="flex items-center space-x-4 text-surface-300">
               <span>
                 <span className="text-yellow-400">{health.queue.pending}</span> pending
               </span>
               <span>
-                <span className="text-blue-400">{health.queue.in_progress}</span> processing
+                <span className="text-pbs-400">{health.queue.in_progress}</span> processing
               </span>
               {health.queue.completed !== undefined && (
                 <span>
@@ -144,14 +144,14 @@ export default function StatusBar() {
 
           {/* LLM Configuration */}
           {health?.llm && (
-            <div className="flex items-center space-x-2 text-gray-300">
+            <div className="flex items-center space-x-2 text-surface-300">
               <span>Backend:</span>
               <span className="text-cyan-400 font-mono">
                 {health.llm.active_backend || health.llm.primary_backend || 'none'}
               </span>
               {health.llm.configured_preset && (
                 <>
-                  <span className="text-gray-500">|</span>
+                  <span className="text-surface-400">|</span>
                   <span>Preset:</span>
                   <span className="text-purple-400 font-mono">
                     {health.llm.configured_preset}
@@ -163,12 +163,12 @@ export default function StatusBar() {
 
           {/* Last Run Stats */}
           {health?.last_run && (
-            <div className="flex items-center space-x-3 text-gray-300">
+            <div className="flex items-center space-x-3 text-surface-300">
               <span>
                 Last run: <span className="text-green-400">{formatCost(health.last_run.total_cost)}</span>
               </span>
               <span>
-                <span className="text-gray-300">{formatTokens(health.last_run.total_tokens)}</span> tokens
+                <span className="text-surface-300">{formatTokens(health.last_run.total_tokens)}</span> tokens
               </span>
             </div>
           )}

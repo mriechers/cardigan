@@ -99,7 +99,7 @@ export default function Home() {
         <StatCard
           label="Processing"
           value={stats?.in_progress ?? 0}
-          color="text-blue-400"
+          color="text-pbs-400"
         />
         <StatCard
           label="Completed"
@@ -114,19 +114,19 @@ export default function Home() {
       </div>
 
       {/* Recent Jobs */}
-      <div className="bg-gray-800 rounded-lg border border-gray-700">
-        <div className="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
+      <div className="bg-surface-800 rounded-lg border border-surface-700">
+        <div className="px-4 py-3 border-b border-surface-700 flex items-center justify-between">
           <h2 className="text-lg font-medium text-white">Recent Jobs</h2>
           <Link
             to="/queue"
-            className="text-sm text-blue-400 hover:text-blue-300"
+            className="text-sm text-pbs-400 hover:text-pbs-300"
           >
             View all
           </Link>
         </div>
-        <div className="divide-y divide-gray-700">
+        <div className="divide-y divide-surface-700">
           {recentJobs.length === 0 ? (
-            <div className="px-4 py-8 text-center text-gray-300">
+            <div className="px-4 py-8 text-center text-surface-300">
               No jobs in queue
             </div>
           ) : (
@@ -134,14 +134,14 @@ export default function Home() {
               <Link
                 key={job.id}
                 to={`/jobs/${job.id}`}
-                className="block px-4 py-3 hover:bg-gray-750 transition-colors"
+                className="block px-4 py-3 hover:bg-surface-800 transition-colors"
               >
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="text-white font-medium">
                       {job.project_name}
                     </div>
-                    <div className="text-sm text-gray-400" title={formatTimestamp(job.queued_at + 'Z')}>
+                    <div className="text-sm text-surface-400" title={formatTimestamp(job.queued_at + 'Z')}>
                       {formatRelativeTime(job.queued_at + 'Z')}
                     </div>
                   </div>
@@ -168,8 +168,8 @@ function StatCard({
   color: string
 }) {
   return (
-    <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
-      <div className="text-sm text-gray-300">{label}</div>
+    <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
+      <div className="text-sm text-surface-300">{label}</div>
       <div className={`text-3xl font-bold ${color}`}>{value}</div>
     </div>
   )

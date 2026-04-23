@@ -120,13 +120,13 @@ export default function PhaseStatsWidget({ className = '' }: PhaseStatsWidgetPro
   }
 
   return (
-    <div className={`bg-gray-800 rounded-lg border border-gray-700 p-4 ${className}`}>
+    <div className={`bg-surface-800 rounded-lg border border-surface-700 p-4 ${className}`}>
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wide">
+          <h3 className="text-sm font-medium text-surface-400 uppercase tracking-wide">
             Agent Performance
           </h3>
-          <p className="text-xs text-gray-500 mt-0.5">
+          <p className="text-xs text-surface-400 mt-0.5">
             Success rates & escalation patterns
           </p>
         </div>
@@ -134,7 +134,7 @@ export default function PhaseStatsWidget({ className = '' }: PhaseStatsWidgetPro
           <select
             value={days}
             onChange={(e) => setDays(Number(e.target.value))}
-            className="bg-gray-700 text-gray-300 text-xs rounded px-2 py-1 border border-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="bg-surface-700 text-surface-300 text-xs rounded px-2 py-1 border border-surface-600 focus:outline-none focus:ring-1 focus:ring-pbs-400"
             aria-label="Time period"
           >
             <option value={7}>Last 7 days</option>
@@ -145,7 +145,7 @@ export default function PhaseStatsWidget({ className = '' }: PhaseStatsWidgetPro
           <button
             onClick={fetchStats}
             disabled={loading}
-            className="text-xs text-gray-400 hover:text-white disabled:opacity-50"
+            className="text-xs text-surface-400 hover:text-white disabled:opacity-50"
             aria-label="Refresh stats"
           >
             {loading ? '...' : 'Refresh'}
@@ -156,9 +156,9 @@ export default function PhaseStatsWidget({ className = '' }: PhaseStatsWidgetPro
       {/* Loading state */}
       {loading && !stats && (
         <div className="animate-pulse space-y-3">
-          <div className="h-12 bg-gray-700 rounded"></div>
-          <div className="h-12 bg-gray-700 rounded"></div>
-          <div className="h-12 bg-gray-700 rounded"></div>
+          <div className="h-12 bg-surface-700 rounded"></div>
+          <div className="h-12 bg-surface-700 rounded"></div>
+          <div className="h-12 bg-surface-700 rounded"></div>
         </div>
       )}
 
@@ -168,7 +168,7 @@ export default function PhaseStatsWidget({ className = '' }: PhaseStatsWidgetPro
           <p className="text-red-400 text-sm">{error}</p>
           <button
             onClick={fetchStats}
-            className="mt-2 text-xs text-blue-400 hover:text-blue-300"
+            className="mt-2 text-xs text-pbs-400 hover:text-pbs-300"
           >
             Try again
           </button>
@@ -179,9 +179,9 @@ export default function PhaseStatsWidget({ className = '' }: PhaseStatsWidgetPro
       {stats && !error && (
         <>
           {/* Summary bar */}
-          <div className="flex justify-between text-sm mb-4 pb-3 border-b border-gray-700">
+          <div className="flex justify-between text-sm mb-4 pb-3 border-b border-surface-700">
             <div>
-              <span className="text-gray-400">Total:</span>{' '}
+              <span className="text-surface-400">Total:</span>{' '}
               <span className="text-white font-medium">
                 {stats.total_completions.toLocaleString()} jobs
               </span>
@@ -192,14 +192,14 @@ export default function PhaseStatsWidget({ className = '' }: PhaseStatsWidgetPro
               )}
             </div>
             <div>
-              <span className="text-gray-400">Cost:</span>{' '}
+              <span className="text-surface-400">Cost:</span>{' '}
               <span className="text-white font-medium">{formatCost(stats.total_cost)}</span>
             </div>
           </div>
 
           {/* Phase list */}
           {stats.phases.length === 0 ? (
-            <p className="text-gray-500 text-sm text-center py-4">
+            <p className="text-surface-400 text-sm text-center py-4">
               No phase data for this period
             </p>
           ) : (
@@ -209,24 +209,24 @@ export default function PhaseStatsWidget({ className = '' }: PhaseStatsWidgetPro
                 const isExpanded = expandedPhase === phase.phase
 
                 return (
-                  <div key={phase.phase} className="bg-gray-900 rounded-lg overflow-hidden">
+                  <div key={phase.phase} className="bg-surface-900 rounded-lg overflow-hidden">
                     {/* Main row - clickable */}
                     <button
                       onClick={() => setExpandedPhase(isExpanded ? null : phase.phase)}
-                      className="w-full p-3 flex items-center justify-between hover:bg-gray-800/50 transition-colors"
+                      className="w-full p-3 flex items-center justify-between hover:bg-surface-800/50 transition-colors"
                     >
                       <div className="flex items-center space-x-3">
                         <span className="text-lg">{info.icon}</span>
                         <div className="text-left">
                           <div className="flex items-center space-x-2">
                             <span className="text-white font-medium">{info.name}</span>
-                            <span className="text-xs text-gray-500">
+                            <span className="text-xs text-surface-400">
                               {phase.total_completions} runs
                             </span>
                           </div>
                           {/* Progress bar */}
                           <div className="flex items-center space-x-2 mt-1">
-                            <div className="w-32 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                            <div className="w-32 h-1.5 bg-surface-700 rounded-full overflow-hidden">
                               <div
                                 className={`h-full ${getBarColor(phase.success_rate)} transition-all`}
                                 style={{ width: `${phase.success_rate}%` }}
@@ -242,20 +242,20 @@ export default function PhaseStatsWidget({ className = '' }: PhaseStatsWidgetPro
                       <div className="flex items-center space-x-4 text-right">
                         {/* Escalation rate */}
                         <div>
-                          <div className="text-xs text-gray-500">Escalated</div>
+                          <div className="text-xs text-surface-400">Escalated</div>
                           <div className={`text-sm font-mono ${getEscalationColor(phase.escalation_rate)}`}>
                             {phase.escalation_rate}%
                           </div>
                         </div>
                         {/* Cost */}
                         <div>
-                          <div className="text-xs text-gray-500">Cost</div>
+                          <div className="text-xs text-surface-400">Cost</div>
                           <div className="text-sm font-mono text-white">
                             {formatCost(phase.total_cost)}
                           </div>
                         </div>
                         {/* Expand indicator */}
-                        <span className={`text-gray-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
+                        <span className={`text-surface-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
                           ▼
                         </span>
                       </div>
@@ -263,15 +263,15 @@ export default function PhaseStatsWidget({ className = '' }: PhaseStatsWidgetPro
 
                     {/* Expanded details */}
                     {isExpanded && (
-                      <div className="px-3 pb-3 border-t border-gray-800">
+                      <div className="px-3 pb-3 border-t border-surface-800">
                         <div className="mt-3 space-y-2">
-                          <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">
+                          <div className="text-xs text-surface-400 uppercase tracking-wide mb-2">
                             Model Breakdown
                           </div>
                           {phase.models.map((model, idx) => (
                             <div
                               key={idx}
-                              className="flex items-center justify-between text-xs py-1.5 px-2 bg-gray-800 rounded"
+                              className="flex items-center justify-between text-xs py-1.5 px-2 bg-surface-800 rounded"
                             >
                               <div className="flex items-center space-x-2">
                                 {model.tier_label && (
@@ -285,18 +285,18 @@ export default function PhaseStatsWidget({ className = '' }: PhaseStatsWidgetPro
                                     {model.tier_label}
                                   </span>
                                 )}
-                                <span className="text-gray-300 font-mono truncate max-w-[200px]" title={model.model}>
+                                <span className="text-surface-300 font-mono truncate max-w-[200px]" title={model.model}>
                                   {model.model}
                                 </span>
                               </div>
                               <div className="flex items-center space-x-4">
-                                <span className="text-gray-500">
+                                <span className="text-surface-400">
                                   {model.completions} runs
                                 </span>
                                 <span className={getSuccessColor(model.success_rate)}>
                                   {model.success_rate}%
                                 </span>
-                                <span className="text-gray-400 font-mono">
+                                <span className="text-surface-400 font-mono">
                                   {formatCost(model.total_cost)}
                                 </span>
                               </div>
@@ -328,7 +328,7 @@ export default function PhaseStatsWidget({ className = '' }: PhaseStatsWidgetPro
           )}
 
           {/* Footer */}
-          <div className="mt-4 pt-3 border-t border-gray-700 flex justify-between items-center text-xs text-gray-600">
+          <div className="mt-4 pt-3 border-t border-surface-700 flex justify-between items-center text-xs text-surface-600">
             <span>
               {stats.period_start ? new Date(stats.period_start).toLocaleDateString() : 'N/A'}
               {' - '}

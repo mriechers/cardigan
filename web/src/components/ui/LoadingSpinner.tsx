@@ -18,7 +18,7 @@ export default function LoadingSpinner({
   return (
     <div className={`inline-flex items-center gap-2 ${className}`} role="status" aria-live="polite">
       <svg
-        className={`animate-spin text-gray-400 motion-reduce:animate-none ${sizeClasses[size]}`}
+        className={`animate-spin text-surface-400 motion-reduce:animate-none ${sizeClasses[size]}`}
         xmlns="http://www.w3.org/2000/svg"
         fill="none"
         viewBox="0 0 24 24"

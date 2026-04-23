@@ -68,16 +68,16 @@ export default function Layout() {
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
     `px-3 py-2 rounded-md text-sm font-medium transition-colors ${
       isActive
-        ? 'bg-gray-700 text-white'
-        : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+        ? 'bg-surface-700 text-white'
+        : 'text-surface-300 hover:bg-surface-700 hover:text-white'
     }`
 
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-100">
+    <div className="min-h-screen bg-surface-900 text-surface-100">
       {/* Skip Navigation Link */}
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-blue-600 focus:text-white focus:rounded-md focus:shadow-lg"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-pbs-500 focus:text-white focus:rounded-md focus:shadow-lg"
       >
         Skip to main content
       </a>
@@ -86,7 +86,7 @@ export default function Layout() {
       <StatusBar />
 
       {/* Navigation */}
-      <nav className="bg-gray-800 border-b border-gray-700" aria-label="Main navigation">
+      <nav className="bg-surface-800 border-b border-surface-700" aria-label="Main navigation">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-14">
             <div className="flex items-center space-x-4">
@@ -98,7 +98,7 @@ export default function Layout() {
               <span className="text-lg font-semibold text-white">
                 Cardigan
               </span>
-              <span className="text-xs text-gray-400">v4.0</span>
+              <span className="text-xs text-surface-400">v4.0</span>
             </div>
             <div className="flex items-center space-x-1">
               <NavLink
@@ -147,7 +147,7 @@ export default function Layout() {
               <button
                 ref={triggerRef}
                 onClick={() => setShowHelp(true)}
-                className="px-3 py-2 rounded-md text-sm font-medium transition-colors text-gray-300 hover:bg-gray-700 hover:text-white"
+                className="px-3 py-2 rounded-md text-sm font-medium transition-colors text-surface-300 hover:bg-surface-700 hover:text-white"
                 aria-label="Show keyboard shortcuts"
                 title="Keyboard shortcuts (?)"
               >
@@ -173,20 +173,20 @@ export default function Layout() {
         >
           <div
             ref={helpModalRef}
-            className="bg-gray-900 rounded-lg border border-gray-700 w-full max-w-md"
+            className="bg-surface-900 rounded-lg border border-surface-700 w-full max-w-md"
             role="dialog"
             aria-modal="true"
             aria-labelledby="shortcuts-modal-title"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-surface-700">
               <h3 id="shortcuts-modal-title" className="text-lg font-medium text-white">
                 Keyboard Shortcuts
               </h3>
               <button
                 onClick={closeHelp}
-                className="text-gray-400 hover:text-white text-2xl leading-none"
+                className="text-surface-400 hover:text-white text-2xl leading-none"
                 aria-label="Close shortcuts help"
               >
                 &times;
@@ -197,16 +197,16 @@ export default function Layout() {
               <div className="space-y-3">
                 {getKeyboardShortcuts().map((shortcut, index) => (
                   <div key={index} className="flex items-center justify-between">
-                    <span className="text-gray-300">{shortcut.description}</span>
-                    <kbd className="px-2 py-1 bg-gray-800 border border-gray-600 rounded text-sm font-mono text-gray-300">
+                    <span className="text-surface-300">{shortcut.description}</span>
+                    <kbd className="px-2 py-1 bg-surface-800 border border-surface-600 rounded text-sm font-mono text-surface-300">
                       {shortcut.keys}
                     </kbd>
                   </div>
                 ))}
               </div>
-              <div className="mt-6 pt-4 border-t border-gray-700">
-                <p className="text-xs text-gray-500">
-                  Press <kbd className="px-1 py-0.5 bg-gray-800 border border-gray-600 rounded text-xs font-mono">?</kbd> to open this help anytime
+              <div className="mt-6 pt-4 border-t border-surface-700">
+                <p className="text-xs text-surface-400">
+                  Press <kbd className="px-1 py-0.5 bg-surface-800 border border-surface-600 rounded text-xs font-mono">?</kbd> to open this help anytime
                 </p>
               </div>
             </div>
