@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useFocusTrap } from '../hooks/useFocusTrap'
+import Button from '../components/ui/Button'
 import { formatRelativeTime, formatTimestamp } from '../utils/formatTime'
 import { ARTIFACT_LABELS } from '../utils/artifactLabels'
 import ScreengrabsBox from '../components/ScreengrabsBox'
@@ -252,7 +253,7 @@ export default function Projects() {
       {/* Header with Search */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-white">Completed Projects</h1>
+          <h1 className="text-2xl font-display font-bold text-white">Completed Projects</h1>
           <span className="text-surface-400 text-sm">
             {total} project{total !== 1 ? 's' : ''}
             {search && ` matching "${search}"`}
@@ -286,12 +287,12 @@ export default function Projects() {
               Search for completed projects by their transcript filename
             </span>
           </div>
-          <button
+          <Button
             type="submit"
-            className="bg-pbs-500 hover:bg-pbs-400 text-white px-4 py-2 rounded-lg transition-colors"
+            variant="primary"
           >
             Search
-          </button>
+          </Button>
         </form>
       </div>
 
@@ -519,23 +520,23 @@ export default function Projects() {
       {/* Pagination Controls */}
       {totalPages > 1 && (
         <div className="flex items-center justify-center space-x-4 py-4">
-          <button
+          <Button
+            variant="secondary"
             onClick={() => setPage(p => Math.max(1, p - 1))}
             disabled={page === 1}
-            className="px-4 py-2 bg-surface-800 border border-surface-700 rounded-lg text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-surface-700 transition-colors"
           >
             ← Previous
-          </button>
+          </Button>
           <span className="text-surface-400">
             Page {page} of {totalPages}
           </span>
-          <button
+          <Button
+            variant="secondary"
             onClick={() => setPage(p => Math.min(totalPages, p + 1))}
             disabled={page === totalPages}
-            className="px-4 py-2 bg-surface-800 border border-surface-700 rounded-lg text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-surface-700 transition-colors"
           >
             Next →
-          </button>
+          </Button>
         </div>
       )}
 

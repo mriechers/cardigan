@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { usePreferences, TextSize } from '../context/PreferencesContext'
 import { AGENT_INFO } from '../constants/agents'
+import Button from '../components/ui/Button'
 
 interface DurationThreshold {
   max_minutes: number | null
@@ -335,7 +336,7 @@ export default function Settings() {
   if (loading) {
     return (
       <div className="space-y-6">
-        <h1 className="text-2xl font-bold text-white">Settings</h1>
+        <h1 className="text-2xl font-display font-bold text-white">Settings</h1>
         <div className="bg-surface-800 rounded-lg border border-surface-700 p-6">
           <p className="text-surface-400 animate-pulse">Loading configuration...</p>
         </div>
@@ -367,22 +368,22 @@ export default function Settings() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-white">Settings</h1>
+        <h1 className="text-2xl font-display font-bold text-white">Settings</h1>
         {hasChanges && (
           <div className="flex items-center space-x-3">
-            <button
+            <Button
+              variant="ghost"
               onClick={handleReset}
-              className="px-4 py-2 bg-surface-700 hover:bg-surface-600 text-white rounded-md text-sm transition-colors"
             >
               Reset
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="primary"
               onClick={handleSave}
               disabled={saving}
-              className="px-4 py-2 bg-pbs-500 hover:bg-pbs-400 disabled:opacity-50 text-white rounded-md text-sm transition-colors"
             >
               {saving ? 'Saving...' : 'Save Changes'}
-            </button>
+            </Button>
           </div>
         )}
       </div>

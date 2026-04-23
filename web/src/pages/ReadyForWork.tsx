@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useToast } from '../components/ui/Toast'
+import Button from '../components/ui/Button'
 import { formatRelativeTime, formatTimestamp } from '../utils/formatTime'
 
 interface AvailableFile {
@@ -244,7 +245,7 @@ export default function ReadyForWork() {
       {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Ready for Work</h1>
+          <h1 className="text-2xl font-display font-bold text-white">Ready for Work</h1>
           <p className="text-surface-400 mt-1">
             Transcripts from the ingest server ready for processing
           </p>
@@ -255,13 +256,13 @@ export default function ReadyForWork() {
               Last scan: {formatRelativeTime(lastScanAt + 'Z')}
             </span>
           )}
-          <button
+          <Button
+            variant="primary"
             onClick={handleScan}
             disabled={scanning}
-            className="px-4 py-2 bg-pbs-500 hover:bg-pbs-400 disabled:opacity-50 text-white rounded-lg transition-colors font-medium"
           >
             {scanning ? 'Checking...' : 'Check for New Files'}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -308,12 +309,13 @@ export default function ReadyForWork() {
 
           {/* Clear Filters */}
           {hasActiveFilters && (
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={clearFilters}
-              className="px-3 py-2 text-surface-400 hover:text-white transition-colors"
             >
               Clear filters
-            </button>
+            </Button>
           )}
         </div>
 
@@ -348,18 +350,20 @@ export default function ReadyForWork() {
               {selectedFileIds.size} file{selectedFileIds.size !== 1 ? 's' : ''} selected
             </span>
             <div className="flex items-center space-x-3">
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setSelectedFileIds(new Set())}
-                className="px-3 py-1.5 text-sm text-surface-400 hover:text-white transition-colors"
               >
                 Clear selection
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
                 onClick={handleQueueSelected}
-                className="px-4 py-1.5 text-sm bg-green-600 hover:bg-green-500 text-white rounded-md transition-colors font-medium"
               >
                 Queue Selected
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -438,18 +442,20 @@ export default function ReadyForWork() {
                 </div>
 
                 <div className="flex items-center space-x-2 ml-4">
-                  <button
+                  <Button
+                    variant="primary"
+                    size="sm"
                     onClick={() => handleQueueFile(file.id)}
-                    className="px-4 py-1.5 text-sm bg-green-600 hover:bg-green-500 text-white rounded-md transition-colors font-medium"
                   >
                     Queue
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => handleIgnoreFile(file.id)}
-                    className="px-3 py-1.5 text-sm bg-surface-700 hover:bg-surface-600 text-surface-300 rounded-md transition-colors"
                   >
                     Ignore
-                  </button>
+                  </Button>
                 </div>
               </div>
             ))

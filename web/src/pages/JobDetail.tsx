@@ -6,6 +6,8 @@ import { useFocusTrap } from '../hooks/useFocusTrap'
 import Breadcrumb from '../components/ui/Breadcrumb'
 import { useToast } from '../components/ui/Toast'
 import { Skeleton, SkeletonCard } from '../components/ui/Skeleton'
+import Button from '../components/ui/Button'
+import Modal from '../components/ui/Modal'
 import { formatRelativeTime, formatTimestamp, formatDuration } from '../utils/formatTime'
 import ChatPanel from '../components/chat/ChatPanel'
 import ScreengrabSlideout from '../components/ScreengrabSlideout'
@@ -432,7 +434,7 @@ export default function JobDetail() {
             &#8592; Back
           </button>
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold text-white">
+            <h1 className="text-2xl font-display font-bold text-white">
               {job.project_name}
             </h1>
             {job.content_type === 'short' && (
@@ -459,56 +461,62 @@ export default function JobDetail() {
         {/* Action Buttons */}
         <div className="flex items-center space-x-2">
           {job.status === 'in_progress' && (
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => handleAction('pause')}
-              className="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white rounded-md text-sm"
             >
               Pause
-            </button>
+            </Button>
           )}
           {job.status === 'paused' && !job.error_message?.includes('TRUNCATION') && (
-            <button
+            <Button
+              variant="primary"
+              size="sm"
               onClick={() => handleAction('resume')}
-              className="px-3 py-1.5 bg-pbs-500 hover:bg-pbs-400 text-white rounded-md text-sm"
             >
               Resume
-            </button>
+            </Button>
           )}
           {(job.status === 'failed' || (job.status === 'paused' && job.error_message?.includes('TRUNCATION'))) && (
-            <button
+            <Button
+              variant="primary"
+              size="sm"
               onClick={() => handleAction('retry')}
-              className="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white rounded-md text-sm"
               title="Retries with a more capable model tier"
             >
               Retry &amp; Escalate
-            </button>
+            </Button>
           )}
           {['pending', 'paused'].includes(job.status) && (
-            <button
+            <Button
+              variant="danger"
+              size="sm"
               onClick={() => handleAction('cancel')}
-              className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-md text-sm"
             >
               Cancel
-            </button>
+            </Button>
           )}
           {job.status === 'completed' && (
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => setShowChat(!showChat)}
-              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md text-sm"
             >
               {showChat ? 'Close Chat' : 'Open Chat'}
-            </button>
+            </Button>
           )}
           {hasScreengrabs && (
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setShowScreengrabs(!showScreengrabs)}
-              className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-md text-sm flex items-center space-x-1.5"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
               <span>{showScreengrabs ? 'Close' : 'Screengrabs'}</span>
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -879,13 +887,14 @@ export default function JobDetail() {
               <pre className="text-xs text-amber-300/70 whitespace-pre-wrap mb-3 bg-amber-950/30 rounded p-2">
                 {job.error_message}
               </pre>
-              <button
+              <Button
+                variant="primary"
+                size="sm"
                 onClick={() => handleAction('retry')}
-                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-md text-sm font-medium transition-colors"
                 title="Retries with a more capable model tier"
               >
                 Retry &amp; Escalate
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -961,78 +970,59 @@ export default function JobDetail() {
       </div>
 
       {/* Phase Retry Modal */}
-      {retryModal && (
-        <div
-          className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
-          onClick={() => setRetryModal(null)}
-        >
-          <div
-            className="bg-surface-900 rounded-lg border border-surface-700 w-full max-w-md"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="retry-modal-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-4 py-3 border-b border-surface-700">
-              <h3 id="retry-modal-title" className="text-base font-medium text-white">
-                Retry: {retryModal.label}
-              </h3>
-              <button
-                onClick={() => setRetryModal(null)}
-                className="text-surface-400 hover:text-white text-2xl leading-none"
-                aria-label="Close retry dialog"
-              >
-                &times;
-              </button>
-            </div>
-            <div className="p-4 space-y-4">
-              <div>
-                <label htmlFor="retry-tier" className="block text-sm text-surface-300 mb-1">
-                  Model tier
-                </label>
-                <select
-                  id="retry-tier"
-                  value={retryTier}
-                  onChange={(e) => setRetryTier(e.target.value)}
-                  className="w-full bg-surface-800 border border-surface-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-pbs-500"
-                >
-                  <option value="">Auto-escalate (recommended)</option>
-                  <option value="0">Cheapskate (tier 0)</option>
-                  <option value="1">Default (tier 1)</option>
-                  <option value="2">Big Brain (tier 2)</option>
-                </select>
-              </div>
-              <div>
-                <label htmlFor="retry-feedback" className="block text-sm text-surface-300 mb-1">
-                  Editorial feedback <span className="text-surface-400">(optional)</span>
-                </label>
-                <textarea
-                  id="retry-feedback"
-                  value={retryFeedback}
-                  onChange={(e) => setRetryFeedback(e.target.value)}
-                  placeholder="Optional: describe what to change..."
-                  rows={4}
-                  className="w-full bg-surface-800 border border-surface-600 rounded px-3 py-2 text-sm text-white placeholder-surface-400 focus:outline-none focus:border-pbs-500 resize-y"
-                />
-              </div>
-              <div className="flex gap-3 justify-end pt-1">
-                <button
-                  onClick={() => setRetryModal(null)}
-                  className="px-4 py-2 text-sm text-surface-300 hover:text-white transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={submitRetryModal}
-                  className="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white text-sm rounded transition-colors"
-                >
-                  Retry
-                </button>
-              </div>
-            </div>
+      <Modal
+        isOpen={!!retryModal}
+        onClose={() => setRetryModal(null)}
+        title={retryModal ? `Retry: ${retryModal.label}` : ''}
+        maxWidth="max-w-md"
+        titleId="retry-modal-title"
+      >
+        <div className="space-y-4">
+          <div>
+            <label htmlFor="retry-tier" className="block text-sm text-surface-300 mb-1">
+              Model tier
+            </label>
+            <select
+              id="retry-tier"
+              value={retryTier}
+              onChange={(e) => setRetryTier(e.target.value)}
+              className="w-full bg-surface-800 border border-surface-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-pbs-500"
+            >
+              <option value="">Auto-escalate (recommended)</option>
+              <option value="0">Cheapskate (tier 0)</option>
+              <option value="1">Default (tier 1)</option>
+              <option value="2">Big Brain (tier 2)</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor="retry-feedback" className="block text-sm text-surface-300 mb-1">
+              Editorial feedback <span className="text-surface-400">(optional)</span>
+            </label>
+            <textarea
+              id="retry-feedback"
+              value={retryFeedback}
+              onChange={(e) => setRetryFeedback(e.target.value)}
+              placeholder="Optional: describe what to change..."
+              rows={4}
+              className="w-full bg-surface-800 border border-surface-600 rounded px-3 py-2 text-sm text-white placeholder-surface-400 focus:outline-none focus:border-pbs-500 resize-y"
+            />
+          </div>
+          <div className="flex gap-3 justify-end pt-1">
+            <Button
+              variant="ghost"
+              onClick={() => setRetryModal(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={submitRetryModal}
+            >
+              Retry
+            </Button>
           </div>
         </div>
-      )}
+      </Modal>
 
       {/* Output Viewer Modal */}
       {viewingOutput && (

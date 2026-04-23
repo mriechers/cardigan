@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import { useToast } from '../components/ui/Toast'
 import { SkeletonQueue } from '../components/ui/Skeleton'
+import Button from '../components/ui/Button'
 import { useDebounce } from '../hooks/useDebounce'
 import { useJobsWebSocket } from '../hooks/useWebSocket'
 import { formatRelativeTime, formatTimestamp } from '../utils/formatTime'
@@ -273,7 +274,7 @@ export default function Queue() {
       {/* Header with Title, Search, and Count */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-white">Job Queue</h1>
+          <h1 className="text-2xl font-display font-bold text-white">Job Queue</h1>
           <span className="text-surface-400 text-sm">
             {total} job{total !== 1 ? 's' : ''}
             {filter !== 'all' && ` (${filter.replace('_', ' ')})`}
@@ -284,22 +285,24 @@ export default function Queue() {
         {/* Upload, Clear Button and Search */}
         <div className="flex items-center gap-4">
           {/* Upload Button */}
-          <button
+          <Button
+            variant="primary"
+            size="sm"
             onClick={() => setShowUploader(!showUploader)}
-            className="px-3 py-1.5 text-sm bg-pbs-500 hover:bg-pbs-400 text-white rounded-md transition-colors"
             title="Upload transcript files"
           >
             {showUploader ? 'Hide Upload' : '+ Upload'}
-          </button>
+          </Button>
 
           {/* Clear Failed/Cancelled Button */}
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => handleClearJobs(['failed', 'cancelled'])}
-            className="px-3 py-1.5 text-sm bg-red-900/50 hover:bg-red-800/50 text-red-300 rounded-md transition-colors"
             title="Delete all failed and cancelled jobs"
           >
             Clear Failed/Cancelled
-          </button>
+          </Button>
 
           {/* Instant Search */}
           <div className="relative">
@@ -435,20 +438,22 @@ export default function Queue() {
                     <div className="flex items-center space-x-2">
                       {job.status === 'pending' && (
                         <>
-                          <button
+                          <Button
+                            variant="secondary"
+                            size="sm"
                             onClick={() => handlePrioritize(job.id)}
-                            className="px-2 py-1 text-xs bg-pbs-500 hover:bg-pbs-400 text-white rounded transition-colors"
                             title="Move to top of queue"
                           >
                             ↑ Prioritize
-                          </button>
-                          <button
+                          </Button>
+                          <Button
+                            variant="danger"
+                            size="sm"
                             onClick={() => handleCancel(job.id)}
-                            className="px-2 py-1 text-xs bg-red-600/50 hover:bg-red-600 text-red-100 rounded transition-colors"
                             title="Cancel job"
                           >
                             Cancel
-                          </button>
+                          </Button>
                         </>
                       )}
                       {job.status === 'in_progress' && (
@@ -475,23 +480,23 @@ export default function Queue() {
       {/* Pagination Controls */}
       {totalPages > 1 && (
         <div className="flex items-center justify-center space-x-4 py-4">
-          <button
+          <Button
+            variant="secondary"
             onClick={() => setPage(p => Math.max(1, p - 1))}
             disabled={page === 1}
-            className="px-4 py-2 bg-surface-800 border border-surface-700 rounded-lg text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-surface-700 transition-colors"
           >
             ← Previous
-          </button>
+          </Button>
           <span className="text-surface-400">
             Page {page} of {totalPages}
           </span>
-          <button
+          <Button
+            variant="secondary"
             onClick={() => setPage(p => Math.min(totalPages, p + 1))}
             disabled={page === totalPages}
-            className="px-4 py-2 bg-surface-800 border border-surface-700 rounded-lg text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-surface-700 transition-colors"
           >
             Next →
-          </button>
+          </Button>
         </div>
       )}
 
