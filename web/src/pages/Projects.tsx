@@ -2,8 +2,8 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { useFocusTrap } from '../hooks/useFocusTrap'
 import Button from '../components/ui/Button'
+import Modal from '../components/ui/Modal'
 import { formatRelativeTime, formatTimestamp } from '../utils/formatTime'
 import { ARTIFACT_LABELS } from '../utils/artifactLabels'
 import ScreengrabsBox from '../components/ScreengrabsBox'
@@ -65,7 +65,6 @@ export default function Projects() {
   const [sstMetadata, setSstMetadata] = useState<SSTMetadata | null>(null)
   const [loadingSst, setLoadingSst] = useState(false)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
-  const modalRef = useFocusTrap(!!viewingArtifact)
 
   // Pagination and search state
   const [page, setPage] = useState(1)
@@ -174,17 +173,6 @@ export default function Projects() {
     }, 0)
   }
 
-  // Handle Escape key to close modal
-  useEffect(() => {
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && viewingArtifact) {
-        closeModal()
-      }
-    }
-
-    document.addEventListener('keydown', handleEscape)
-    return () => document.removeEventListener('keydown', handleEscape)
-  }, [viewingArtifact])
 
   // Map phase names to artifact keys for lookup
   const PHASE_TO_ARTIFACT_KEY: Record<string, string> = {
@@ -233,8 +221,8 @@ export default function Projects() {
 
   const getPhaseIcon = (status: string) => {
     switch (status) {
-      case 'completed': return <span className="text-green-400">✓</span>
-      case 'failed': return <span className="text-red-400">✗</span>
+      case 'completed': return <span className="text-status-completed">✓</span>
+      case 'failed': return <span className="text-status-failed">✗</span>
       case 'in_progress': return <span className="text-pbs-400 animate-pulse">●</span>
       default: return <span className="text-surface-400">○</span>
     }
@@ -332,7 +320,7 @@ export default function Projects() {
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="text-green-400 font-mono text-sm">
+                      <div className="text-status-completed font-mono text-sm">
                         {formatCost(job.actual_cost || 0)}
                       </div>
                       <div className="text-xs text-surface-400">total cost</div>
@@ -443,7 +431,7 @@ export default function Projects() {
                           <span className="text-white capitalize">{phase.name}</span>
                         </div>
                         <div className="flex items-center space-x-4 text-sm">
-                          <span className="text-green-400 font-mono">
+                          <span className="text-status-completed font-mono">
                             {formatCost(phase.cost || 0)}
                           </span>
                           <span className="text-surface-400">
@@ -501,7 +489,7 @@ export default function Projects() {
                   <h3 className="text-sm font-medium text-surface-400 mb-2">
                     Output Location
                   </h3>
-                  <code className="text-sm text-emerald-400 font-mono break-all">
+                  <code className="text-sm text-pbs-400 font-mono break-all">
                     {selectedProject.project_path}
                   </code>
                 </div>
@@ -541,50 +529,24 @@ export default function Projects() {
       )}
 
       {/* Artifact Viewer Modal */}
-      {viewingArtifact && (
-        <div
-          className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
-          onClick={closeModal}
-        >
-          <div
-            ref={modalRef}
-            className="bg-surface-900 rounded-lg border border-surface-700 w-full max-w-4xl max-h-[90vh] flex flex-col"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="artifact-modal-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Modal Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-surface-700">
-              <h3 id="artifact-modal-title" className="text-lg font-medium text-white">
-                {viewingArtifact.label}
-                <span className="ml-2 text-sm text-surface-400 font-mono font-normal">
-                  {viewingArtifact.name}
-                </span>
-              </h3>
-              <button
-                onClick={closeModal}
-                className="text-surface-400 hover:text-white text-2xl leading-none"
-                aria-label="Close artifact viewer"
-              >
-                &times;
-              </button>
+      <Modal
+        isOpen={!!viewingArtifact}
+        onClose={closeModal}
+        title={viewingArtifact?.label || ''}
+        maxWidth="max-w-4xl"
+      >
+        {viewingArtifact && (
+          viewingArtifact.isJson ? (
+            <pre className="text-sm text-surface-300 whitespace-pre-wrap font-mono">
+              {JSON.stringify(JSON.parse(viewingArtifact.content), null, 2)}
+            </pre>
+          ) : (
+            <div className="prose prose-invert prose-sm max-w-none prose-table:border-collapse prose-th:border prose-th:border-surface-600 prose-th:p-2 prose-th:bg-surface-800 prose-td:border prose-td:border-surface-700 prose-td:p-2">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{viewingArtifact.content}</ReactMarkdown>
             </div>
-            {/* Modal Content */}
-            <div className="flex-1 overflow-auto p-4">
-              {viewingArtifact.isJson ? (
-                <pre className="text-sm text-surface-300 whitespace-pre-wrap font-mono">
-                  {JSON.stringify(JSON.parse(viewingArtifact.content), null, 2)}
-                </pre>
-              ) : (
-                <div className="prose prose-invert prose-sm max-w-none prose-table:border-collapse prose-th:border prose-th:border-surface-600 prose-th:p-2 prose-th:bg-surface-800 prose-td:border prose-td:border-surface-700 prose-td:p-2">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{viewingArtifact.content}</ReactMarkdown>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+          )
+        )}
+      </Modal>
     </div>
   )
 }

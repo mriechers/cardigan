@@ -263,15 +263,15 @@ export default function System() {
               const isBigBrain = presetName.includes('big-brain')
               const isCheapskate = presetName.includes('cheapskate')
               const colorClass = isBigBrain
-                ? 'bg-purple-900/10 border-purple-500/30'
+                ? 'bg-pbs-300/10 border-pbs-300/30'
                 : isCheapskate
-                ? 'bg-green-900/10 border-green-500/30'
-                : 'bg-cyan-900/10 border-cyan-500/30'
+                ? 'bg-status-completed/10 border-status-completed/30'
+                : 'bg-pbs-500/10 border-pbs-500/30'
               const textClass = isBigBrain
-                ? 'text-purple-400'
+                ? 'text-pbs-300'
                 : isCheapskate
-                ? 'text-green-400'
-                : 'text-cyan-400'
+                ? 'text-status-completed'
+                : 'text-pbs-400'
               return (
                 <div key={presetName} className={`rounded-lg p-3 border ${colorClass}`}>
                   <div className="flex items-center space-x-2 mb-2">
@@ -323,10 +323,10 @@ export default function System() {
               const isBigBrain = backend.includes('big-brain')
               const isCheapskate = backend.includes('cheapskate')
               const badgeClass = isBigBrain
-                ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+                ? 'bg-pbs-300/15 text-pbs-300 border border-pbs-300/30'
                 : isCheapskate
-                ? 'bg-green-500/20 text-green-400 border border-green-500/30'
-                : 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                ? 'bg-status-completed/15 text-status-completed border border-status-completed/30'
+                : 'bg-pbs-500/15 text-pbs-400 border border-pbs-500/30'
               const tierLabel = isBigBrain ? 'big-brain' : isCheapskate ? 'cheapskate' : 'default'
               return (
                 <div key={agent.id} className="flex items-start space-x-4 p-3 bg-surface-900 rounded-lg">
@@ -347,9 +347,9 @@ export default function System() {
             })}
           </div>
           <p className="text-xs text-surface-400 mt-3">
-            <span className="text-purple-400">big-brain</span> = complex reasoning |{' '}
-            <span className="text-cyan-400">default</span> = balanced |{' '}
-            <span className="text-green-400">cheapskate</span> = free tier
+            <span className="text-pbs-300">big-brain</span> = complex reasoning |{' '}
+            <span className="text-pbs-400">default</span> = balanced |{' '}
+            <span className="text-status-completed">cheapskate</span> = free tier
           </p>
         </div>
       )}

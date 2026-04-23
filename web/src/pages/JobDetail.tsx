@@ -1119,12 +1119,12 @@ function CopyEditorHandoff({ projectName }: { projectName: string }) {
   }
 
   return (
-    <div className="bg-gradient-to-r from-emerald-900/30 to-teal-900/30 rounded-lg border border-emerald-500/30 p-6">
+    <div className="bg-pbs-900/20 rounded-lg border border-pbs-500/30 p-6">
       <div className="flex items-start space-x-4">
         {/* Icon */}
         <div className="flex-shrink-0">
-          <div className="w-12 h-12 bg-emerald-500/20 rounded-full flex items-center justify-center">
-            <svg className="w-6 h-6 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="w-12 h-12 bg-pbs-500/20 rounded-full flex items-center justify-center">
+            <svg className="w-6 h-6 text-pbs-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
@@ -1132,7 +1132,7 @@ function CopyEditorHandoff({ projectName }: { projectName: string }) {
 
         {/* Content */}
         <div className="flex-1 min-w-0">
-          <h3 className="text-lg font-semibold text-emerald-300 mb-2">
+          <h3 className="text-lg font-semibold text-pbs-300 mb-2">
             Ready for Copy Editing
           </h3>
           <p className="text-surface-300 text-sm mb-4">
@@ -1148,13 +1148,11 @@ function CopyEditorHandoff({ projectName }: { projectName: string }) {
                   "{promptText}"
                 </p>
               </div>
-              <button
+              <Button
                 onClick={handleCopyPrompt}
-                className={`ml-4 flex-shrink-0 px-3 py-1.5 text-white rounded-md text-sm font-medium transition-colors flex items-center space-x-1.5 ${
-                  copyState === 'error'
-                    ? 'bg-red-600 hover:bg-red-500'
-                    : 'bg-emerald-600 hover:bg-emerald-500'
-                }`}
+                variant={copyState === 'error' ? 'danger' : 'primary'}
+                size="sm"
+                className="ml-4 flex-shrink-0"
                 aria-label="Copy prompt to clipboard"
               >
                 {copyState === 'copied' ? (
@@ -1179,7 +1177,7 @@ function CopyEditorHandoff({ projectName }: { projectName: string }) {
                     <span>Copy</span>
                   </>
                 )}
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -1190,7 +1188,7 @@ function CopyEditorHandoff({ projectName }: { projectName: string }) {
               href="https://github.com/your-org/ai-editorial-assistant-v3/blob/main/docs/CLAUDE_DESKTOP_SETUP.md"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-emerald-400 hover:text-emerald-300 underline"
+              className="text-pbs-400 hover:text-pbs-300 underline"
             >
               See the setup guide
             </a>

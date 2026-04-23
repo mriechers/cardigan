@@ -97,11 +97,11 @@ export default function StatusBar() {
         {/* Center: Expandable Details Toggle */}
         <button
           onClick={() => setExpanded(!expanded)}
-          className="flex items-center space-x-1 text-surface-400 hover:text-surface-200 px-2 py-1 rounded hover:bg-surface-800 transition-colors"
+          className="flex items-center gap-1 text-surface-400 hover:text-surface-200 px-2 py-1 rounded hover:bg-surface-800 transition-colors text-xs"
           aria-expanded={expanded}
           aria-label={expanded ? 'Hide system details' : 'Show system details'}
         >
-          <span>{expanded ? 'Less' : 'More'}</span>
+          <span>Details</span>
           <span className={`transform transition-transform ${expanded ? 'rotate-180' : ''}`}>
             ▼
           </span>
@@ -146,14 +146,14 @@ export default function StatusBar() {
           {health?.llm && (
             <div className="flex items-center space-x-2 text-surface-300">
               <span>Backend:</span>
-              <span className="text-cyan-400 font-mono">
+              <span className="text-pbs-400 font-mono">
                 {health.llm.active_backend || health.llm.primary_backend || 'none'}
               </span>
               {health.llm.configured_preset && (
                 <>
                   <span className="text-surface-400">|</span>
                   <span>Preset:</span>
-                  <span className="text-purple-400 font-mono">
+                  <span className="text-pbs-300 font-mono">
                     {health.llm.configured_preset}
                   </span>
                 </>
@@ -168,7 +168,7 @@ export default function StatusBar() {
                 Last run: <span className="text-status-completed">{formatCost(health.last_run.total_cost)}</span>
               </span>
               <span>
-                <span className="text-surface-300">{formatTokens(health.last_run.total_tokens)}</span> tokens
+                <span className="text-surface-200">{formatTokens(health.last_run.total_tokens)}</span> tokens
               </span>
             </div>
           )}
