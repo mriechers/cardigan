@@ -70,7 +70,7 @@ export default function Help() {
         className="hidden lg:block w-56 flex-shrink-0 sticky top-20 self-start max-h-[calc(100vh-6rem)] overflow-y-auto"
         aria-label="Table of contents"
       >
-        <h2 className="text-sm font-semibold text-surface-400 uppercase tracking-wider mb-3">
+        <h2 className="text-sm font-display font-semibold text-surface-400 uppercase tracking-wider mb-3">
           Contents
         </h2>
         <ul className="space-y-1">
@@ -96,17 +96,17 @@ export default function Help() {
       {/* Main Content */}
       <article className="flex-1 min-w-0">
         <div className="bg-surface-800 rounded-lg border border-surface-700 p-8">
-          <div className="prose prose-invert prose-gray max-w-none
-            prose-headings:scroll-mt-20
-            prose-h1:text-2xl prose-h1:font-bold prose-h1:text-white prose-h1:border-b prose-h1:border-surface-700 prose-h1:pb-3 prose-h1:mb-6
-            prose-h2:text-xl prose-h2:font-semibold prose-h2:text-white prose-h2:mt-10 prose-h2:mb-4
-            prose-h3:text-lg prose-h3:font-medium prose-h3:text-surface-200
-            prose-p:text-surface-300 prose-p:leading-relaxed
+          <div className="prose prose-invert max-w-none
+            prose-headings:font-display prose-headings:scroll-mt-20
+            prose-h1:text-[var(--text-3xl)] prose-h1:font-bold prose-h1:text-white prose-h1:border-b prose-h1:border-surface-700 prose-h1:pb-3 prose-h1:mb-6
+            prose-h2:text-[var(--text-2xl)] prose-h2:font-semibold prose-h2:text-white prose-h2:mt-10 prose-h2:mb-4
+            prose-h3:text-[var(--text-xl)] prose-h3:font-medium prose-h3:text-surface-200
+            prose-p:text-surface-300 prose-p:leading-relaxed prose-p:max-w-[75ch]
             prose-a:text-pbs-400 prose-a:no-underline hover:prose-a:underline
             prose-strong:text-white
-            prose-code:text-pbs-300 prose-code:bg-surface-900 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-sm
+            prose-code:text-pbs-300 prose-code:bg-surface-800 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-sm prose-code:font-mono
             prose-table:border-collapse
-            prose-th:bg-surface-900 prose-th:text-surface-200 prose-th:text-left prose-th:px-3 prose-th:py-2 prose-th:border prose-th:border-surface-700 prose-th:text-sm
+            prose-th:bg-surface-850 prose-th:text-surface-200 prose-th:text-left prose-th:px-3 prose-th:py-2 prose-th:border prose-th:border-surface-700 prose-th:text-sm
             prose-td:px-3 prose-td:py-2 prose-td:border prose-td:border-surface-700 prose-td:text-sm prose-td:text-surface-300
             prose-li:text-surface-300
             prose-hr:border-surface-700
