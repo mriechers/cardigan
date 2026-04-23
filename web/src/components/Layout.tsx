@@ -1,15 +1,14 @@
 import { useState, useRef, useEffect } from 'react'
 import { Outlet, NavLink } from 'react-router-dom'
 import StatusBar from './StatusBar'
+import Modal from './ui/Modal'
 import { useKeyboardShortcuts, getKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
-import { useFocusTrap } from '../hooks/useFocusTrap'
 import { usePreferences } from '../context/PreferencesContext'
 
 export default function Layout() {
   useKeyboardShortcuts()
   const { preferences } = usePreferences()
   const [showHelp, setShowHelp] = useState(false)
-  const helpModalRef = useFocusTrap(showHelp)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
 
   // Apply preferences to document root
@@ -66,10 +65,10 @@ export default function Layout() {
   }
 
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-    `px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+    `px-3 py-2 text-sm font-medium transition-colors relative ${
       isActive
-        ? 'bg-surface-700 text-white'
-        : 'text-surface-300 hover:bg-surface-700 hover:text-white'
+        ? 'text-white after:absolute after:bottom-0 after:left-1 after:right-1 after:h-0.5 after:bg-pbs-400 after:rounded-full'
+        : 'text-surface-300 hover:text-white'
     }`
 
   return (
@@ -86,72 +85,60 @@ export default function Layout() {
       <StatusBar />
 
       {/* Navigation */}
-      <nav className="bg-surface-800 border-b border-surface-700" aria-label="Main navigation">
+      <nav className="bg-surface-850 border-b border-surface-700" aria-label="Main navigation">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-14">
-            <div className="flex items-center space-x-4">
+          <div className="flex items-center h-14">
+            {/* Brand */}
+            <div className="flex items-center space-x-3 mr-6">
               <img
                 src="https://wisconsinpublictv.s3.us-east-2.amazonaws.com/wp-content/uploads/2023/08/pbs-wisconsin-wblue-rgb-2-412x62.png"
                 alt="PBS Wisconsin"
                 className="h-6"
               />
-              <span className="text-lg font-semibold text-white">
+              <span className="font-display text-lg font-semibold tracking-tight text-white">
                 Cardigan
               </span>
-              <span className="text-xs text-surface-400">v4.0</span>
+              <span className="text-xs text-surface-400 font-mono">v4</span>
             </div>
+
+            {/* Work nav links */}
             <div className="flex items-center space-x-1">
-              <NavLink
-                to="/"
-                className={navLinkClass}
-                end
-              >
+              <NavLink to="/" className={navLinkClass} end>
                 Dashboard
               </NavLink>
-              <NavLink
-                to="/ready"
-                className={navLinkClass}
-              >
+              <NavLink to="/ready" className={navLinkClass}>
                 Ready for Work
               </NavLink>
-              <NavLink
-                to="/queue"
-                className={navLinkClass}
-              >
+              <NavLink to="/queue" className={navLinkClass}>
                 Queue
               </NavLink>
-              <NavLink
-                to="/projects"
-                className={navLinkClass}
-              >
+              <NavLink to="/projects" className={navLinkClass}>
                 Projects
               </NavLink>
-              <NavLink
-                to="/settings"
-                className={navLinkClass}
-              >
+            </div>
+
+            {/* Separator */}
+            <div className="w-px h-5 bg-surface-700 mx-3" />
+
+            {/* Utility nav links */}
+            <div className="flex items-center space-x-1">
+              <NavLink to="/settings" className={navLinkClass}>
                 Settings
               </NavLink>
-              <NavLink
-                to="/system"
-                className={navLinkClass}
-              >
+              <NavLink to="/system" className={navLinkClass}>
                 System
               </NavLink>
-              <NavLink
-                to="/help"
-                className={navLinkClass}
-              >
+              <NavLink to="/help" className={navLinkClass}>
                 Help
               </NavLink>
               <button
                 ref={triggerRef}
                 onClick={() => setShowHelp(true)}
-                className="px-3 py-2 rounded-md text-sm font-medium transition-colors text-surface-300 hover:bg-surface-700 hover:text-white"
+                className="p-2 transition-colors text-surface-300 hover:text-white"
                 aria-label="Show keyboard shortcuts"
                 title="Keyboard shortcuts (?)"
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </button>
@@ -165,54 +152,23 @@ export default function Layout() {
         <Outlet />
       </main>
 
-      {/* Keyboard Shortcuts Help Modal */}
-      {showHelp && (
-        <div
-          className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
-          onClick={closeHelp}
-        >
-          <div
-            ref={helpModalRef}
-            className="bg-surface-900 rounded-lg border border-surface-700 w-full max-w-md"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="shortcuts-modal-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-surface-700">
-              <h3 id="shortcuts-modal-title" className="text-lg font-medium text-white">
-                Keyboard Shortcuts
-              </h3>
-              <button
-                onClick={closeHelp}
-                className="text-surface-400 hover:text-white text-2xl leading-none"
-                aria-label="Close shortcuts help"
-              >
-                &times;
-              </button>
+      <Modal isOpen={showHelp} onClose={closeHelp} title="Keyboard Shortcuts" maxWidth="max-w-md">
+        <div className="space-y-3">
+          {getKeyboardShortcuts().map((shortcut, index) => (
+            <div key={index} className="flex items-center justify-between">
+              <span className="text-surface-300">{shortcut.description}</span>
+              <kbd className="px-2 py-1 bg-surface-800 border border-surface-600 rounded text-sm font-mono text-surface-300">
+                {shortcut.keys}
+              </kbd>
             </div>
-            {/* Modal Content */}
-            <div className="px-6 py-4">
-              <div className="space-y-3">
-                {getKeyboardShortcuts().map((shortcut, index) => (
-                  <div key={index} className="flex items-center justify-between">
-                    <span className="text-surface-300">{shortcut.description}</span>
-                    <kbd className="px-2 py-1 bg-surface-800 border border-surface-600 rounded text-sm font-mono text-surface-300">
-                      {shortcut.keys}
-                    </kbd>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-6 pt-4 border-t border-surface-700">
-                <p className="text-xs text-surface-400">
-                  Press <kbd className="px-1 py-0.5 bg-surface-800 border border-surface-600 rounded text-xs font-mono">?</kbd> to open this help anytime
-                </p>
-              </div>
-            </div>
-          </div>
+          ))}
         </div>
-      )}
+        <div className="mt-6 pt-4 border-t border-surface-700">
+          <p className="text-xs text-surface-400">
+            Press <kbd className="px-1 py-0.5 bg-surface-800 border border-surface-600 rounded text-xs font-mono">?</kbd> to open this help anytime
+          </p>
+        </div>
+      </Modal>
     </div>
   )
 }
