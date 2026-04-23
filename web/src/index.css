@@ -117,3 +117,38 @@ body {
 .high-contrast .border-surface-600 {
   border-color: #555566 !important;
 }
+
+/* Custom range slider styling */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 3px;
+  background: #343a52; /* surface-700 */
+  outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #5283d6; /* pbs-400 */
+  cursor: pointer;
+  border: 2px solid #242939; /* surface-800 */
+  transition: background 0.15s;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  background: #7da2e0; /* pbs-300 */
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #5283d6;
+  cursor: pointer;
+  border: 2px solid #242939;
+}

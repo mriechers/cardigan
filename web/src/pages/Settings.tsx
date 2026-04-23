@@ -1,8 +1,16 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { usePreferences, TextSize } from '../context/PreferencesContext'
 import { AGENT_INFO } from '../constants/agents'
 import Button from '../components/ui/Button'
+
+function TabIcon({ d }: { d: string }) {
+  return (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d={d} />
+    </svg>
+  )
+}
 
 interface DurationThreshold {
   max_minutes: number | null
@@ -49,22 +57,21 @@ interface IngestConfigUpdate {
   scan_time?: string  // "HH:MM" format
 }
 
-const TIER_COLORS = ['green', 'cyan', 'purple'] as const
-const TIER_STYLES: Record<string, { bg: string; border: string; text: string }> = {
-  green: { bg: 'bg-green-900/20', border: 'border-green-500/30', text: 'text-green-400' },
-  cyan: { bg: 'bg-cyan-900/20', border: 'border-cyan-500/30', text: 'text-cyan-400' },
-  purple: { bg: 'bg-purple-900/20', border: 'border-purple-500/30', text: 'text-purple-400' },
+const TIER_STYLES: Record<number, { bg: string; border: string; text: string }> = {
+  0: { bg: 'bg-status-completed/10', border: 'border-status-completed/30', text: 'text-status-completed' },
+  1: { bg: 'bg-pbs-500/10', border: 'border-pbs-500/30', text: 'text-pbs-400' },
+  2: { bg: 'bg-pbs-300/10', border: 'border-pbs-300/30', text: 'text-pbs-300' },
 }
 
 type TabId = 'agents' | 'routing' | 'worker' | 'ingest' | 'system' | 'accessibility'
 
-const TABS: { id: TabId; label: string; icon: string }[] = [
-  { id: 'agents', label: 'Agents', icon: '🤖' },
-  { id: 'routing', label: 'Routing', icon: '🔀' },
-  { id: 'worker', label: 'Worker', icon: '⚙️' },
-  { id: 'ingest', label: 'Ingest', icon: '📥' },
-  { id: 'system', label: 'System', icon: '🖥️' },
-  { id: 'accessibility', label: 'Accessibility', icon: '♿' },
+const TABS: { id: TabId; label: string; icon: ReactNode }[] = [
+  { id: 'agents', label: 'Agents', icon: <TabIcon d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" /> },
+  { id: 'routing', label: 'Routing', icon: <TabIcon d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" /> },
+  { id: 'worker', label: 'Worker', icon: <TabIcon d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.149.894c.07.424.384.764.78.93.398.164.855.142 1.205-.108l.737-.527a1.125 1.125 0 011.45.12l.773.774c.39.389.44 1.002.12 1.45l-.527.737c-.25.35-.272.806-.107 1.204.165.397.505.71.93.78l.893.15c.543.09.94.56.94 1.109v1.094c0 .55-.397 1.02-.94 1.11l-.893.149c-.425.07-.765.383-.93.78-.165.398-.143.854.107 1.204l.527.738c.32.447.269 1.06-.12 1.45l-.774.773a1.125 1.125 0 01-1.449.12l-.738-.527c-.35-.25-.806-.272-1.203-.107-.397.165-.71.505-.781.929l-.149.894c-.09.542-.56.94-1.11.94h-1.094c-.55 0-1.019-.398-1.11-.94l-.148-.894c-.071-.424-.384-.764-.781-.93-.398-.164-.854-.142-1.204.108l-.738.527c-.447.32-1.06.269-1.45-.12l-.773-.774a1.125 1.125 0 01-.12-1.45l.527-.737c.25-.35.273-.806.108-1.204-.165-.397-.505-.71-.93-.78l-.894-.15c-.542-.09-.94-.56-.94-1.109v-1.094c0-.55.398-1.02.94-1.11l.894-.149c.424-.07.765-.383.93-.78.165-.398.143-.854-.107-1.204l-.527-.738a1.125 1.125 0 01.12-1.45l.773-.773a1.125 1.125 0 011.45-.12l.737.527c.35.25.807.272 1.204.107.397-.165.71-.505.78-.929l.15-.894z" /> },
+  { id: 'ingest', label: 'Ingest', icon: <TabIcon d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /> },
+  { id: 'system', label: 'System', icon: <TabIcon d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25" /> },
+  { id: 'accessibility', label: 'Accessibility', icon: <TabIcon d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" /> },
 ]
 
 interface ComponentStatus {
@@ -316,10 +323,6 @@ export default function Settings() {
     return routing?.tier_labels?.[tier] || `tier-${tier}`
   }
 
-  const getTierColor = (tier: number): string => {
-    return TIER_COLORS[tier] || 'cyan'
-  }
-
   const formatDateTime = (isoString: string | null): string => {
     if (!isoString) return 'Never'
     const date = new Date(isoString)
@@ -439,8 +442,7 @@ export default function Settings() {
               <div className="space-y-4">
                 {AGENT_INFO.map((agent) => {
                   const currentTier = getCurrentPhaseBaseTier(agent.id)
-                  const color = getTierColor(currentTier)
-                  const styles = TIER_STYLES[color]
+                  const styles = TIER_STYLES[currentTier] || TIER_STYLES[0]
 
                   return (
                     <div key={agent.id} className="flex items-center justify-between p-4 bg-surface-900 rounded-lg">
@@ -476,15 +478,16 @@ export default function Settings() {
               </div>
 
               <div className="mt-4 flex items-center space-x-6 text-xs text-surface-400">
-                {routing?.tier_labels?.map((label, idx) => {
-                  const color = getTierColor(idx)
-                  return (
-                    <div key={idx} className="flex items-center space-x-2">
-                      <span className="w-2 h-2 rounded-full" style={{backgroundColor: color === 'green' ? '#22c55e' : color === 'cyan' ? '#06b6d4' : '#a855f7'}} />
-                      <span>{label}</span>
-                    </div>
-                  )
-                })}
+                {routing?.tier_labels?.map((label, idx) => (
+                  <div key={idx} className="flex items-center space-x-2">
+                    <span className={`w-2 h-2 rounded-full ${
+                      idx === 0 ? 'bg-status-completed' :
+                      idx === 1 ? 'bg-pbs-500' :
+                      'bg-pbs-300'
+                    }`} />
+                    <span>{label}</span>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
@@ -504,8 +507,7 @@ export default function Settings() {
               <div className="space-y-4">
                 {getCurrentThresholds().map((threshold, idx) => {
                   const label = getTierLabel(threshold.tier)
-                  const color = getTierColor(threshold.tier)
-                  const styles = TIER_STYLES[color]
+                  const styles = TIER_STYLES[threshold.tier] || TIER_STYLES[0]
 
                   return (
                     <div key={idx} className={`p-4 rounded-lg border ${styles.bg} ${styles.border}`}>
