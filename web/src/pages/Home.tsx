@@ -94,22 +94,22 @@ export default function Home() {
         <StatCard
           label="Pending"
           value={stats?.pending ?? 0}
-          color="text-yellow-400"
+          color="text-status-pending"
         />
         <StatCard
           label="Processing"
           value={stats?.in_progress ?? 0}
-          color="text-pbs-400"
+          color="text-status-processing"
         />
         <StatCard
           label="Completed"
           value={stats?.completed ?? 0}
-          color="text-green-400"
+          color="text-status-completed"
         />
         <StatCard
           label="Failed"
           value={stats?.failed ?? 0}
-          color="text-red-400"
+          color="text-status-failed"
         />
       </div>
 

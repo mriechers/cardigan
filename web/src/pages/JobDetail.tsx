@@ -359,11 +359,11 @@ export default function JobDetail() {
   const phaseStatusIcon = (status: string) => {
     switch (status) {
       case 'completed':
-        return <span className="text-green-400">&#10003;</span>
+        return <span className="text-status-completed">&#10003;</span>
       case 'in_progress':
-        return <span className="text-pbs-400 animate-pulse">&#9679;</span>
+        return <span className="text-status-processing animate-pulse">&#9679;</span>
       case 'failed':
-        return <span className="text-red-400">&#10007;</span>
+        return <span className="text-status-failed">&#10007;</span>
       case 'skipped':
         return <span className="text-surface-400">&#8212;</span>
       default:
@@ -399,7 +399,7 @@ export default function JobDetail() {
   if (error || !job) {
     return (
       <div className="text-center py-12">
-        <div role="alert" aria-live="assertive" className="text-red-400 mb-4">{error || 'Job not found'}</div>
+        <div role="alert" aria-live="assertive" className="text-status-failed mb-4">{error || 'Job not found'}</div>
         <button
           onClick={() => navigate(-1)}
           className="text-pbs-400 hover:text-pbs-300"
@@ -893,9 +893,9 @@ export default function JobDetail() {
 
       {/* Error Message (non-truncation errors) */}
       {job.error_message && !job.error_message.includes('TRUNCATION') && (
-        <div role="alert" aria-live="assertive" className="bg-red-900/20 border border-red-500/30 rounded-lg p-4">
-          <h3 className="text-red-400 font-medium mb-2">Error</h3>
-          <pre className="text-sm text-red-300 whitespace-pre-wrap">
+        <div role="alert" aria-live="assertive" className="bg-status-failed/15 border border-status-failed/30 rounded-lg p-4">
+          <h3 className="text-status-failed font-medium mb-2">Error</h3>
+          <pre className="text-sm text-status-failed/70 whitespace-pre-wrap">
             {job.error_message}
           </pre>
         </div>

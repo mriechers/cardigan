@@ -70,10 +70,10 @@ export default function StatusBar() {
           >
             <div
               className={`w-2 h-2 rounded-full ${
-                error ? 'bg-red-500 animate-pulse' : 'bg-green-500'
+                error ? 'bg-status-failed animate-pulse' : 'bg-status-completed'
               }`}
             />
-            <span className={error ? 'text-red-400' : 'text-surface-300'}>
+            <span className={error ? 'text-status-failed' : 'text-surface-300'}>
               {error ? 'Offline' : 'Connected'}
             </span>
           </Link>
@@ -85,7 +85,7 @@ export default function StatusBar() {
               className="flex items-center space-x-2 text-surface-300 hover:bg-surface-800 px-2 py-1 rounded transition-colors"
               title={`${health.queue.pending} pending, ${health.queue.in_progress} processing`}
             >
-              <span className="text-yellow-400 font-medium">{queueTotal}</span>
+              <span className="text-status-pending font-medium">{queueTotal}</span>
               <span>in queue</span>
               {health.queue.in_progress > 0 && (
                 <span className="text-pbs-400 animate-pulse">●</span>
@@ -124,19 +124,19 @@ export default function StatusBar() {
           {health?.queue && (
             <div className="flex items-center space-x-4 text-surface-300">
               <span>
-                <span className="text-yellow-400">{health.queue.pending}</span> pending
+                <span className="text-status-pending">{health.queue.pending}</span> pending
               </span>
               <span>
-                <span className="text-pbs-400">{health.queue.in_progress}</span> processing
+                <span className="text-status-processing">{health.queue.in_progress}</span> processing
               </span>
               {health.queue.completed !== undefined && (
                 <span>
-                  <span className="text-green-400">{health.queue.completed}</span> completed
+                  <span className="text-status-completed">{health.queue.completed}</span> completed
                 </span>
               )}
               {health.queue.failed !== undefined && health.queue.failed > 0 && (
                 <span>
-                  <span className="text-red-400">{health.queue.failed}</span> failed
+                  <span className="text-status-failed">{health.queue.failed}</span> failed
                 </span>
               )}
             </div>
@@ -165,7 +165,7 @@ export default function StatusBar() {
           {health?.last_run && (
             <div className="flex items-center space-x-3 text-surface-300">
               <span>
-                Last run: <span className="text-green-400">{formatCost(health.last_run.total_cost)}</span>
+                Last run: <span className="text-status-completed">{formatCost(health.last_run.total_cost)}</span>
               </span>
               <span>
                 <span className="text-surface-300">{formatTokens(health.last_run.total_tokens)}</span> tokens

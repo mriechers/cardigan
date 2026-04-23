@@ -91,17 +91,17 @@ export default function System() {
       {/* Connection Status Card */}
       <div role={isConnected ? "status" : "alert"} aria-live={isConnected ? "polite" : "assertive"} className={`rounded-lg border p-6 ${
         isConnected
-          ? 'bg-green-900/20 border-green-500/30'
-          : 'bg-red-900/20 border-red-500/30'
+          ? 'bg-status-completed/15 border-status-completed/30'
+          : 'bg-status-failed/15 border-status-failed/30'
       }`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <div className={`w-4 h-4 rounded-full ${
-              isConnected ? 'bg-green-500' : 'bg-red-500 animate-pulse'
+              isConnected ? 'bg-status-completed' : 'bg-status-failed animate-pulse'
             }`} />
             <div>
               <h2 className={`text-xl font-semibold ${
-                isConnected ? 'text-green-400' : 'text-red-400'
+                isConnected ? 'text-status-completed' : 'text-status-failed'
               }`}>
                 {isConnected ? 'API Connected' : 'API Offline'}
               </h2>
@@ -368,14 +368,14 @@ export default function System() {
                 <span className="text-surface-600">
                   {log.timestamp.toLocaleTimeString()}
                 </span>
-                <span className={log.success ? 'text-green-400' : 'text-red-400'}>
+                <span className={log.success ? 'text-status-completed' : 'text-status-failed'}>
                   {log.success ? 'OK' : 'FAIL'}
                 </span>
                 {log.latency && (
                   <span className="text-surface-400">{log.latency}ms</span>
                 )}
                 {log.error && (
-                  <span className="text-red-400 truncate">{log.error}</span>
+                  <span className="text-status-failed truncate">{log.error}</span>
                 )}
               </div>
             ))}
