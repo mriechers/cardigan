@@ -3,11 +3,21 @@
 @tailwind utilities;
 
 :root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
+  font-family: 'Atkinson Hyperlegible', system-ui, sans-serif;
+  line-height: 1.6;
   font-weight: 400;
-  color-scheme: dark light;
+  color-scheme: dark;
   --text-scale: 1;
+
+  /* Type scale — 1.25 ratio (Major Third) */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.563rem;
+  --text-3xl: 1.953rem;
+  --text-4xl: 2.441rem;
 }
 
 /* Apply text scaling and base styles */
@@ -79,30 +89,31 @@ body {
   color: #ffffff;
 }
 
-.high-contrast .bg-gray-900 {
+.high-contrast .bg-surface-900 {
   background-color: #000000 !important;
 }
 
-.high-contrast .bg-gray-800 {
-  background-color: #111111 !important;
+.high-contrast .bg-surface-800,
+.high-contrast .bg-surface-850 {
+  background-color: #111118 !important;
 }
 
-.high-contrast .bg-gray-700 {
-  background-color: #1a1a1a !important;
+.high-contrast .bg-surface-700 {
+  background-color: #1a1a24 !important;
 }
 
-.high-contrast .text-gray-400 {
+.high-contrast .text-surface-400 {
   color: #cccccc !important;
 }
 
-.high-contrast .text-gray-300 {
+.high-contrast .text-surface-300 {
   color: #e5e5e5 !important;
 }
 
-.high-contrast .border-gray-700 {
-  border-color: #444444 !important;
+.high-contrast .border-surface-700 {
+  border-color: #444455 !important;
 }
 
-.high-contrast .border-gray-600 {
-  border-color: #555555 !important;
+.high-contrast .border-surface-600 {
+  border-color: #555566 !important;
 }
