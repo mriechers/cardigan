@@ -268,9 +268,9 @@ export default function ReadyForWork() {
 
       {/* Filter Bar */}
       <div className="bg-surface-850 rounded-lg p-4">
-        <div className="flex items-center gap-4">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
           {/* Search Input */}
-          <div className="flex-1 max-w-md">
+          <div className="flex-1 sm:max-w-md">
             <label htmlFor="search" className="sr-only">Search</label>
             <div className="relative">
               <input

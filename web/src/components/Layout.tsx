@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Outlet, NavLink } from 'react-router-dom'
+import { Outlet, NavLink, useLocation } from 'react-router-dom'
 import StatusBar from './StatusBar'
 import Modal from './ui/Modal'
 import { useKeyboardShortcuts, getKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
@@ -9,7 +9,13 @@ export default function Layout() {
   useKeyboardShortcuts()
   const { preferences } = usePreferences()
   const [showHelp, setShowHelp] = useState(false)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const location = useLocation()
+
+  useEffect(() => {
+    setMobileMenuOpen(false)
+  }, [location.pathname])
 
   // Apply preferences to document root
   useEffect(() => {
@@ -71,6 +77,13 @@ export default function Layout() {
         : 'text-surface-300 hover:text-white'
     }`
 
+  const mobileNavLinkClass = ({ isActive }: { isActive: boolean }) =>
+    `block px-3 py-2 rounded-md text-base font-medium transition-colors ${
+      isActive
+        ? 'text-white bg-surface-800'
+        : 'text-surface-300 hover:text-white hover:bg-surface-800'
+    }`
+
   return (
     <div className="min-h-screen bg-surface-900 text-surface-100">
       {/* Skip Navigation Link */}
@@ -87,9 +100,9 @@ export default function Layout() {
       {/* Navigation */}
       <nav className="bg-surface-850 border-b border-surface-700" aria-label="Main navigation">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center h-14">
+          <div className="flex items-center justify-between h-14">
             {/* Brand */}
-            <div className="flex items-center space-x-3 mr-6">
+            <div className="flex items-center space-x-3">
               <img
                 src="https://wisconsinpublictv.s3.us-east-2.amazonaws.com/wp-content/uploads/2023/08/pbs-wisconsin-wblue-rgb-2-412x62.png"
                 alt="PBS Wisconsin"
@@ -101,50 +114,73 @@ export default function Layout() {
               <span className="text-xs text-surface-400 font-mono">v4</span>
             </div>
 
-            {/* Work nav links */}
-            <div className="flex items-center space-x-1">
-              <NavLink to="/" className={navLinkClass} end>
-                Dashboard
-              </NavLink>
-              <NavLink to="/ready" className={navLinkClass}>
-                Ready for Work
-              </NavLink>
-              <NavLink to="/queue" className={navLinkClass}>
-                Queue
-              </NavLink>
-              <NavLink to="/projects" className={navLinkClass}>
-                Projects
-              </NavLink>
+            {/* Desktop nav — hidden on mobile */}
+            <div className="hidden md:flex items-center">
+              {/* Work items */}
+              <div className="flex items-center space-x-1">
+                <NavLink to="/" className={navLinkClass} end>Dashboard</NavLink>
+                <NavLink to="/ready" className={navLinkClass}>Ready for Work</NavLink>
+                <NavLink to="/queue" className={navLinkClass}>Queue</NavLink>
+                <NavLink to="/projects" className={navLinkClass}>Projects</NavLink>
+              </div>
+
+              {/* Separator */}
+              <div className="w-px h-5 bg-surface-700 mx-3" />
+
+              {/* Utility items */}
+              <div className="flex items-center space-x-1">
+                <NavLink to="/settings" className={navLinkClass}>Settings</NavLink>
+                <NavLink to="/system" className={navLinkClass}>System</NavLink>
+                <NavLink to="/help" className={navLinkClass}>Help</NavLink>
+                <button
+                  ref={triggerRef}
+                  onClick={() => setShowHelp(true)}
+                  className="p-2 transition-colors text-surface-300 hover:text-white"
+                  aria-label="Show keyboard shortcuts"
+                  title="Keyboard shortcuts (?)"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </button>
+              </div>
             </div>
 
-            {/* Separator */}
-            <div className="w-px h-5 bg-surface-700 mx-3" />
-
-            {/* Utility nav links */}
-            <div className="flex items-center space-x-1">
-              <NavLink to="/settings" className={navLinkClass}>
-                Settings
-              </NavLink>
-              <NavLink to="/system" className={navLinkClass}>
-                System
-              </NavLink>
-              <NavLink to="/help" className={navLinkClass}>
-                Help
-              </NavLink>
-              <button
-                ref={triggerRef}
-                onClick={() => setShowHelp(true)}
-                className="p-2 transition-colors text-surface-300 hover:text-white"
-                aria-label="Show keyboard shortcuts"
-                title="Keyboard shortcuts (?)"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            {/* Mobile hamburger — visible on mobile only */}
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="md:hidden p-2 text-surface-300 hover:text-white transition-colors"
+              aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
+              aria-expanded={mobileMenuOpen}
+            >
+              {mobileMenuOpen ? (
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
-              </button>
-            </div>
+              ) : (
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              )}
+            </button>
           </div>
         </div>
+
+        {/* Mobile menu panel */}
+        {mobileMenuOpen && (
+          <div className="md:hidden border-t border-surface-700 bg-surface-850">
+            <div className="px-4 py-3 space-y-1">
+              <NavLink to="/" className={mobileNavLinkClass} end>Dashboard</NavLink>
+              <NavLink to="/ready" className={mobileNavLinkClass}>Ready for Work</NavLink>
+              <NavLink to="/queue" className={mobileNavLinkClass}>Queue</NavLink>
+              <NavLink to="/projects" className={mobileNavLinkClass}>Projects</NavLink>
+              <div className="border-t border-surface-700 my-2" />
+              <NavLink to="/settings" className={mobileNavLinkClass}>Settings</NavLink>
+              <NavLink to="/system" className={mobileNavLinkClass}>System</NavLink>
+              <NavLink to="/help" className={mobileNavLinkClass}>Help</NavLink>
+            </div>
+          </div>
+        )}
       </nav>
 
       {/* Main Content */}

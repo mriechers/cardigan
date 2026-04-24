@@ -1059,7 +1059,7 @@ export default function JobDetail() {
 
       {/* Chat Panel */}
       {showChat && job && (
-        <div className="fixed right-0 top-0 h-full w-1/2 min-w-[400px] bg-surface-900 border-l border-surface-700 z-40 shadow-xl">
+        <div className="fixed right-0 top-0 h-full w-full sm:w-2/3 md:w-1/2 md:min-w-[400px] bg-surface-900 border-l border-surface-700 z-40 shadow-xl">
           <ChatPanel
             projectName={job.project_name}
             onClose={() => setShowChat(false)}
@@ -1069,7 +1069,7 @@ export default function JobDetail() {
 
       {/* Screengrab Slideout */}
       {showScreengrabs && job?.media_id && (
-        <div className="fixed right-0 top-0 h-full w-1/3 min-w-[350px] bg-surface-900 border-l border-surface-700 z-40 shadow-xl">
+        <div className="fixed right-0 top-0 h-full w-full sm:w-1/2 md:w-1/3 md:min-w-[350px] bg-surface-900 border-l border-surface-700 z-40 shadow-xl">
           <ScreengrabSlideout
             mediaId={job.media_id}
             onClose={() => setShowScreengrabs(false)}
