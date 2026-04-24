@@ -31,26 +31,16 @@ interface HealthStatus {
   } | null
 }
 
-interface ConnectionLog {
-  timestamp: Date
-  success: boolean
-  error?: string
-  latency?: number
-}
-
 export default function System() {
   const [health, setHealth] = useState<HealthStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [checking, setChecking] = useState(false)
-  const [logs, setLogs] = useState<ConnectionLog[]>([])
 
   const checkConnection = async () => {
     setChecking(true)
-    const start = Date.now()
 
     try {
       const response = await fetch('/api/system/health')
-      const latency = Date.now() - start
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
@@ -59,20 +49,10 @@ export default function System() {
       const data = await response.json()
       setHealth(data)
       setError(null)
-      setLogs(prev => [{
-        timestamp: new Date(),
-        success: true,
-        latency
-      }, ...prev.slice(0, 9)])
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Unknown error'
       setError(errorMsg)
       setHealth(null)
-      setLogs(prev => [{
-        timestamp: new Date(),
-        success: false,
-        error: errorMsg
-      }, ...prev.slice(0, 9)])
     } finally {
       setChecking(false)
     }
@@ -354,70 +334,6 @@ export default function System() {
         </div>
       )}
 
-      {/* Connection Log */}
-      <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
-        <h3 className="text-sm font-medium text-surface-400 uppercase tracking-wide mb-3">
-          Connection Log
-        </h3>
-        {logs.length === 0 ? (
-          <p className="text-surface-400 text-sm">No connection attempts yet</p>
-        ) : (
-          <div className="space-y-1">
-            {logs.map((log, i) => (
-              <div key={i} className="flex items-center space-x-3 text-sm font-mono">
-                <span className="text-surface-600">
-                  {log.timestamp.toLocaleTimeString()}
-                </span>
-                <span className={log.success ? 'text-status-completed' : 'text-status-failed'}>
-                  {log.success ? 'OK' : 'FAIL'}
-                </span>
-                {log.latency && (
-                  <span className="text-surface-400">{log.latency}ms</span>
-                )}
-                {log.error && (
-                  <span className="text-status-failed truncate">{log.error}</span>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* API Endpoints Reference */}
-      <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
-        <h3 className="text-sm font-medium text-surface-400 uppercase tracking-wide mb-3">
-          API Endpoints
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm font-mono">
-          <div className="text-surface-400">
-            <span className="text-pbs-400">GET</span> /api/system/health
-          </div>
-          <div className="text-surface-400">
-            <span className="text-green-400">POST</span> /api/queue/
-          </div>
-          <div className="text-surface-400">
-            <span className="text-pbs-400">GET</span> /api/queue/
-          </div>
-          <div className="text-surface-400">
-            <span className="text-pbs-400">GET</span> /api/queue/stats
-          </div>
-          <div className="text-surface-400">
-            <span className="text-pbs-400">GET</span> /api/jobs/:id
-          </div>
-          <div className="text-surface-400">
-            <span className="text-yellow-400">PATCH</span> /api/jobs/:id
-          </div>
-          <div className="text-surface-400">
-            <span className="text-pbs-400">GET</span> /api/langfuse/model-stats
-          </div>
-          <div className="text-surface-400">
-            <span className="text-pbs-400">GET</span> /api/langfuse/phase-stats
-          </div>
-          <div className="text-surface-400">
-            <span className="text-pbs-400">GET</span> /api/langfuse/status
-          </div>
-        </div>
-      </div>
     </div>
   )
 }

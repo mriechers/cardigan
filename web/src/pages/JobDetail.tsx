@@ -426,13 +426,6 @@ export default function JobDetail() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <button
-            onClick={() => navigate(-1)}
-            className="text-sm text-surface-400 hover:text-white mb-2 inline-block transition-colors"
-            aria-label="Go back to previous page"
-          >
-            &#8592; Back
-          </button>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-display font-bold text-white">
               {job.project_name}
@@ -663,20 +656,6 @@ export default function JobDetail() {
         </div>
       )}
 
-      {/* Info Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <InfoCard label="Status" value={job.status} />
-        <InfoCard label="Priority" value={String(job.priority)} />
-        <InfoCard
-          label="Cost"
-          value={job.actual_cost ? `$${job.actual_cost.toFixed(4)}` : '-'}
-        />
-        <InfoCard
-          label="Tokens"
-          value={job.phases?.reduce((sum, p) => sum + (p.tokens || 0), 0).toLocaleString() ?? '-'}
-        />
-      </div>
-
       {/* Phases */}
       {job.phases && job.phases.length > 0 && (
         <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
@@ -725,36 +704,37 @@ export default function JobDetail() {
                     )}
                   </div>
                 </div>
-                {(phase.model || phase.tier_reason) && (
-                  <div className="mt-1 ml-8 text-xs text-surface-400 space-y-0.5">
-                    {phase.model && (
-                      <div>
-                        Model: <span className="text-surface-400 font-mono">{phase.model}</span>
-                      </div>
-                    )}
-                    {phase.tier_reason && (
-                      <div>
-                        Reason: <span className="text-surface-400">{phase.tier_reason}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-                {phase.previous_runs && phase.previous_runs.length > 0 && (
-                  <div className="mt-1.5 ml-8 text-xs text-surface-400">
-                    <div className="text-surface-600 mb-1">Previous runs:</div>
-                    {phase.previous_runs.map((run, i) => (
-                      <div key={i} className="flex items-center gap-2 text-surface-400 ml-2">
-                        <span className="text-surface-600">#{i + 1}</span>
-                        <span className={`px-1.5 py-0 rounded text-[10px] ${
-                          run.tier === 2 ? 'bg-purple-900/30 text-purple-400' :
-                          run.tier === 1 ? 'bg-pbs-900/30 text-pbs-400' :
-                          'bg-green-900/30 text-green-400'
-                        }`}>{run.tier_label || 'unknown'}</span>
-                        {run.model && <span className="font-mono">{run.model}</span>}
-                        <span>${(run.cost || 0).toFixed(4)}</span>
-                      </div>
-                    ))}
-                  </div>
+                {(phase.model || phase.tier_reason || (phase.previous_runs && phase.previous_runs.length > 0)) && (
+                  <details className="mt-1 ml-8">
+                    <summary className="text-xs text-surface-500 cursor-pointer hover:text-surface-300 select-none">
+                      Details
+                    </summary>
+                    <div className="mt-1 text-xs text-surface-400 space-y-1">
+                      {phase.model && (
+                        <div>Model: <span className="font-mono">{phase.model}</span></div>
+                      )}
+                      {phase.tier_reason && (
+                        <div>Reason: {phase.tier_reason}</div>
+                      )}
+                      {phase.previous_runs && phase.previous_runs.length > 0 && (
+                        <div className="mt-1">
+                          <div className="text-surface-500 mb-1">Previous runs:</div>
+                          {phase.previous_runs.map((run, i) => (
+                            <div key={i} className="flex items-center gap-2 text-surface-400 ml-2">
+                              <span className="text-surface-500">#{i + 1}</span>
+                              <span className={`px-1.5 py-0 rounded text-[10px] ${
+                                run.tier === 2 ? 'bg-purple-900/30 text-purple-400' :
+                                run.tier === 1 ? 'bg-pbs-900/30 text-pbs-400' :
+                                'bg-green-900/30 text-green-400'
+                              }`}>{run.tier_label || 'unknown'}</span>
+                              {run.model && <span className="font-mono">{run.model}</span>}
+                              <span>${(run.cost || 0).toFixed(4)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </details>
                 )}
               </div>
             ))}
@@ -821,7 +801,8 @@ export default function JobDetail() {
         </div>
       )}
 
-      {/* Keyword Report Upload */}
+      {/* Keyword Report Upload — only for completed jobs */}
+      {job.status === 'completed' && (
       <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-medium text-white">SEMRush Keyword Report</h2>
@@ -862,6 +843,7 @@ export default function JobDetail() {
           </ul>
         )}
       </div>
+      )}
 
       {/* Screengrabs (inline) */}
       {job.media_id && (
@@ -909,63 +891,67 @@ export default function JobDetail() {
         </div>
       )}
 
-      {/* Timestamps */}
+      {/* Timeline */}
       <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
-        <h2 className="text-lg font-medium text-white mb-4">Timeline</h2>
-        <div className="grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <span className="text-surface-400">Queued:</span>
-            <span className="ml-2 text-white" title={formatTimestamp(job.queued_at)}>
-              {formatRelativeTime(job.queued_at)}
-            </span>
-          </div>
-          {job.started_at && (
-            <div>
-              <span className="text-surface-400">Started:</span>
-              <span className="ml-2 text-white" title={formatTimestamp(job.started_at)}>
-                {formatRelativeTime(job.started_at)}
-              </span>
-            </div>
-          )}
-          {job.completed_at && (
-            <div>
-              <span className="text-surface-400">Completed:</span>
-              <span className="ml-2 text-white" title={formatTimestamp(job.completed_at)}>
-                {formatRelativeTime(job.completed_at)}
-              </span>
-            </div>
-          )}
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-medium text-white">Timeline</h2>
           {job.started_at && job.completed_at && (
+            <span className="text-sm text-surface-300">
+              Duration: <span className="text-white font-medium">{formatDuration(job.started_at, job.completed_at)}</span>
+            </span>
+          )}
+        </div>
+        <details className="mt-3">
+          <summary className="text-xs text-surface-500 cursor-pointer hover:text-surface-300 select-none">
+            All timestamps
+          </summary>
+          <div className="grid grid-cols-2 gap-4 text-sm mt-3">
             <div>
-              <span className="text-surface-400">Duration:</span>
-              <span className="ml-2 text-white">
-                {formatDuration(job.started_at, job.completed_at)}
+              <span className="text-surface-400">Queued:</span>
+              <span className="ml-2 text-white" title={formatTimestamp(job.queued_at)}>
+                {formatRelativeTime(job.queued_at)}
               </span>
             </div>
-          )}
-          {job.last_heartbeat && job.status === 'in_progress' && (
-            <div>
-              <span className="text-surface-400">Last heartbeat:</span>
-              <span className="ml-2 text-white" title={formatTimestamp(job.last_heartbeat)}>
-                {formatRelativeTime(job.last_heartbeat)}
-              </span>
-            </div>
-          )}
-          {(() => {
-            const retriedPhases = (job.phases || []).filter((p) => p.retry_count > 0);
-            const totalRetries = retriedPhases.reduce((sum, p) => sum + (p.retry_count || 0), 0);
-            return (
+            {job.started_at && (
               <div>
-                <span className="text-surface-400">Retries:</span>
-                <span className="ml-2 text-white">
-                  {totalRetries === 0
-                    ? 'None'
-                    : `${totalRetries} (${retriedPhases.map((p) => p.name).join(', ')})`}
+                <span className="text-surface-400">Started:</span>
+                <span className="ml-2 text-white" title={formatTimestamp(job.started_at)}>
+                  {formatRelativeTime(job.started_at)}
                 </span>
               </div>
-            );
-          })()}
-        </div>
+            )}
+            {job.completed_at && (
+              <div>
+                <span className="text-surface-400">Completed:</span>
+                <span className="ml-2 text-white" title={formatTimestamp(job.completed_at)}>
+                  {formatRelativeTime(job.completed_at)}
+                </span>
+              </div>
+            )}
+            {job.last_heartbeat && job.status === 'in_progress' && (
+              <div>
+                <span className="text-surface-400">Last heartbeat:</span>
+                <span className="ml-2 text-white" title={formatTimestamp(job.last_heartbeat)}>
+                  {formatRelativeTime(job.last_heartbeat)}
+                </span>
+              </div>
+            )}
+            {(() => {
+              const retriedPhases = (job.phases || []).filter((p) => p.retry_count > 0);
+              const totalRetries = retriedPhases.reduce((sum, p) => sum + (p.retry_count || 0), 0);
+              return (
+                <div>
+                  <span className="text-surface-400">Retries:</span>
+                  <span className="ml-2 text-white">
+                    {totalRetries === 0
+                      ? 'None'
+                      : `${totalRetries} (${retriedPhases.map((p) => p.name).join(', ')})`}
+                  </span>
+                </div>
+              );
+            })()}
+          </div>
+        </details>
       </div>
 
       {/* Phase Retry Modal */}
@@ -1085,17 +1071,6 @@ export default function JobDetail() {
           />
         </div>
       )}
-    </div>
-  )
-}
-
-function InfoCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="bg-surface-800 rounded-lg border border-surface-700 p-3">
-      <div className="text-xs text-surface-400 uppercase tracking-wide">
-        {label}
-      </div>
-      <div className="text-lg font-medium text-white mt-1">{value}</div>
     </div>
   )
 }
