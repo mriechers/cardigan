@@ -214,10 +214,10 @@ export default function JobDetail() {
 
   const handleAction = async (action: string) => {
     const actionLabels: Record<string, { success: string; error: string }> = {
-      pause: { success: 'Job paused successfully', error: 'Failed to pause job' },
-      resume: { success: 'Job resumed successfully', error: 'Failed to resume job' },
-      retry: { success: 'Job retry initiated', error: 'Failed to retry job' },
-      cancel: { success: 'Job cancelled successfully', error: 'Failed to cancel job' },
+      pause: { success: 'Job paused', error: 'Failed to pause job' },
+      resume: { success: 'Job resumed', error: 'Failed to resume job' },
+      retry: { success: 'Retrying job', error: 'Failed to retry job' },
+      cancel: { success: 'Job cancelled', error: 'Failed to cancel job' },
     }
 
     try {
@@ -280,7 +280,7 @@ export default function JobDetail() {
         body: JSON.stringify(body),
       })
       if (response.ok) {
-        toast('Phase retry started. Refresh in a moment to see results.', 'success')
+        toast('Regenerating — this usually takes 30–60 seconds.', 'success')
         // Auto-refresh after a delay
         setTimeout(async () => {
           const updated = await fetch(`/api/jobs/${id}`)
@@ -483,9 +483,9 @@ export default function JobDetail() {
               variant="primary"
               size="sm"
               onClick={() => handleAction('retry')}
-              title="Retries with a more capable model tier"
+              title="Retries this job using a more powerful AI model"
             >
-              Retry &amp; Escalate
+              Retry with stronger model
             </Button>
           )}
           {['pending', 'paused'].includes(job.status) && (
@@ -806,7 +806,7 @@ export default function JobDetail() {
                     disabled={isRetrying || retryingPhase !== null}
                     className="px-2 py-2 bg-surface-600 hover:bg-orange-600 rounded-r-md text-sm text-surface-300 hover:text-white transition-colors disabled:opacity-50"
                     aria-label={`Retry ${label}`}
-                    title={`Regenerate ${label}`}
+                    title="Regenerate this output"
                   >
                     {isRetrying ? (
                       <span className="animate-spin">&#8635;</span>
@@ -847,7 +847,7 @@ export default function JobDetail() {
         </div>
         {keywordReports.length === 0 ? (
           <p className="text-sm text-surface-400">
-            No keyword reports uploaded. Upload a SEMRush CSV export to enrich the SEO phase.
+            No keyword data yet. Upload a SEMRush export to improve keyword recommendations.
           </p>
         ) : (
           <ul className="space-y-1">
@@ -879,10 +879,9 @@ export default function JobDetail() {
           <div className="flex items-start space-x-3">
             <span className="text-amber-400 text-xl flex-shrink-0 mt-0.5">&#9888;</span>
             <div className="flex-1">
-              <h3 className="text-amber-300 font-medium mb-1">Transcript Truncation Detected</h3>
+              <h3 className="text-amber-300 font-medium mb-1">Incomplete output detected</h3>
               <p className="text-sm text-amber-200/80 mb-3">
-                The LLM stopped generating before reaching the end of the transcript.
-                The formatter output covers significantly less content than the source file.
+                The AI stopped before processing the full transcript. This sometimes happens with longer content. Retrying with a stronger model usually fixes it.
               </p>
               <pre className="text-xs text-amber-300/70 whitespace-pre-wrap mb-3 bg-amber-950/30 rounded p-2">
                 {job.error_message}
@@ -891,9 +890,9 @@ export default function JobDetail() {
                 variant="primary"
                 size="sm"
                 onClick={() => handleAction('retry')}
-                title="Retries with a more capable model tier"
+                title="Retries this job using a more powerful AI model"
               >
-                Retry &amp; Escalate
+                Retry with stronger model
               </Button>
             </div>
           </div>
@@ -973,14 +972,14 @@ export default function JobDetail() {
       <Modal
         isOpen={!!retryModal}
         onClose={() => setRetryModal(null)}
-        title={retryModal ? `Retry: ${retryModal.label}` : ''}
+        title={retryModal ? `Regenerate ${retryModal.label}` : ''}
         maxWidth="max-w-md"
         titleId="retry-modal-title"
       >
         <div className="space-y-4">
           <div>
             <label htmlFor="retry-tier" className="block text-sm text-surface-300 mb-1">
-              Model tier
+              AI model strength
             </label>
             <select
               id="retry-tier"
@@ -988,21 +987,21 @@ export default function JobDetail() {
               onChange={(e) => setRetryTier(e.target.value)}
               className="w-full bg-surface-800 border border-surface-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-pbs-500"
             >
-              <option value="">Auto-escalate (recommended)</option>
-              <option value="0">Cheapskate (tier 0)</option>
-              <option value="1">Default (tier 1)</option>
-              <option value="2">Big Brain (tier 2)</option>
+              <option value="">Auto (recommended)</option>
+              <option value="0">Fast &amp; economical</option>
+              <option value="1">Standard</option>
+              <option value="2">Most capable</option>
             </select>
           </div>
           <div>
             <label htmlFor="retry-feedback" className="block text-sm text-surface-300 mb-1">
-              Editorial feedback <span className="text-surface-400">(optional)</span>
+              What should change? <span className="text-surface-400">(optional)</span>
             </label>
             <textarea
               id="retry-feedback"
               value={retryFeedback}
               onChange={(e) => setRetryFeedback(e.target.value)}
-              placeholder="Optional: describe what to change..."
+              placeholder='e.g., "Make the description shorter" or "Focus on the interview segments"'
               rows={4}
               className="w-full bg-surface-800 border border-surface-600 rounded px-3 py-2 text-sm text-white placeholder-surface-400 focus:outline-none focus:border-pbs-500 resize-y"
             />
@@ -1018,7 +1017,7 @@ export default function JobDetail() {
               variant="primary"
               onClick={submitRetryModal}
             >
-              Retry
+              Regenerate
             </Button>
           </div>
         </div>

@@ -38,6 +38,18 @@ interface QueueStats {
   total: number
 }
 
+const formatStatus = (status: string) => {
+  const labels: Record<string, string> = {
+    all: 'All jobs',
+    pending: 'Pending',
+    in_progress: 'Processing',
+    completed: 'Completed',
+    failed: 'Failed',
+    cancelled: 'Cancelled',
+  }
+  return labels[status] || status
+}
+
 export default function Queue() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [jobs, setJobs] = useState<Job[]>([])
@@ -61,6 +73,7 @@ export default function Queue() {
     message: string
     onConfirm: () => void
     variant?: 'danger' | 'warning' | 'info'
+    confirmText?: string
   }>({
     isOpen: false,
     title: '',
@@ -121,9 +134,10 @@ export default function Queue() {
   const handleCancel = (jobId: number) => {
     setConfirmDialog({
       isOpen: true,
-      title: 'Cancel Job',
-      message: 'Are you sure you want to cancel this job? This action cannot be undone.',
+      title: 'Cancel this job?',
+      message: 'This will stop processing and remove the job from the queue.',
       variant: 'danger',
+      confirmText: 'Cancel job',
       onConfirm: async () => {
         try {
           const response = await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' })
@@ -147,9 +161,10 @@ export default function Queue() {
 
     setConfirmDialog({
       isOpen: true,
-      title: 'Delete Jobs',
-      message: `Are you sure you want to delete all ${statusLabels} jobs? This cannot be undone.`,
+      title: `Delete ${statusLabels} jobs?`,
+      message: `This permanently removes all ${statusLabels} jobs and their outputs.`,
       variant: 'danger',
+      confirmText: 'Delete jobs',
       onConfirm: async () => {
         try {
           const params = new URLSearchParams()
@@ -294,14 +309,14 @@ export default function Queue() {
             {showUploader ? 'Hide Upload' : '+ Upload'}
           </Button>
 
-          {/* Clear Failed/Cancelled Button */}
+          {/* Delete Old Jobs Button */}
           <Button
             variant="ghost"
             size="sm"
             onClick={() => handleClearJobs(['failed', 'cancelled'])}
             title="Delete all failed and cancelled jobs"
           >
-            Clear Failed/Cancelled
+            Delete old jobs
           </Button>
 
           {/* Instant Search */}
@@ -357,7 +372,7 @@ export default function Queue() {
                   : 'text-surface-400 hover:text-white'
               }`}
             >
-              <span>{status === 'all' ? 'All' : status.replace('_', ' ')}</span>
+              <span>{formatStatus(status)}</span>
               {count !== null && (
                 <span
                   className={`px-1.5 py-0.5 text-xs rounded-full ${
@@ -419,7 +434,7 @@ export default function Queue() {
                         job.status
                       )}`}
                     >
-                      {job.status}
+                      {formatStatus(job.status)}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-surface-300 text-sm">
@@ -508,7 +523,7 @@ export default function Queue() {
         title={confirmDialog.title}
         message={confirmDialog.message}
         variant={confirmDialog.variant}
-        confirmText="Confirm"
+        confirmText={confirmDialog.confirmText || 'Confirm'}
         cancelText="Cancel"
       />
     </div>

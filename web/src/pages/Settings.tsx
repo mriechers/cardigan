@@ -263,7 +263,7 @@ export default function Settings() {
         if (!res.ok) throw new Error('Failed to save ingest config')
       }
 
-      setSuccess('Settings saved successfully. Restart workers to apply changes.')
+      setSuccess('Settings saved. Changes take effect within a few seconds.')
       await fetchConfig()
       await fetchIngestConfig()
       setPendingIngest(null)

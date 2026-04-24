@@ -403,7 +403,7 @@ export default function ReadyForWork() {
               <p className="text-sm text-surface-400 mt-1">
                 {hasActiveFilters
                   ? 'Try adjusting your search or date range'
-                  : 'Click "Check for New Files" to scan for new transcripts'}
+                  : 'Use the button above to scan for new transcripts'}
               </p>
             </div>
           ) : (
