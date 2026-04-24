@@ -85,26 +85,26 @@ export default function PhaseStatsWidget({ className = '' }: PhaseStatsWidgetPro
 
   // Get color based on success rate
   const getSuccessColor = (rate: number) => {
-    if (rate >= 99) return 'text-green-400'
-    if (rate >= 95) return 'text-yellow-400'
-    if (rate >= 90) return 'text-orange-400'
-    return 'text-red-400'
+    if (rate >= 99) return 'text-status-completed'
+    if (rate >= 95) return 'text-status-pending'
+    if (rate >= 90) return 'text-status-paused'
+    return 'text-status-failed'
   }
 
   // Get bar color based on success rate
   const getBarColor = (rate: number) => {
-    if (rate >= 99) return 'bg-green-500'
-    if (rate >= 95) return 'bg-yellow-500'
-    if (rate >= 90) return 'bg-orange-500'
-    return 'bg-red-500'
+    if (rate >= 99) return 'bg-status-completed'
+    if (rate >= 95) return 'bg-status-pending'
+    if (rate >= 90) return 'bg-status-paused'
+    return 'bg-status-failed'
   }
 
   // Get escalation indicator color
   const getEscalationColor = (rate: number) => {
-    if (rate <= 5) return 'text-green-400'
-    if (rate <= 20) return 'text-cyan-400'
-    if (rate <= 50) return 'text-yellow-400'
-    return 'text-orange-400'
+    if (rate <= 5) return 'text-status-completed'
+    if (rate <= 20) return 'text-pbs-400'
+    if (rate <= 50) return 'text-status-pending'
+    return 'text-status-paused'
   }
 
   // Format cost
@@ -165,7 +165,7 @@ export default function PhaseStatsWidget({ className = '' }: PhaseStatsWidgetPro
       {/* Error state */}
       {error && !loading && (
         <div className="text-center py-4">
-          <p className="text-red-400 text-sm">{error}</p>
+          <p className="text-status-failed text-sm">{error}</p>
           <button
             onClick={fetchStats}
             className="mt-2 text-xs text-pbs-400 hover:text-pbs-300"
@@ -186,7 +186,7 @@ export default function PhaseStatsWidget({ className = '' }: PhaseStatsWidgetPro
                 {stats.total_completions.toLocaleString()} jobs
               </span>
               {stats.total_failures > 0 && (
-                <span className="text-red-400 text-xs ml-2">
+                <span className="text-status-failed text-xs ml-2">
                   ({stats.total_failures} failed)
                 </span>
               )}
@@ -277,10 +277,10 @@ export default function PhaseStatsWidget({ className = '' }: PhaseStatsWidgetPro
                                 {model.tier_label && (
                                   <span className={`px-1.5 py-0.5 rounded text-[10px] ${
                                     model.tier_label === 'big-brain'
-                                      ? 'bg-purple-500/20 text-purple-400'
+                                      ? 'bg-pbs-300/15 text-pbs-300'
                                       : model.tier_label === 'cheapskate'
-                                      ? 'bg-green-500/20 text-green-400'
-                                      : 'bg-cyan-500/20 text-cyan-400'
+                                      ? 'bg-status-completed/15 text-status-completed'
+                                      : 'bg-pbs-500/15 text-pbs-400'
                                   }`}>
                                     {model.tier_label}
                                   </span>
@@ -306,14 +306,14 @@ export default function PhaseStatsWidget({ className = '' }: PhaseStatsWidgetPro
 
                         {/* Insights for problematic phases */}
                         {(phase.success_rate < 95 || phase.escalation_rate > 30) && (
-                          <div className="mt-3 p-2 bg-yellow-900/20 border border-yellow-500/30 rounded text-xs">
+                          <div className="mt-3 p-2 bg-status-pending/20 border border-status-pending/30 rounded text-xs">
                             {phase.success_rate < 95 && (
-                              <p className="text-yellow-400">
+                              <p className="text-status-pending">
                                 ⚠️ Low success rate - consider using a more capable base model
                               </p>
                             )}
                             {phase.escalation_rate > 30 && phase.escalation_rate < 100 && (
-                              <p className="text-yellow-400">
+                              <p className="text-status-pending">
                                 ⚠️ High escalation rate - base tier may be underpowered for this task
                               </p>
                             )}

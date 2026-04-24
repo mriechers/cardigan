@@ -613,7 +613,7 @@ export default function JobDetail() {
                       href={sstMetadata.media_manager_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-green-400 hover:text-green-300 text-sm inline-flex items-center"
+                      className="text-pbs-400 hover:text-pbs-300 text-sm inline-flex items-center"
                     >
                       View
                       <svg className="ml-1 w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -677,21 +677,21 @@ export default function JobDetail() {
                     <span className="text-white">{phase.name}</span>
                     {phase.tier_label && (
                       <span className={`text-xs px-2 py-0.5 rounded-full ${
-                        phase.tier === 2 ? 'bg-purple-900/50 text-purple-300' :
+                        phase.tier === 2 ? 'bg-pbs-300/15 text-pbs-300' :
                         phase.tier === 1 ? 'bg-pbs-900/50 text-pbs-300' :
-                        'bg-green-900/50 text-green-300'
+                        'bg-status-completed/15 text-status-completed'
                       }`}>
                         {phase.tier_label}
                       </span>
                     )}
                     {phase.attempts && phase.attempts > 1 && (
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-orange-900/50 text-orange-300">
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-status-paused/15 text-status-paused">
                         {phase.attempts} attempts
                       </span>
                     )}
                     {phase.retry_count > 0 && (
                       <span
-                        className="text-xs px-2 py-0.5 rounded-full bg-amber-900/50 text-amber-300"
+                        className="text-xs px-2 py-0.5 rounded-full bg-status-pending/15 text-status-pending"
                         title={`Retried ${phase.retry_count} time${phase.retry_count > 1 ? 's' : ''}`}
                       >
                         &#8635; {phase.retry_count}
@@ -726,9 +726,9 @@ export default function JobDetail() {
                             <div key={i} className="flex items-center gap-2 text-surface-400 ml-2">
                               <span className="text-surface-500">#{i + 1}</span>
                               <span className={`px-1.5 py-0 rounded text-[10px] ${
-                                run.tier === 2 ? 'bg-purple-900/30 text-purple-400' :
+                                run.tier === 2 ? 'bg-pbs-300/10 text-pbs-300' :
                                 run.tier === 1 ? 'bg-pbs-900/30 text-pbs-400' :
-                                'bg-green-900/30 text-green-400'
+                                'bg-status-completed/10 text-status-completed'
                               }`}>{run.tier_label || 'unknown'}</span>
                               {run.model && <span className="font-mono">{run.model}</span>}
                               <span>${(run.cost || 0).toFixed(4)}</span>
@@ -787,7 +787,7 @@ export default function JobDetail() {
                   <button
                     onClick={() => openRetryModal(key, label)}
                     disabled={isRetrying || retryingPhase !== null}
-                    className="px-2 py-2 bg-surface-600 hover:bg-orange-600 rounded-r-md text-sm text-surface-300 hover:text-white transition-colors disabled:opacity-50"
+                    className="px-2 py-2 bg-surface-600 hover:bg-pbs-400 rounded-r-md text-sm text-surface-300 hover:text-white transition-colors disabled:opacity-50"
                     aria-label={`Retry ${label}`}
                     title="Regenerate this output"
                   >

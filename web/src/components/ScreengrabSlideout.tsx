@@ -179,7 +179,7 @@ export default function ScreengrabSlideout({ mediaId, onClose }: ScreengrabSlide
           <button
             onClick={handleAttachAll}
             disabled={batchAttaching}
-            className="w-full px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-lg transition-colors font-medium"
+            className="w-full px-4 py-2 bg-pbs-500 hover:bg-pbs-400 disabled:opacity-50 text-white rounded-lg transition-colors font-medium"
           >
             {batchAttaching ? 'Attaching...' : `Attach All (${pendingCount})`}
           </button>
@@ -235,8 +235,8 @@ export default function ScreengrabSlideout({ mediaId, onClose }: ScreengrabSlide
         )}
 
         {error && (
-          <div className="mb-4 p-3 bg-red-900/20 border border-red-500/30 rounded-lg">
-            <p className="text-red-400 text-sm">{error}</p>
+          <div className="mb-4 p-3 bg-status-failed/15 border border-status-failed/30 rounded-lg">
+            <p className="text-status-failed text-sm">{error}</p>
           </div>
         )}
 
@@ -272,7 +272,7 @@ export default function ScreengrabSlideout({ mediaId, onClose }: ScreengrabSlide
 
                   {/* Status Badge */}
                   {screengrab.status === 'attached' && (
-                    <div className="absolute top-2 right-2 px-2 py-1 bg-green-600 text-white text-xs rounded">
+                    <div className="absolute top-2 right-2 px-2 py-1 bg-status-completed text-white text-xs rounded">
                       Attached
                     </div>
                   )}
@@ -293,7 +293,7 @@ export default function ScreengrabSlideout({ mediaId, onClose }: ScreengrabSlide
                       <button
                         onClick={() => handleAttach(screengrab.id)}
                         disabled={attaching === screengrab.id}
-                        className="flex-1 px-3 py-1.5 text-sm bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded transition-colors"
+                        className="flex-1 px-3 py-1.5 text-sm bg-pbs-500 hover:bg-pbs-400 disabled:opacity-50 text-white rounded transition-colors"
                       >
                         {attaching === screengrab.id ? 'Attaching...' : 'Attach'}
                       </button>
