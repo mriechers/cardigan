@@ -18,7 +18,6 @@ Secrets:
 
 import argparse
 import asyncio
-import os
 import signal
 
 from dotenv import load_dotenv

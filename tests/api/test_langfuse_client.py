@@ -13,7 +13,6 @@ import pytest
 from api.services.langfuse_client import (
     LangfuseClient,
     ModelStatsResponse,
-    _get_langfuse_credential,
     get_langfuse_client,
 )
 from api.services.secrets import get_secret
