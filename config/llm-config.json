@@ -95,7 +95,7 @@
       "type": "openrouter",
       "endpoint": "https://openrouter.ai/api/v1/chat/completions",
       "preset": "ai-editorial-assistant-cheapskate",
-      "fallback_model": "anthropic/claude-haiku-4-5-20251001",
+      "fallback_model": "anthropic/claude-haiku-4.5",
       "api_key_env": "OPENROUTER_API_KEY",
       "timeout": 300,
       "cost_per_project": 0.0,
@@ -224,7 +224,7 @@
   ],
   "available_models": [
     {
-      "id": "anthropic/claude-haiku-4-5-20251001",
+      "id": "anthropic/claude-haiku-4.5",
       "name": "Claude Haiku 4.5",
       "provider": "Anthropic",
       "tier": 0
@@ -255,9 +255,9 @@
     }
   ],
   "phase_models": {
-    "analyst": "anthropic/claude-haiku-4-5-20251001",
+    "analyst": "anthropic/claude-haiku-4.5",
     "formatter": "anthropic/claude-sonnet-4.6",
-    "seo": "anthropic/claude-haiku-4-5-20251001",
+    "seo": "anthropic/claude-haiku-4.5",
     "manager": "anthropic/claude-opus-4.6",
     "timestamp": "anthropic/claude-sonnet-4.6",
     "copy_editor": "anthropic/claude-opus-4.6",
@@ -285,7 +285,7 @@
     "ai-editorial-assistant-cheapskate": {
       "description": "Cheapskate tier — Claude Haiku via OpenRouter",
       "models": [
-        "anthropic/claude-haiku-4-5-20251001",
+        "anthropic/claude-haiku-4.5",
         "openai/gpt-oss-120b",
         "moonshotai/kimi-k2-0711"
       ],

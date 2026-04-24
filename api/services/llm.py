@@ -70,6 +70,7 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
     "claude-3-5-sonnet-latest": {"input": 3.00, "output": 15.00},
     # Claude via OpenRouter — tier 0/1/2 (pricing per 1M tokens)
     "anthropic/claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.00},
+    "anthropic/claude-haiku-4.5": {"input": 0.80, "output": 4.00},
     "anthropic/claude-sonnet-4-5-20250514": {"input": 3.00, "output": 15.00},
     "anthropic/claude-opus-4-5-20250514": {"input": 15.00, "output": 75.00},
     "anthropic/claude-sonnet-4.6": {"input": 3.00, "output": 15.00},

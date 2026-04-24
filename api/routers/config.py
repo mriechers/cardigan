@@ -281,9 +281,9 @@ class PhaseModelsUpdate(BaseModel):
 
 
 DEFAULT_PHASE_MODELS = {
-    "analyst": "anthropic/claude-haiku-4-5-20251001",
+    "analyst": "anthropic/claude-haiku-4.5",
     "formatter": "anthropic/claude-sonnet-4.6",
-    "seo": "anthropic/claude-haiku-4-5-20251001",
+    "seo": "anthropic/claude-haiku-4.5",
     "manager": "anthropic/claude-opus-4.6",
     "timestamp": "anthropic/claude-sonnet-4.6",
     "copy_editor": "anthropic/claude-opus-4.6",
