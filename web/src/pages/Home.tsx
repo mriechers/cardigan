@@ -86,36 +86,37 @@ export default function Home() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <h1 className="text-2xl font-display font-bold text-white">Dashboard</h1>
 
-      {/* Queue Summary — single compact row, not 4 cards */}
-      <div className="flex items-center gap-6 px-4 py-3 bg-surface-850 rounded-lg border border-surface-700">
-        <span className="text-sm font-medium text-surface-300">Queue</span>
-        <div className="flex items-center gap-4 text-sm">
-          <span>
-            <span className="font-mono font-medium text-status-pending">{stats?.pending ?? 0}</span>
-            <span className="text-surface-400 ml-1">pending</span>
-          </span>
-          <span>
-            <span className="font-mono font-medium text-status-processing">{stats?.in_progress ?? 0}</span>
-            <span className="text-surface-400 ml-1">processing</span>
-          </span>
-          <span>
-            <span className="font-mono font-medium text-status-completed">{stats?.completed ?? 0}</span>
-            <span className="text-surface-400 ml-1">done</span>
-          </span>
-          {(stats?.failed ?? 0) > 0 && (
+      <div className="space-y-4">
+        {/* Queue Summary — single compact row, not 4 cards */}
+        <div className="flex items-center gap-6 px-4 py-3 bg-surface-850 rounded-lg border border-surface-700">
+          <span className="text-sm font-medium text-surface-300">Queue</span>
+          <div className="flex items-center gap-4 text-sm">
             <span>
-              <span className="font-mono font-medium text-status-failed">{stats?.failed}</span>
-              <span className="text-surface-400 ml-1">failed</span>
+              <span className="font-mono font-medium text-status-pending">{stats?.pending ?? 0}</span>
+              <span className="text-surface-400 ml-1">pending</span>
             </span>
-          )}
+            <span>
+              <span className="font-mono font-medium text-status-processing">{stats?.in_progress ?? 0}</span>
+              <span className="text-surface-400 ml-1">processing</span>
+            </span>
+            <span>
+              <span className="font-mono font-medium text-status-completed">{stats?.completed ?? 0}</span>
+              <span className="text-surface-400 ml-1">done</span>
+            </span>
+            {(stats?.failed ?? 0) > 0 && (
+              <span>
+                <span className="font-mono font-medium text-status-failed">{stats?.failed}</span>
+                <span className="text-surface-400 ml-1">failed</span>
+              </span>
+            )}
+          </div>
         </div>
-      </div>
 
-      {/* Recent Jobs */}
-      <div className="bg-surface-800 rounded-lg border border-surface-700">
+        {/* Recent Jobs */}
+        <div className="bg-surface-800 rounded-lg border border-surface-700">
         <div className="px-4 py-3 border-b border-surface-700 flex items-center justify-between">
           <h2 className="text-lg font-medium text-white">Recent Jobs</h2>
           <Link
@@ -163,6 +164,7 @@ export default function Home() {
               </Link>
             ))
           )}
+        </div>
         </div>
       </div>
     </div>

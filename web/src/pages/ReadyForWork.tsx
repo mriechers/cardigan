@@ -241,7 +241,7 @@ export default function ReadyForWork() {
   const hasActiveFilters = search || days !== 30
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
+    <div className="max-w-6xl mx-auto space-y-8">
       {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -267,7 +267,7 @@ export default function ReadyForWork() {
       </div>
 
       {/* Filter Bar */}
-      <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
+      <div className="bg-surface-850 rounded-lg p-4">
         <div className="flex items-center gap-4">
           {/* Search Input */}
           <div className="flex-1 max-w-md">

@@ -285,7 +285,7 @@ export default function Queue() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Header with Title, Search, and Count */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -354,7 +354,7 @@ export default function Queue() {
       )}
 
       {/* Filter Tabs */}
-      <div className="flex items-center space-x-1 bg-surface-800 rounded-lg p-1 w-fit">
+      <div className="flex items-center space-x-1 bg-surface-850 rounded-lg p-1 w-fit">
         {['all', 'pending', 'in_progress', 'completed', 'failed', 'cancelled'].map((status) => {
           const count = stats
             ? status === 'all'

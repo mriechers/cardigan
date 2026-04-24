@@ -338,7 +338,7 @@ export default function Settings() {
 
   if (loading) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-8">
         <h1 className="text-2xl font-display font-bold text-white">Settings</h1>
         <div className="bg-surface-800 rounded-lg border border-surface-700 p-6">
           <p className="text-surface-400 animate-pulse">Loading configuration...</p>
@@ -368,7 +368,7 @@ export default function Settings() {
   )
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-display font-bold text-white">Settings</h1>
@@ -430,7 +430,7 @@ export default function Settings() {
       <div role="tabpanel" id={`panel-${activeTab}`} aria-labelledby={activeTab}>
         {/* AGENTS TAB */}
         {activeTab === 'agents' && (
-          <div className="space-y-6">
+          <div className="space-y-5">
             {/* Agent Base Tier Assignment */}
             <div className="bg-surface-800 rounded-lg border border-surface-700 p-6">
               <h2 className="text-lg font-semibold text-white mb-4">Agent Base Tiers</h2>
@@ -495,7 +495,7 @@ export default function Settings() {
 
         {/* ROUTING TAB */}
         {activeTab === 'routing' && (
-          <div className="space-y-6">
+          <div className="space-y-5">
             {/* Duration-Based Tier Escalation */}
             <div className="bg-surface-800 rounded-lg border border-surface-700 p-6">
               <h2 className="text-lg font-semibold text-white mb-4">Duration-Based Tier Selection</h2>
@@ -648,7 +648,7 @@ export default function Settings() {
 
         {/* WORKER TAB */}
         {activeTab === 'worker' && (
-          <div className="space-y-6">
+          <div className="space-y-5">
             <div className="bg-surface-800 rounded-lg border border-surface-700 p-6">
               <h2 className="text-lg font-semibold text-white mb-4">Worker Settings</h2>
               <p className="text-sm text-surface-400 mb-6">
@@ -720,7 +720,7 @@ export default function Settings() {
 
         {/* INGEST TAB */}
         {activeTab === 'ingest' && (
-          <div className="space-y-6">
+          <div className="space-y-5">
             <div className="bg-surface-800 rounded-lg border border-surface-700 p-6">
               <h2 className="text-lg font-semibold text-white mb-4">Ingest Scanner</h2>
               <p className="text-sm text-surface-400 mb-6">
@@ -880,7 +880,7 @@ export default function Settings() {
 
         {/* SYSTEM TAB */}
         {activeTab === 'system' && (
-          <div className="space-y-6">
+          <div className="space-y-5">
             {/* Component Status */}
             <div className="bg-surface-800 rounded-lg border border-surface-700 p-6">
               <h2 className="text-lg font-semibold text-white mb-4">System Components</h2>
@@ -1010,7 +1010,7 @@ export default function Settings() {
 
         {/* ACCESSIBILITY TAB */}
         {activeTab === 'accessibility' && (
-          <div className="space-y-6">
+          <div className="space-y-5">
             {/* Reduce Motion */}
             <div className="bg-surface-800 rounded-lg border border-surface-700 p-6">
               <h2 className="text-lg font-semibold text-white mb-4">Motion Preferences</h2>

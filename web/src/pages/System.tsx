@@ -65,7 +65,7 @@ export default function System() {
   const isConnected = health !== null && error === null
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <h1 className="text-2xl font-bold text-white">System Status</h1>
 
       {/* Connection Status Card */}

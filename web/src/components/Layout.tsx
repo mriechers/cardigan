@@ -148,7 +148,7 @@ export default function Layout() {
       </nav>
 
       {/* Main Content */}
-      <main id="main-content" tabIndex={-1} className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+      <main id="main-content" tabIndex={-1} className="max-w-7xl mx-auto pt-8 pb-12 px-4 sm:px-6 lg:px-8">
         <Outlet />
       </main>
 

@@ -413,7 +413,7 @@ export default function JobDetail() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Breadcrumb */}
       <Breadcrumb
         items={[
@@ -513,6 +513,9 @@ export default function JobDetail() {
           )}
         </div>
       </div>
+
+      {/* Primary content group — tighter spacing */}
+      <div className="space-y-4">
 
       {/* AirTable Metadata Panel */}
       {(job.airtable_url || job.media_id || sstMetadata) && (
@@ -800,6 +803,8 @@ export default function JobDetail() {
           </div>
         </div>
       )}
+
+      </div>
 
       {/* Keyword Report Upload — only for completed jobs */}
       {job.status === 'completed' && (
