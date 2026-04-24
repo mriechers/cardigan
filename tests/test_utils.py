@@ -144,3 +144,17 @@ class TestExtractMediaId:
         # These don't match the 4+4 pattern but should still work
         assert extract_media_id("Some_Project_Name.txt") == "Some_Project_Name"
         assert extract_media_id("WC_S01_trailer.srt") == "WC_S01_trailer"
+
+    def test_sm_style_filenames_no_rev_false_positive(self):
+        """Test that SM-style filenames don't false-match REV dates as media IDs."""
+        # SM-style: show code + title slug, no standard 4+4 episode number.
+        # The _REV suffix is a revision date, NOT a show code.
+        assert extract_media_id("2WLIAliceGoodSM_REV20251106.srt") == "2WLIAliceGoodSM_REV20251106"
+        assert extract_media_id("2WLIExchangeStudentSM.srt") == "2WLIExchangeStudentSM"
+        assert extract_media_id("6WLIBigfootConvention_ForClaude.txt") == "6WLIBigfootConvention"
+
+    def test_rev_suffix_not_extracted_as_media_id(self):
+        """Test that _REV date suffixes are never mistaken for show codes."""
+        # Previously, REV20251 would match [A-Z0-9]{4}\\d{4} as a false positive
+        result = extract_media_id("2WLIAliceGoodSM_REV20251106.srt")
+        assert result != "REV20251", "REV date suffix should not be extracted as media ID"

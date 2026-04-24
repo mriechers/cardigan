@@ -280,8 +280,10 @@ def extract_media_id(filename: str) -> Optional[str]:
 
     # Step 3: Match PBS Media ID pattern
     # e.g., 2WLI1209HD, 6GWQ2503, 2BUC0000HDWEB02
+    # Reject matches starting with "REV" — those are revision date suffixes
+    # (e.g., _REV20251106 falsely matching REV20251 as a show code)
     match = re.search(r"([A-Z0-9]{4}\d{4}(?:[A-Z]+\d{0,2})?)", sanitized, re.IGNORECASE)
-    if match:
+    if match and not match.group(1).upper().startswith("REV"):
         base_id = match.group(1).upper()
         # Check if a _REV[date] suffix follows the matched base ID in the sanitized stem
         rev_match = re.search(
@@ -289,7 +291,7 @@ def extract_media_id(filename: str) -> Optional[str]:
             sanitized,
             re.IGNORECASE,
         )
-        if rev_match:
+        if rev_match and not rev_match.group(1).upper().startswith("REV"):
             return (rev_match.group(1) + rev_match.group(2)).upper()
         return base_id
 

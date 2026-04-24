@@ -189,9 +189,8 @@ class TestMediaIdExtraction:
         scanner = IngestScanner()
 
         # macOS adds " (1)" when downloading duplicates
-        # Note: Scanner pattern requires 4 chars + 4 digits format
-        # "2WLIComicArtistSM" doesn't match that pattern, so returns None
-        assert scanner._extract_media_id("2WLIComicArtistSM (1).srt") is None  # No 4+4 pattern
+        # SM-style names without 4+4 pattern fall back to full sanitized stem
+        assert scanner._extract_media_id("2WLIComicArtistSM (1).srt") == "2WLIComicArtistSM"
         assert scanner._extract_media_id("2WLI1209HD (2).srt") == "2WLI1209HD"
         assert scanner._extract_media_id("9UNP2005HD (3).txt") == "9UNP2005HD"
 
@@ -204,13 +203,12 @@ class TestMediaIdExtraction:
         assert scanner._extract_media_id("2WLI1209HD copy 2.srt") == "2WLI1209HD"
 
     def test_extract_media_id_preserves_revision_dates(self):
-        """Test that _REV[date] patterns are NOT stripped (legitimate IDs)."""
+        """Test that _REV[date] patterns are preserved as part of the full media ID."""
         scanner = IngestScanner()
 
-        # _REV patterns should be preserved - they're legitimate Media IDs
-        # Note: Pattern only extracts base 8-char ID, so _REV part isn't in result
+        # _REV patterns are preserved — they distinguish revisions from originals
         result = scanner._extract_media_id("2BUC0000HDWEB02_REV20251202.srt")
-        assert result == "2BUC0000HD"  # Pattern extracts base ID
+        assert result == "2BUC0000HDWEB02_REV20251202"
 
     def test_extract_media_id_without_suffix(self):
         """Test extracting Media ID without HD suffix."""
@@ -220,12 +218,11 @@ class TestMediaIdExtraction:
         assert scanner._extract_media_id("9UNP2005.srt") == "9UNP2005"
 
     def test_extract_media_id_with_web_suffix(self):
-        """Test extracting Media ID with WEB suffix (extracts base ID only)."""
+        """Test extracting Media ID with WEB suffix preserves full ID."""
         scanner = IngestScanner()
 
-        # Pattern only matches 4 chars + 4 digits + up to 2 letters
-        # "2BUC0000HDWEB02" has more than 2 letters at end, so extracts "2BUC0000HD"
-        assert scanner._extract_media_id("2BUC0000HDWEB02_REV20251202.srt") == "2BUC0000HD"
+        # Full media ID including WEB suffix and revision date
+        assert scanner._extract_media_id("2BUC0000HDWEB02_REV20251202.srt") == "2BUC0000HDWEB02_REV20251202"
 
     def test_extract_media_id_case_insensitive(self):
         """Test Media ID extraction is case insensitive but returns uppercase."""
@@ -235,12 +232,20 @@ class TestMediaIdExtraction:
         assert scanner._extract_media_id("9unp2005HD.srt") == "9UNP2005HD"
 
     def test_no_match_returns_none(self):
-        """Test that non-matching filenames return None."""
+        """Test that filenames with spaces return None (freeform text, not IDs)."""
         scanner = IngestScanner()
 
-        assert scanner._extract_media_id("README.txt") is None
-        assert scanner._extract_media_id("notes.srt") is None
-        assert scanner._extract_media_id("WPT_2401_final.srt") is None
+        # Filenames with spaces are treated as freeform text, not valid IDs
+        assert scanner._extract_media_id("TLB CC IN WI.srt") is None
+
+    def test_fallback_to_stem_for_non_standard_names(self):
+        """Test that non-standard filenames without spaces fall back to full stem."""
+        scanner = IngestScanner()
+
+        # These don't match 4+4 pattern but are valid underscore-separated IDs
+        assert scanner._extract_media_id("README.txt") == "README"
+        assert scanner._extract_media_id("notes.srt") == "notes"
+        assert scanner._extract_media_id("WPT_2401_final.srt") == "WPT_2401_final"
 
     def test_empty_string_returns_none(self):
         """Test that empty string returns None."""

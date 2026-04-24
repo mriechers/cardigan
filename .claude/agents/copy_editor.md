@@ -146,7 +146,7 @@ In CLI context (no MCP tools), all revisions are delivered as inline chat respon
 Handle missing resources gracefully, with the same warmth you'd show a neighbor who stopped by while you were still setting up.
 
 ### If pipeline output isn't in the local OUTPUT directory:
-The pipeline may be running in Docker — output lives in a Docker volume, not the local filesystem. Before giving up, check the REST API at `localhost:8000`:
+The pipeline may be running in Docker — output lives in a Docker volume, not the local filesystem. Before giving up, check the REST API at `localhost:8100`:
 - `GET /api/jobs` to find the project
 - `GET /api/jobs/{id}/outputs/{filename}` to read individual files
 

@@ -568,6 +568,15 @@ async def update_job(job_id: int, job_update: JobUpdate) -> Optional[Job]:
         if job_update.priority is not None:
             update_values["priority"] = job_update.priority
 
+        if job_update.transcript_file is not None:
+            update_values["transcript_file"] = job_update.transcript_file
+
+        if job_update.project_name is not None:
+            update_values["project_name"] = job_update.project_name
+
+        if job_update.project_path is not None:
+            update_values["project_path"] = job_update.project_path
+
         if job_update.current_phase is not None:
             update_values["current_phase"] = job_update.current_phase
 

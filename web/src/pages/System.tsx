@@ -1,12 +1,9 @@
 import { useEffect, useState } from 'react'
-import ModelStatsWidget from '../components/ModelStatsWidget'
 import PhaseStatsWidget from '../components/PhaseStatsWidget'
-import { AGENT_INFO } from '../constants/agents'
 
-interface PresetInfo {
-  description: string
-  models: string[]
-  models_verified?: string
+interface DurationThreshold {
+  max_minutes: number | null
+  tier: number
 }
 
 interface HealthStatus {
@@ -16,14 +13,10 @@ interface HealthStatus {
     in_progress: number
   }
   llm?: {
-    active_model: string | null
-    active_backend: string | null
-    active_preset: string | null
-    primary_backend: string | null
-    configured_preset: string | null
-    fallback_model: string | null
-    phase_backends?: Record<string, string>
-    openrouter_presets?: Record<string, PresetInfo>
+    routing?: {
+      tier_labels: string[]
+      duration_thresholds: DurationThreshold[]
+    }
   }
   last_run?: {
     total_cost: number
@@ -134,10 +127,10 @@ export default function System() {
               <div>
                 <p className="text-white font-medium">Check if the API server is running</p>
                 <p className="text-sm text-gray-400 mt-1">
-                  The API should be running on port 8000. Open a terminal and run:
+                  The API should be running on port 8100. Open a terminal and run:
                 </p>
                 <pre className="mt-2 bg-gray-900 rounded p-3 text-sm text-green-400 font-mono overflow-x-auto">
-                  lsof -i :8000
+                  lsof -i :8100
                 </pre>
               </div>
             </div>
@@ -151,7 +144,7 @@ export default function System() {
                 </p>
                 <pre className="mt-2 bg-gray-900 rounded p-3 text-sm text-green-400 font-mono overflow-x-auto">
 {`cd /Users/mriechers/Developer/ai-editorial-assistant-v3
-./venv/bin/uvicorn api.main:app --reload --port 8000`}
+./venv/bin/uvicorn api.main:app --reload --port 8100`}
                 </pre>
               </div>
             </div>
@@ -188,43 +181,6 @@ export default function System() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
             <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wide mb-3">
-              LLM Configuration
-            </h3>
-            <div className="space-y-2">
-              <InfoRow
-                label="Primary Backend"
-                value={health.llm?.primary_backend || 'Not configured'}
-              />
-              {health.llm?.configured_preset ? (
-                <>
-                  <InfoRow
-                    label="Model Preset"
-                    value={health.llm.configured_preset}
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    OpenRouter selects from preset's model pool
-                  </p>
-                </>
-              ) : (
-                <InfoRow
-                  label="Fallback Model"
-                  value={health.llm?.fallback_model || 'Not configured'}
-                />
-              )}
-              {health.llm?.active_model && (
-                <div className="pt-2 border-t border-gray-700 mt-2">
-                  <div className="text-xs text-gray-500 mb-1">Currently processing with:</div>
-                  <InfoRow
-                    label="Active Model"
-                    value={health.llm.active_model}
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
-            <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wide mb-3">
               Queue Status
             </h3>
             <div className="space-y-2">
@@ -238,120 +194,43 @@ export default function System() {
               )}
             </div>
           </div>
-        </div>
-      )}
 
-      {/* OpenRouter Presets - Show when connected */}
-      {isConnected && health?.llm?.openrouter_presets && Object.keys(health.llm.openrouter_presets).length > 0 && (
-        <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wide">
-              OpenRouter Presets
-            </h3>
-            <a
-              href="https://openrouter.ai/settings/presets"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-blue-400 hover:text-blue-300 flex items-center space-x-1"
-            >
-              <span>Manage Presets</span>
-              <span>↗</span>
-            </a>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {Object.entries(health.llm.openrouter_presets).map(([presetName, preset]) => {
-              const isBigBrain = presetName.includes('big-brain')
-              const isCheapskate = presetName.includes('cheapskate')
-              const colorClass = isBigBrain
-                ? 'bg-purple-900/10 border-purple-500/30'
-                : isCheapskate
-                ? 'bg-green-900/10 border-green-500/30'
-                : 'bg-cyan-900/10 border-cyan-500/30'
-              const textClass = isBigBrain
-                ? 'text-purple-400'
-                : isCheapskate
-                ? 'text-green-400'
-                : 'text-cyan-400'
-              return (
-                <div key={presetName} className={`rounded-lg p-3 border ${colorClass}`}>
-                  <div className="flex items-center space-x-2 mb-2">
-                    <span className={`text-sm font-medium ${textClass}`}>
-                      {presetName.replace('ai-editorial-assistant-', '').replace('ai-editorial-assistant', 'default')}
-                    </span>
-                  </div>
-                  <p className="text-xs text-gray-500 mb-2">{preset.description}</p>
-                  <div className="space-y-1">
-                    {preset.models.map((model, idx) => (
-                      <div key={idx} className="text-xs font-mono text-gray-400 flex items-center space-x-2">
-                        <span className="text-gray-600">{idx + 1}.</span>
-                        <span>{model}</span>
-                      </div>
-                    ))}
-                  </div>
-                  {preset.models_verified && (
-                    <p className="text-[10px] text-gray-600 mt-2">
-                      Verified {new Date(preset.models_verified + 'T00:00:00').toLocaleDateString()}
-                    </p>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-          <p className="text-xs text-gray-600 mt-3 italic">
-            Model lists are maintained locally. Update config/llm-config.json when presets change on OpenRouter.
-          </p>
-        </div>
-      )}
-
-      {/* Actual Model Usage from Langfuse - Show when connected */}
-      {isConnected && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <ModelStatsWidget />
-          <PhaseStatsWidget />
-        </div>
-      )}
-
-      {/* Agent Roster - Show when connected */}
-      {isConnected && health?.llm?.phase_backends && (
-        <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
-          <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wide mb-3">
-            Agent Roster
-          </h3>
-          <div className="space-y-3">
-            {AGENT_INFO.map((agent) => {
-              const backend = health.llm?.phase_backends?.[agent.id] || 'openrouter'
-              const isBigBrain = backend.includes('big-brain')
-              const isCheapskate = backend.includes('cheapskate')
-              const badgeClass = isBigBrain
-                ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
-                : isCheapskate
-                ? 'bg-green-500/20 text-green-400 border border-green-500/30'
-                : 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
-              const tierLabel = isBigBrain ? 'big-brain' : isCheapskate ? 'cheapskate' : 'default'
-              return (
-                <div key={agent.id} className="flex items-start space-x-4 p-3 bg-gray-900 rounded-lg">
-                  <div className="flex-shrink-0 w-10 h-10 rounded-full bg-gray-800 flex items-center justify-center text-lg">
-                    {agent.icon}
-                  </div>
-                  <div className="flex-grow min-w-0">
-                    <div className="flex items-center space-x-2">
-                      <span className="font-medium text-white">{agent.name}</span>
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${badgeClass}`}>
-                        {tierLabel}
+          {health.llm?.routing && (
+            <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
+              <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wide mb-3">
+                Duration Escalation
+              </h3>
+              <p className="text-xs text-gray-500 mb-3">
+                Base tier is escalated automatically for longer transcripts
+              </p>
+              <div className="space-y-1.5">
+                {health.llm.routing.duration_thresholds.map((threshold, idx) => {
+                  const label = health.llm?.routing?.tier_labels?.[threshold.tier] || `Tier ${threshold.tier}`
+                  const tierColors = ['text-green-400', 'text-cyan-400', 'text-purple-400']
+                  return (
+                    <div key={idx} className="flex items-center justify-between text-sm">
+                      <span className={tierColors[threshold.tier] || 'text-gray-400'}>
+                        {label}
+                      </span>
+                      <span className="text-gray-500 text-xs">
+                        {threshold.max_minutes === null
+                          ? '45+ min'
+                          : idx === 0
+                          ? `≤ ${threshold.max_minutes} min`
+                          : `≤ ${threshold.max_minutes} min`}
                       </span>
                     </div>
-                    <p className="text-sm text-gray-400 mt-1">{agent.description}</p>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-          <p className="text-xs text-gray-500 mt-3">
-            <span className="text-purple-400">big-brain</span> = complex reasoning |{' '}
-            <span className="text-cyan-400">default</span> = balanced |{' '}
-            <span className="text-green-400">cheapskate</span> = free tier
-          </p>
+                  )
+                })}
+              </div>
+            </div>
+          )}
         </div>
+      )}
+
+      {/* Agent Performance - Show when connected */}
+      {isConnected && (
+        <PhaseStatsWidget />
       )}
 
       {/* Connection Log */}

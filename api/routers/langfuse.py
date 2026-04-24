@@ -168,6 +168,8 @@ class PhaseStatsResponse(BaseModel):
     total_completions: int = Field(0)
     total_failures: int = Field(0)
     escalation_summary: Dict[str, Any] = Field(default_factory=dict)
+    phase_base_tiers: Dict[str, int] = Field(default_factory=dict, description="Current configured tier per phase")
+    tier_labels: List[str] = Field(default_factory=list, description="Human-readable tier names")
 
 
 @router.get("/phase-stats", response_model=PhaseStatsResponse)
@@ -282,6 +284,12 @@ async def get_phase_stats(
         ps = phase_data[phase_name]
         ps.total_failures = sum(tier_failures.values())
 
+    # Load current routing config for tier-relative escalation calculation
+    from api.services.llm import get_llm_client
+
+    llm_config = get_llm_client().config
+    phase_base_tiers = llm_config.get("routing", {}).get("phase_base_tiers", {})
+
     # Calculate overall stats and escalation rates
     total_cost = 0.0
     total_completions = 0
@@ -297,20 +305,28 @@ async def get_phase_stats(
         total_attempts = ps.total_completions + ps.total_failures
         ps.success_rate = round((ps.total_completions / total_attempts * 100) if total_attempts > 0 else 0, 1)
 
-        # Calculate escalation rate (how many finished at tier > 0)
-        base_tier_completions = sum(m.completions for m in ps.models if m.tier == 0 or m.tier is None)
-        escalated_completions = sum(m.completions for m in ps.models if m.tier is not None and m.tier > 0)
+        # Calculate escalation rate relative to configured base tier
+        configured_tier = phase_base_tiers.get(phase_name, 0)
+        at_or_below = sum(
+            m.completions for m in ps.models if m.tier is not None and m.tier <= configured_tier
+        ) + sum(m.completions for m in ps.models if m.tier is None)
+        escalated_completions = sum(
+            m.completions for m in ps.models if m.tier is not None and m.tier > configured_tier
+        )
         if ps.total_completions > 0:
             ps.escalation_rate = round(escalated_completions / ps.total_completions * 100, 1)
 
         escalation_summary["by_phase"][phase_name] = {
-            "base_tier": base_tier_completions,
+            "configured_tier": configured_tier,
+            "at_configured": at_or_below,
             "escalated": escalated_completions,
             "rate": ps.escalation_rate,
         }
 
     # Sort phases by name
     phases = sorted(phase_data.values(), key=lambda p: p.phase)
+
+    tier_labels = llm_config.get("routing", {}).get("tier_labels", [])
 
     return PhaseStatsResponse(
         phases=phases,
@@ -321,4 +337,6 @@ async def get_phase_stats(
         total_completions=total_completions,
         total_failures=total_failures,
         escalation_summary=escalation_summary,
+        phase_base_tiers=phase_base_tiers,
+        tier_labels=tier_labels,
     )
