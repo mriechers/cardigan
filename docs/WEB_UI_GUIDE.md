@@ -7,15 +7,15 @@ The PBS Wisconsin Editorial Assistant dashboard provides a web interface for man
 ## Table of Contents
 
 1. [Getting Started](#getting-started)
-2. [Dashboard](#dashboard)
-3. [Ready for Work](#ready-for-work)
-4. [Queue](#queue)
-5. [Job Detail](#job-detail)
-6. [Projects](#projects)
-7. [Settings](#settings)
-8. [System](#system)
-9. [Keyboard Shortcuts](#keyboard-shortcuts)
-10. [Accessibility](#accessibility)
+2. [Ready for Work](#ready-for-work)
+3. [Queue](#queue)
+4. [Job Detail](#job-detail)
+5. [Projects](#projects)
+6. [Settings](#settings)
+7. [Keyboard Shortcuts](#keyboard-shortcuts)
+8. [Accessibility](#accessibility)
+9. [Troubleshooting](#troubleshooting)
+10. [API Reference](#api-reference)
 
 ---
 
@@ -32,37 +32,15 @@ The API server must be running on port 8000 for the dashboard to function. Both 
 
 ### First-Time Orientation
 
-When you first open the dashboard, you'll see the **Dashboard** page with an overview of your processing queue. The navigation bar at the top provides access to all sections:
+When you first open the dashboard, you'll land on the **Queue** — your primary workspace. The navigation bar at the top provides access to all sections:
 
-- **Dashboard** — Queue stats and recent activity
 - **Ready for Work** — Discover and queue new transcripts
 - **Queue** — Manage all jobs (pending, processing, completed, failed)
 - **Projects** — Browse completed work and review outputs
-- **Settings** — Configure agents, routing, and preferences
-- **System** — Health checks and component status
+- **Settings** — Configure agents, routing, system components, and preferences
+- **Help** — This guide, troubleshooting, and API reference
 
 The dashboard updates in real time via WebSocket. If the WebSocket connection drops, it falls back to periodic polling so you never lose visibility into job status.
-
----
-
-## Dashboard
-
-The home page provides a quick overview of your processing pipeline.
-
-### Stat Cards
-
-Four cards at the top show live counts:
-
-| Card | What It Shows |
-|------|---------------|
-| **Pending** | Jobs waiting to be processed |
-| **Processing** | Jobs currently running |
-| **Completed** | Successfully finished jobs |
-| **Failed** | Jobs that encountered errors |
-
-### Recent Jobs
-
-A table shows the 5 most recent jobs with their status, phase, and creation time. Click any job to view its full details.
 
 ---
 
@@ -268,43 +246,16 @@ When you modify any setting, a **Save Changes** button appears at the bottom. Ch
 
 ---
 
-## System
-
-The System page provides health monitoring for the backend infrastructure.
-
-### Connection Status
-
-A status card shows whether the dashboard can reach the API server:
-- **Green**: Connected and healthy
-- **Red**: Connection failed or API unreachable
-
-### Health Details
-
-When connected, you'll see:
-- Queue counts by status
-- LLM configuration details
-- OpenRouter preset information
-- Last run statistics (cost, tokens)
-
-### Connection Log
-
-A scrollable log shows the last 10 health checks with timestamps and response latency, helping you spot intermittent connection issues.
-
-Click **Check Connection** to manually refresh the health status.
-
----
-
 ## Keyboard Shortcuts
 
 Press **?** anywhere in the dashboard to see available shortcuts:
 
 | Shortcut | Action |
 |----------|--------|
-| `g` then `h` | Go to Dashboard |
 | `g` then `q` | Go to Queue |
+| `g` then `r` | Go to Ready for Work |
 | `g` then `p` | Go to Projects |
 | `g` then `s` | Go to Settings |
-| `g` then `y` | Go to System |
 | `/` | Focus search (on Queue page) |
 | `?` | Show keyboard shortcuts |
 | `Esc` | Close modal or help overlay |
@@ -346,3 +297,74 @@ Your manual selections in Settings override the system defaults.
 ### Preference Persistence
 
 All accessibility preferences are saved in your browser's local storage. They persist across sessions and browser restarts — you only need to set them once.
+
+---
+
+## Troubleshooting
+
+### Dashboard Shows "Offline"
+
+If the status bar shows "Offline" or the dashboard can't reach the API:
+
+1. **Check if Docker containers are running**
+   ```bash
+   docker compose ps
+   ```
+
+2. **Restart the containers**
+   ```bash
+   docker compose restart
+   ```
+
+3. **Check container logs for errors**
+   ```bash
+   docker compose logs -f
+   ```
+
+4. **Rebuild and restart** (if containers won't start)
+   ```bash
+   docker compose up --build -d
+   ```
+
+### Jobs Stuck in Processing
+
+If jobs appear stuck:
+
+1. Check the worker container logs: `docker compose logs -f cardigan-api`
+2. Verify OpenRouter API connectivity
+3. Try restarting: `docker compose restart`
+
+### Database Issues
+
+The SQLite database is stored at `/data/db/dashboard.db` inside the container. If you suspect corruption:
+
+1. Stop the containers: `docker compose down`
+2. Back up the database file from the mounted volume
+3. Restart: `docker compose up -d`
+
+---
+
+## API Reference
+
+The Cardigan API is available at port 8100 (Docker) or proxied through the dev server at port 3000.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/system/health` | Health check and system status |
+| `GET` | `/api/system/status` | Component status (API, worker, watcher) |
+| `POST` | `/api/queue/` | Add a job to the processing queue |
+| `GET` | `/api/queue/` | List jobs with filtering and pagination |
+| `GET` | `/api/queue/stats` | Queue statistics by status |
+| `GET` | `/api/jobs/:id` | Get job details |
+| `PATCH` | `/api/jobs/:id` | Update job (cancel, prioritize, etc.) |
+| `GET` | `/api/config/routing` | Get routing configuration |
+| `PATCH` | `/api/config/routing` | Update routing configuration |
+| `GET` | `/api/config/models` | Get model assignments |
+| `PATCH` | `/api/config/models` | Update model assignments |
+| `GET` | `/api/config/worker` | Get worker configuration |
+| `PATCH` | `/api/config/worker` | Update worker configuration |
+| `GET` | `/api/ingest/config` | Get ingest scanner configuration |
+| `PUT` | `/api/ingest/config` | Update ingest scanner configuration |
+| `GET` | `/api/langfuse/model-stats` | Model usage statistics |
+| `GET` | `/api/langfuse/phase-stats` | Per-phase processing statistics |
+| `GET` | `/api/langfuse/status` | Langfuse connection status |

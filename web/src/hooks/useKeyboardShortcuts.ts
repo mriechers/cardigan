@@ -5,12 +5,12 @@ import { useNavigate } from 'react-router-dom'
  * Global keyboard shortcuts for navigation and actions.
  *
  * Shortcuts:
- * - g+h: Go to home/dashboard
- * - g+q: Go to queue
+ * - g+q: Go to queue (home)
+ * - g+r: Go to ready for work
  * - g+p: Go to projects
  * - g+s: Go to settings
  * - /: Focus search input (if available on page)
- * - ?: Show help modal (if implemented)
+ * - ?: Show help modal
  *
  * Shortcuts are disabled when typing in inputs, textareas, or contenteditable elements.
  */
@@ -55,13 +55,13 @@ export function useKeyboardShortcuts() {
           }
 
           switch (nextEvent.key) {
-            case 'h':
+            case 'q':
               nextEvent.preventDefault()
               navigate('/')
               break
-            case 'q':
+            case 'r':
               nextEvent.preventDefault()
-              navigate('/queue')
+              navigate('/ready')
               break
             case 'p':
               nextEvent.preventDefault()
@@ -70,10 +70,6 @@ export function useKeyboardShortcuts() {
             case 's':
               nextEvent.preventDefault()
               navigate('/settings')
-              break
-            case 'y':
-              nextEvent.preventDefault()
-              navigate('/system')
               break
           }
           document.removeEventListener('keydown', handleNextKey)
@@ -87,11 +83,9 @@ export function useKeyboardShortcuts() {
         }, 1000)
       }
 
-      // Handle '?' for help (future implementation)
+      // Handle '?' for help
       if (event.key === '?') {
         event.preventDefault()
-        // TODO: Show keyboard shortcuts help modal
-        console.log('Keyboard shortcuts help - to be implemented')
       }
     },
     [navigate]
@@ -110,11 +104,10 @@ export function useKeyboardShortcuts() {
  */
 export function getKeyboardShortcuts() {
   return [
-    { keys: 'g h', description: 'Go to Dashboard' },
     { keys: 'g q', description: 'Go to Queue' },
+    { keys: 'g r', description: 'Go to Ready for Work' },
     { keys: 'g p', description: 'Go to Projects' },
     { keys: 'g s', description: 'Go to Settings' },
-    { keys: 'g y', description: 'Go to System' },
     { keys: '/', description: 'Focus search (on Queue page)' },
     { keys: '?', description: 'Show keyboard shortcuts help' },
   ]
