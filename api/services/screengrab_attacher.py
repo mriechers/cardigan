@@ -20,8 +20,9 @@ from typing import List, Optional
 
 import httpx
 
-from api.services.airtable import AirtableClient, get_secret
+from api.services.airtable import AirtableClient
 from api.services.database import get_session
+from api.services.secrets import get_secret
 
 logger = logging.getLogger(__name__)
 

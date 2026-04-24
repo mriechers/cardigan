@@ -182,7 +182,7 @@ The MCP server supports these environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `EDITORIAL_API_URL` | `http://localhost:8000` | The Metadata Neighborhood API URL |
+| `EDITORIAL_API_URL` | `http://localhost:8100` | The Metadata Neighborhood API URL |
 | `EDITORIAL_OUTPUT_DIR` | `./OUTPUT` | Project output directory |
 | `EDITORIAL_TRANSCRIPTS_DIR` | `./transcripts` | Transcript source directory |
 | `AIRTABLE_API_KEY` | (none) | For SST metadata lookup (READ-ONLY) |

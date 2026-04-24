@@ -53,9 +53,9 @@ This runs database migrations, starts the API server, and launches the worker.
 
 | URL | Description |
 |-----|-------------|
-| http://metadata.neighborhood:8000 | API (after domain setup) |
-| http://localhost:8000 | API (always works) |
-| http://localhost:3000 | Web dashboard (run `cd web && npm run dev`) |
+| http://metadata.neighborhood:8100 | API (after domain setup) |
+| http://localhost:8100 | API (always works) |
+| http://localhost:3100 | Web dashboard (run `cd web && npm run dev`) |
 
 ### Shell Aliases (add to ~/.zshrc)
 
@@ -67,7 +67,7 @@ alias neighborhood-start="$NEIGHBORHOOD/scripts/start.sh"
 alias neighborhood-stop="$NEIGHBORHOOD/scripts/stop.sh"
 alias neighborhood-status="$NEIGHBORHOOD/scripts/status.sh"
 alias neighborhood-logs="tail -f $NEIGHBORHOOD/logs/api.log $NEIGHBORHOOD/logs/worker.log"
-alias neighborhood-queue="curl -s http://metadata.neighborhood:8000/api/queue/stats | python3 -m json.tool"
+alias neighborhood-queue="curl -s http://metadata.neighborhood:8100/api/queue/stats | python3 -m json.tool"
 ```
 
 ## Meet Cardigan
@@ -86,7 +86,7 @@ Cardigan speaks like Mister Rogers — warm, patient, and genuinely delighted to
 ### Add a transcript to the queue
 
 ```bash
-curl -X POST http://metadata.neighborhood:8000/api/queue \
+curl -X POST http://metadata.neighborhood:8100/api/queue \
   -H "Content-Type: application/json" \
   -d '{"transcript_file": "MY_TRANSCRIPT.txt"}'
 ```
@@ -104,7 +104,7 @@ curl -X POST http://metadata.neighborhood:8000/api/queue \
 ### Check queue status
 
 ```bash
-curl http://metadata.neighborhood:8000/api/queue/stats
+curl http://metadata.neighborhood:8100/api/queue/stats
 ```
 
 ## Troubleshooting

@@ -62,7 +62,7 @@ WebSocket messages are JSON objects:
 
 ## Connection Flow
 
-1. Client connects to `ws://localhost:8000/api/ws/jobs`
+1. Client connects to `ws://localhost:8100/api/ws/jobs`
 2. Server accepts connection and adds to active connections
 3. Server broadcasts updates when jobs change
 4. Client sends "ping" every 30s, server responds with "pong"

@@ -6,37 +6,11 @@ Provides read-only access to the PBS Wisconsin SST (Single Source of Truth) tabl
 CRITICAL: This service is intentionally READ-ONLY. No write operations are permitted.
 """
 
-import importlib.util
-import os
-from pathlib import Path
 from typing import Optional
 
 import httpx
 
-# keychain_secrets isn't on sys.path, so use spec_from_file_location.
-_keychain_path = Path.home() / "Developer/the-lodge/scripts/keychain_secrets.py"
-get_secret = None
-if _keychain_path.exists():
-    try:
-        spec = importlib.util.spec_from_file_location("keychain_secrets", _keychain_path)
-        if spec and spec.loader:
-            _keychain_mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(_keychain_mod)
-            get_secret = getattr(_keychain_mod, "get_secret", None)
-    except Exception:
-        pass  # Keychain not available (CI/Docker)
-
-
-def _get_airtable_credential(key: str) -> Optional[str]:
-    """Get Airtable credential from environment first, Keychain as fallback."""
-    value = os.environ.get(key)
-    if value:
-        return value
-    if get_secret:
-        value = get_secret(key)
-        if value:
-            return value
-    return None
+from api.services.secrets import get_secret
 
 
 class AirtableClient:
@@ -66,7 +40,7 @@ class AirtableClient:
         Raises:
             ValueError: If no API key is provided or found.
         """
-        self.api_key = api_key or _get_airtable_credential("AIRTABLE_API_KEY")
+        self.api_key = api_key or get_secret("AIRTABLE_API_KEY")
         if not self.api_key:
             raise ValueError("Airtable API key required. Add to Keychain or set AIRTABLE_API_KEY env var.")
 

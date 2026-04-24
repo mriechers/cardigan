@@ -19,4 +19,4 @@ COPY --from=build /app/dist /usr/share/nginx/html
 
 EXPOSE 3000
 
-CMD ["/bin/sh", "-c", "envsubst '${CARDIGAN_API_KEY}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && nginx -g 'daemon off;'"]
+CMD ["/bin/sh", "-c", "export CARDIGAN_API_KEY=$(cat /run/secrets/cardigan_api_key 2>/dev/null || echo \"${CARDIGAN_API_KEY}\") && envsubst '${CARDIGAN_API_KEY}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && nginx -g 'daemon off;'"]

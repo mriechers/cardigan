@@ -22,7 +22,7 @@ from bs4 import BeautifulSoup
 from sqlalchemy import text
 
 from api.services.database import get_session
-from api.services.utils import sanitize_duplicate_filename
+from api.services.utils import extract_media_id
 
 logger = logging.getLogger(__name__)
 
@@ -501,13 +501,17 @@ class IngestScanner:
         """
         Extract Media ID from filename using PBS Wisconsin conventions.
 
+        Delegates to the shared extract_media_id() utility after URL-decoding
+        and stripping duplicate extensions (remote server artifacts).
+
         Examples:
             "2WLI1209HD_transcript.srt" -> "2WLI1209HD"
             "9UNP2005_screengrab.jpg" -> "9UNP2005"
-            "WPT_2401_final.srt" -> None (doesn't match pattern)
+            "WPT_2401_final.srt" -> "WPT_2401_final"
             "2WLI1209HD%20(2).srt" -> "2WLI1209HD" (URL-encoded, duplicate stripped)
             "2WLI1209HD.srt.srt" -> "2WLI1209HD" (duplicate extension)
             "2WLIComicArtistSM (1).srt" -> "2WLIComicArtistSM" (OS duplicate stripped)
+            "2WLIAliceGoodSM_REV20251106.srt" -> "2WLIAliceGoodSM_REV20251106"
         """
         # URL-decode the filename first (handles %20, etc.)
         decoded = unquote(filename)
@@ -518,19 +522,8 @@ class IngestScanner:
         while decoded.endswith(".txt.txt"):
             decoded = decoded[:-4]
 
-        # Remove extension for sanitization
-        if "." in decoded:
-            name_part = decoded.rsplit(".", 1)[0]
-        else:
-            name_part = decoded
-
-        # Sanitize OS duplicate patterns like (1), - Copy, copy 2
-        sanitized, was_duplicate = sanitize_duplicate_filename(name_part)
-
-        match = self.MEDIA_ID_PATTERN.search(sanitized)
-        if match:
-            return match.group(1).upper()
-        return None
+        # Delegate to shared utility for consistent media ID extraction
+        return extract_media_id(decoded)
 
     def _parse_file_metadata(self, link_element) -> tuple[Optional[int], Optional[datetime]]:
         """

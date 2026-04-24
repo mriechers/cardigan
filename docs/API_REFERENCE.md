@@ -1,7 +1,7 @@
 # Editorial Assistant API Reference
 
 ## Overview
-- Base URL: `http://localhost:8000`
+- Base URL: `http://localhost:8100`
 - API prefix: `/api`
 - WebSocket: `/api/ws/jobs`
 - Auth: none (local dev by default)
