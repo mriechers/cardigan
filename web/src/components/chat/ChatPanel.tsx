@@ -159,12 +159,12 @@ export default function ChatPanel({ projectName, onClose }: ChatPanelProps) {
 
       {/* Error Message */}
       {error && (
-        <div className="px-4 py-2 bg-red-900/20 border-t border-red-500/30">
+        <div className="px-4 py-2 bg-status-failed/15 border-t border-status-failed/30">
           <div className="flex items-center justify-between">
-            <p className="text-red-400 text-sm">{error}</p>
+            <p className="text-status-failed text-sm">{error}</p>
             <button
               onClick={handleRetry}
-              className="text-sm text-red-400 hover:text-red-300 underline"
+              className="text-sm text-status-failed hover:text-pbs-300 underline"
             >
               Retry
             </button>

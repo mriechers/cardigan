@@ -201,13 +201,13 @@ export default function ScreengrabPanel() {
 
       {/* Status Messages */}
       {error && (
-        <div role="alert" aria-live="assertive" className="bg-red-900/20 border border-red-500/30 rounded-lg p-4">
-          <p className="text-red-400 text-sm">{error}</p>
+        <div role="alert" aria-live="assertive" className="bg-status-failed/15 border border-status-failed/30 rounded-lg p-4">
+          <p className="text-status-failed text-sm">{error}</p>
         </div>
       )}
       {success && (
-        <div role="status" aria-live="polite" className="bg-green-900/20 border border-green-500/30 rounded-lg p-4">
-          <p className="text-green-400 text-sm">{success}</p>
+        <div role="status" aria-live="polite" className="bg-status-completed/15 border border-status-completed/30 rounded-lg p-4">
+          <p className="text-status-completed text-sm">{success}</p>
         </div>
       )}
 
@@ -258,11 +258,11 @@ export default function ScreengrabPanel() {
 
       {/* No Match Explanation */}
       {activeFilter === 'no_match' && counts.no_match > 0 && (
-        <div className="bg-yellow-900/20 border border-yellow-500/30 rounded-lg p-4">
+        <div className="bg-status-pending/15 border border-status-pending/30 rounded-lg p-4">
           <div className="flex items-start space-x-3">
-            <span className="text-yellow-400 text-xl">⚠️</span>
+            <span className="text-status-pending text-xl">⚠️</span>
             <div>
-              <h3 className="text-sm font-medium text-yellow-400">No SST Match Found</h3>
+              <h3 className="text-sm font-medium text-status-pending">No SST Match Found</h3>
               <p className="text-xs text-surface-300 mt-1">
                 These screengrabs could not be automatically matched to a Media ID in the SST.
                 The filename pattern does not match expected formats (e.g., &quot;2WLI...&quot; or &quot;NOLA...&quot;).
@@ -319,7 +319,7 @@ export default function ScreengrabPanel() {
                         </div>
                       )}
                       {screengrab.sst_record_id && (
-                        <div className="text-green-400 text-xs">
+                        <div className="text-status-completed text-xs">
                           SST Match Found
                         </div>
                       )}
@@ -328,12 +328,12 @@ export default function ScreengrabPanel() {
                     {/* Status Badge */}
                     <div>
                       {screengrab.status === 'attached' && (
-                        <span className="inline-flex items-center px-2 py-1 rounded text-xs bg-green-900/30 text-green-400 border border-green-500/30">
+                        <span className="inline-flex items-center px-2 py-1 rounded text-xs bg-status-completed/15 text-status-completed border border-status-completed/30">
                           Attached
                         </span>
                       )}
                       {screengrab.status === 'no_match' && (
-                        <span className="inline-flex items-center px-2 py-1 rounded text-xs bg-yellow-900/30 text-yellow-400 border border-yellow-500/30">
+                        <span className="inline-flex items-center px-2 py-1 rounded text-xs bg-status-pending/15 text-status-pending border border-status-pending/30">
                           No Match
                         </span>
                       )}
