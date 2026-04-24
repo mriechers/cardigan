@@ -1188,8 +1188,7 @@ class JobWorker:
         if sst_context:
             for field_value in sst_context.values():
                 if isinstance(field_value, str) and "Clip" in field_value:
-                    if any(marker in field_value for marker in ("Full-Length", "Livestream")):
-                        return "clip"
+                    return "clip"
 
         # Check duration threshold for Shorts.
         # 90-second threshold is intentionally higher than YouTube's 60s limit
@@ -1687,7 +1686,7 @@ Please format this transcript section:
                     },
                 )
 
-                return response.content
+                return {"content": response.content, "cost": response.cost, "tokens": response.total_tokens}
 
         # Log phase start
         await log_event(
@@ -1736,14 +1735,12 @@ Please format this transcript section:
                         "cost": 0,
                     }
 
-            # Merge outputs
-            merged = merge_formatter_chunks(chunk_results)
+            # Aggregate cost/tokens from all chunks
+            total_cost = sum(r["cost"] for r in chunk_results)
+            total_tokens = sum(r["tokens"] for r in chunk_results)
 
-            # Calculate aggregate cost/tokens from run tracker
-            # (RunCostTracker accumulates automatically via llm.chat)
-            # We report 0 here since the tracker handles it
-            total_cost = 0.0
-            total_tokens = 0
+            # Merge text outputs
+            merged = merge_formatter_chunks([r["content"] for r in chunk_results])
 
             # Save merged output
             output_file = project_path / "formatter_output.md"
@@ -1754,7 +1751,9 @@ Please format this transcript section:
                 prev_file.write_text(prev_content)
 
             provenance_header = (
-                f"<!-- model: chunked ({total_chunks} chunks) | " f"tier: {tier_label} | backend: {backend} -->\n"
+                f"<!-- model: chunked ({total_chunks} chunks) | "
+                f"tier: {tier_label} | backend: {backend} | "
+                f"cost: ${total_cost:.4f} | tokens: {total_tokens} -->\n"
             )
             output_file.write_text(provenance_header + merged)
 

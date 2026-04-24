@@ -309,11 +309,17 @@ class IngestScanner:
 
             logger.info(f"Found {len(existing_urls)} existing files, {len(files) - len(existing_urls)} new")
 
-            # Step 2: Insert new files
-            new_files = [f for f in files if f.url not in existing_urls]
+            # Step 2: Insert new files (dedup by URL within the batch)
+            seen_urls: set = set()
+            new_files = []
+            for f in files:
+                if f.url not in existing_urls and f.url not in seen_urls:
+                    new_files.append(f)
+                    seen_urls.add(f.url)
+
             for f in new_files:
                 insert_query = text("""
-                    INSERT INTO available_files
+                    INSERT OR IGNORE INTO available_files
                     (remote_url, filename, directory_path, file_type, media_id,
                      file_size_bytes, remote_modified_at, first_seen_at, last_seen_at, status)
                     VALUES

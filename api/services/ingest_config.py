@@ -46,7 +46,26 @@ DEFAULT_CONFIG = IngestConfig(
     server_url="https://mmingest.pbswi.wisc.edu/",
     # Scan from root to auto-discover all directories (IWP, SCC2SRT, misc, etc.)
     directories=["/"],
-    ignore_directories=["/promos/"],
+    # Directories that don't contain transcripts/screengrabs — skip to avoid timeouts
+    ignore_directories=[
+        "SkyCloud",
+        "promos",
+        "Promotions",
+        "_old_projects",
+        "AddDisclaimer",
+        "SCC_Add1Hour",
+        "SRT2SCC",
+        "VideoDownloader",
+        "GIFLINK",
+        "AppsNCTR",
+        "CCRecord",
+        "pledge",
+        "test_jd",
+        "preservation",
+        "candidatestatements",
+        "fmdub",
+        "MP4_Misc_Output",
+    ],
 )
 
 

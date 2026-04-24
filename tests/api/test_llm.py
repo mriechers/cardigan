@@ -53,7 +53,7 @@ def mock_config(tmp_path):
         },
         "routing": {
             "tiers": ["openrouter-cheapskate", "openrouter", "openrouter-big-brain"],
-            "tier_labels": ["cheapskate", "default", "big-brain"],
+            "tier_labels": ["economy", "standard", "premium"],
             "phase_base_tiers": {"analyst": 0, "formatter": 0, "seo": 0, "manager": 2},
             "duration_thresholds": [
                 {"max_minutes": 15, "tier": 0},
