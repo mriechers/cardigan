@@ -22,7 +22,7 @@ from bs4 import BeautifulSoup
 from sqlalchemy import text
 
 from api.services.database import get_session
-from api.services.utils import extract_media_id, sanitize_duplicate_filename
+from api.services.utils import extract_media_id
 
 logger = logging.getLogger(__name__)
 
