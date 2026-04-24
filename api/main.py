@@ -4,33 +4,15 @@ Cardigan v4.0 - FastAPI Application
 Main entry point for the API server.
 """
 
-import importlib.util
 import os
-from pathlib import Path
 
-# Load .env file FIRST — it contains the current, correct credentials
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Then backfill from Keychain for any keys still missing.
-# keychain_secrets isn't on sys.path, so use spec_from_file_location.
-_keychain_path = Path.home() / "Developer/the-lodge/scripts/keychain_secrets.py"
-if _keychain_path.exists():
-    try:
-        spec = importlib.util.spec_from_file_location("keychain_secrets", _keychain_path)
-        if spec and spec.loader:
-            _keychain_mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(_keychain_mod)
-            _get_secret = getattr(_keychain_mod, "get_secret", None)
-            if _get_secret:
-                for key in ["OPENROUTER_API_KEY", "AIRTABLE_API_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"]:
-                    if key not in os.environ:
-                        value = _get_secret(key)
-                        if value:
-                            os.environ[key] = value
-    except Exception:
-        pass  # Keychain module not available (e.g., CI/Docker)
+from api.services.secrets import bootstrap_secrets
+
+bootstrap_secrets()
 
 from contextlib import asynccontextmanager
 
@@ -155,6 +137,9 @@ async def health():
     llm_client = get_llm_client()
     llm_status = llm_client.get_status()
 
+    # Get routing config for tier display
+    routing_config = llm_client.config.get("routing", {})
+
     return {
         "status": "ok",
         "queue": queue_stats,
@@ -167,6 +152,12 @@ async def health():
             "fallback_model": llm_status.get("fallback_model"),
             "phase_backends": llm_status.get("phase_backends"),
             "openrouter_presets": llm_status.get("openrouter_presets"),
+            "routing": {
+                "tiers": routing_config.get("tiers", []),
+                "tier_labels": routing_config.get("tier_labels", []),
+                "phase_base_tiers": routing_config.get("phase_base_tiers", {}),
+                "duration_thresholds": routing_config.get("duration_thresholds", []),
+            },
         },
         "last_run": llm_status.get("last_run_totals"),
     }

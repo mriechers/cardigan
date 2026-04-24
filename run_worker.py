@@ -12,40 +12,21 @@ Run multiple workers for parallel processing:
     ./venv/bin/python run_worker.py --worker-id worker-2 --concurrent 2 &
 
 Secrets:
-    API keys are loaded from macOS Keychain (service: developer.workspace.*)
-    Falls back to .env file or environment variables for CI/Docker.
+    API keys are loaded from Docker secret files (/run/secrets/),
+    environment variables, or macOS Keychain (local dev fallback).
 """
 
 import argparse
 import asyncio
-import importlib.util
-import os
 import signal
-from pathlib import Path
 
-# Load .env file FIRST — it contains the current, correct credentials
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Then backfill from Keychain for any keys still missing.
-# keychain_secrets isn't on sys.path, so use spec_from_file_location.
-_keychain_path = Path.home() / "Developer/the-lodge/scripts/keychain_secrets.py"
-if _keychain_path.exists():
-    try:
-        spec = importlib.util.spec_from_file_location("keychain_secrets", _keychain_path)
-        if spec and spec.loader:
-            _keychain_mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(_keychain_mod)
-            _get_secret = getattr(_keychain_mod, "get_secret", None)
-            if _get_secret:
-                for key in ["OPENROUTER_API_KEY", "AIRTABLE_API_KEY"]:
-                    if key not in os.environ:
-                        value = _get_secret(key)
-                        if value:
-                            os.environ[key] = value
-    except Exception:
-        pass  # Keychain module not available (e.g., CI/Docker)
+from api.services.secrets import bootstrap_secrets
+
+bootstrap_secrets()
 
 import json
 from pathlib import Path

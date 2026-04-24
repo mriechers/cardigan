@@ -1,0 +1,98 @@
+"""
+Centralized secret management for Cardigan.
+
+Resolution order:
+1. Docker secret file (/run/secrets/<name_lowercase>)
+2. Environment variable
+3. macOS Keychain via keychain_secrets (local dev only)
+
+This module replaces the duplicated keychain-loading boilerplate that was
+previously copy-pasted across main.py, run_worker.py, airtable.py, and
+langfuse_client.py.
+"""
+
+import importlib.util
+import os
+from functools import lru_cache
+from pathlib import Path
+from typing import Optional
+
+DOCKER_SECRETS_DIR = Path("/run/secrets")
+
+# ---------------------------------------------------------------------------
+# macOS Keychain loader (local dev only — not available in Docker/CI)
+# ---------------------------------------------------------------------------
+_keychain_get_secret = None
+_keychain_path = Path.home() / "Developer/the-lodge/scripts/keychain_secrets.py"
+if _keychain_path.exists():
+    try:
+        spec = importlib.util.spec_from_file_location("keychain_secrets", _keychain_path)
+        if spec and spec.loader:
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _keychain_get_secret = getattr(mod, "get_secret", None)
+    except Exception:
+        pass
+
+
+def get_secret(key: str) -> Optional[str]:
+    """Get a secret value by name.
+
+    Checks in order:
+    1. Docker secret file at /run/secrets/<key_lowercase>
+    2. Environment variable with the exact key name
+    3. macOS Keychain (local dev fallback)
+
+    Returns None if the secret is not found in any source.
+    """
+    # 1. Docker secret file
+    secret_file = DOCKER_SECRETS_DIR / key.lower()
+    if secret_file.is_file():
+        try:
+            return secret_file.read_text().strip()
+        except OSError:
+            pass
+
+    # 2. Environment variable
+    value = os.environ.get(key)
+    if value:
+        return value
+
+    # 3. macOS Keychain
+    if _keychain_get_secret:
+        value = _keychain_get_secret(key)
+        if value:
+            return value
+
+    return None
+
+
+@lru_cache(maxsize=1)
+def _bootstrap_complete() -> bool:
+    """One-time bootstrap: populate os.environ from Docker secrets / Keychain.
+
+    Called from main.py and run_worker.py at startup so that downstream code
+    using os.environ.get() (e.g., middleware, LLM client) picks up secrets
+    without needing to call get_secret() directly.
+    """
+    keys = [
+        "OPENROUTER_API_KEY",
+        "AIRTABLE_API_KEY",
+        "LANGFUSE_PUBLIC_KEY",
+        "LANGFUSE_SECRET_KEY",
+        "CARDIGAN_API_KEY",
+    ]
+    for key in keys:
+        if key not in os.environ:
+            value = get_secret(key)
+            if value:
+                os.environ[key] = value
+    return True
+
+
+def bootstrap_secrets() -> None:
+    """Populate os.environ with secrets from Docker files / Keychain.
+
+    Safe to call multiple times — only runs once.
+    """
+    _bootstrap_complete()
