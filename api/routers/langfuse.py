@@ -307,12 +307,10 @@ async def get_phase_stats(
 
         # Calculate escalation rate relative to configured base tier
         configured_tier = phase_base_tiers.get(phase_name, 0)
-        at_or_below = sum(
-            m.completions for m in ps.models if m.tier is not None and m.tier <= configured_tier
-        ) + sum(m.completions for m in ps.models if m.tier is None)
-        escalated_completions = sum(
-            m.completions for m in ps.models if m.tier is not None and m.tier > configured_tier
+        at_or_below = sum(m.completions for m in ps.models if m.tier is not None and m.tier <= configured_tier) + sum(
+            m.completions for m in ps.models if m.tier is None
         )
+        escalated_completions = sum(m.completions for m in ps.models if m.tier is not None and m.tier > configured_tier)
         if ps.total_completions > 0:
             ps.escalation_rate = round(escalated_completions / ps.total_completions * 100, 1)
 
