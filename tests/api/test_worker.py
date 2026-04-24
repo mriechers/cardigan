@@ -19,7 +19,7 @@ def mock_llm_client():
     client = MagicMock()
     client.config = {
         "routing": {
-            "tier_labels": ["cheapskate", "default", "big-brain"],
+            "tier_labels": ["economy", "standard", "premium"],
             "tiers": ["openrouter-cheapskate", "openrouter", "openrouter-big-brain"],
             "long_form_threshold_minutes": 15,
         }
@@ -510,7 +510,7 @@ class TestAnalyzeAndRecover:
         result = await worker._analyze_and_recover(
             job={"id": 1, "project_name": "Test"},
             project_path=tmp_path,
-            phases=[{"name": "analyst", "status": "failed", "tier": 0, "tier_label": "cheapskate"}],
+            phases=[{"name": "analyst", "status": "failed", "tier": 0, "tier_label": "economy"}],
             context={"transcript": "test"},
             error="Test error",
             current_cost=0.001,

@@ -116,7 +116,7 @@ async def get_phase_backends():
 
     phase_backends = config.get("phase_backends", {})
     available_backends = list(config.get("backends", {}).keys())
-    available_phases = ["analyst", "formatter", "seo", "manager", "copy_editor", "chat"]
+    available_phases = ["analyst", "formatter", "seo", "manager", "timestamp", "copy_editor", "chat"]
 
     return PhaseBackendsResponse(
         phase_backends=phase_backends,
@@ -134,7 +134,7 @@ async def update_phase_backends(update: PhaseBackendsUpdate):
     """
     config = _load_config()
     available_backends = list(config.get("backends", {}).keys())
-    valid_phases = {"analyst", "formatter", "seo", "manager", "copy_editor", "chat"}
+    valid_phases = {"analyst", "formatter", "seo", "manager", "timestamp", "copy_editor", "chat"}
 
     # Validate the update
     for phase, backend in update.phase_backends.items():
@@ -150,6 +150,11 @@ async def update_phase_backends(update: PhaseBackendsUpdate):
     # Update config
     config["phase_backends"] = update.phase_backends
     _save_config(config)
+
+    # Reload the live LLM client so changes take effect immediately
+    from api.services.llm import get_llm_client
+
+    get_llm_client().reload_config()
 
     return PhaseBackendsResponse(
         phase_backends=config["phase_backends"],
@@ -169,13 +174,13 @@ async def get_routing_config():
 
     # Default values
     default_tiers = ["openrouter-cheapskate", "openrouter", "openrouter-big-brain"]
-    default_labels = ["cheapskate", "default", "big-brain"]
+    default_labels = ["economy", "standard", "premium"]
     default_thresholds = [
-        {"max_minutes": 15, "tier": 0},
-        {"max_minutes": 30, "tier": 1},
+        {"max_minutes": 30, "tier": 0},
+        {"max_minutes": 45, "tier": 1},
         {"max_minutes": None, "tier": 2},
     ]
-    default_phase_tiers = {"analyst": 1, "formatter": 0, "seo": 0, "manager": 2, "copy_editor": 1, "chat": 1}
+    default_phase_tiers = {"analyst": 0, "formatter": 1, "seo": 0, "manager": 2, "timestamp": 1, "copy_editor": 2, "chat": 1}
     default_escalation = {
         "enabled": True,
         "on_failure": True,
@@ -202,7 +207,7 @@ async def update_routing_config(update: RoutingConfigUpdate):
     """
     config = _load_config()
     routing = config.get("routing", {})
-    valid_phases = {"analyst", "formatter", "seo", "manager", "copy_editor", "chat"}
+    valid_phases = {"analyst", "formatter", "seo", "manager", "timestamp", "copy_editor", "chat"}
 
     # Apply updates (only non-None values)
     if update.duration_thresholds is not None:
@@ -228,8 +233,100 @@ async def update_routing_config(update: RoutingConfigUpdate):
     config["routing"] = routing
     _save_config(config)
 
+    # Reload the live LLM client so changes take effect immediately
+    from api.services.llm import get_llm_client
+
+    get_llm_client().reload_config()
+
     # Return updated config
     return await get_routing_config()
+
+
+class AvailableModel(BaseModel):
+    """A model available for phase assignment."""
+
+    id: str = Field(..., description="OpenRouter model ID (e.g., 'anthropic/claude-sonnet-4-5-20250514')")
+    name: str = Field(..., description="Human-readable model name")
+    provider: str = Field(..., description="Model provider (e.g., 'Anthropic', 'Google')")
+    tier: int = Field(..., ge=0, le=2, description="Cost tier (0=economy, 1=standard, 2=premium)")
+
+
+class PhaseModelsResponse(BaseModel):
+    """Response with current phase-to-model assignments and available models."""
+
+    phase_models: Dict[str, str] = Field(..., description="Current model ID assigned to each phase")
+    available_models: List[AvailableModel] = Field(..., description="All models available for selection")
+    available_phases: List[str] = Field(..., description="All configurable phases")
+
+
+class PhaseModelsUpdate(BaseModel):
+    """Request body for updating phase-to-model assignments."""
+
+    phase_models: Dict[str, str] = Field(
+        ...,
+        description="Mapping of phase names to model IDs",
+        examples=[{"analyst": "anthropic/claude-haiku-4-5-20251001", "formatter": "anthropic/claude-sonnet-4-5-20250514"}],
+    )
+
+
+DEFAULT_PHASE_MODELS = {
+    "analyst": "anthropic/claude-haiku-4-5-20251001",
+    "formatter": "anthropic/claude-sonnet-4-5-20250514",
+    "seo": "anthropic/claude-haiku-4-5-20251001",
+    "manager": "anthropic/claude-opus-4-5-20250514",
+    "timestamp": "anthropic/claude-sonnet-4-5-20250514",
+    "copy_editor": "anthropic/claude-opus-4-5-20250514",
+    "chat": "anthropic/claude-sonnet-4-5-20250514",
+}
+
+
+@router.get("/models", response_model=PhaseModelsResponse)
+async def get_phase_models():
+    """Get current phase-to-model assignments and available models.
+
+    Returns which specific model is assigned to each agent phase,
+    plus the full list of available models for the Settings UI.
+    """
+    config = _load_config()
+    available_models = [AvailableModel(**m) for m in config.get("available_models", [])]
+    phase_models = config.get("phase_models", DEFAULT_PHASE_MODELS)
+    available_phases = ["analyst", "formatter", "seo", "manager", "timestamp", "copy_editor", "chat"]
+
+    return PhaseModelsResponse(
+        phase_models=phase_models,
+        available_models=available_models,
+        available_phases=available_phases,
+    )
+
+
+@router.patch("/models", response_model=PhaseModelsResponse)
+async def update_phase_models(update: PhaseModelsUpdate):
+    """Update phase-to-model assignments.
+
+    Allows reconfiguring which specific model handles each agent phase.
+    Changes are persisted to the config file and take effect immediately.
+    """
+    config = _load_config()
+    valid_phases = {"analyst", "formatter", "seo", "manager", "timestamp", "copy_editor", "chat"}
+    available_model_ids = {m["id"] for m in config.get("available_models", [])}
+
+    for phase, model_id in update.phase_models.items():
+        if phase not in valid_phases:
+            raise HTTPException(
+                status_code=400, detail=f"Invalid phase: {phase}. Valid phases: {', '.join(sorted(valid_phases))}"
+            )
+        if available_model_ids and model_id not in available_model_ids:
+            raise HTTPException(
+                status_code=400, detail=f"Unknown model: {model_id}. Check available_models in config."
+            )
+
+    # Merge with existing (partial update)
+    phase_models = config.get("phase_models", DEFAULT_PHASE_MODELS)
+    phase_models.update(update.phase_models)
+    config["phase_models"] = phase_models
+    _save_config(config)
+
+    return await get_phase_models()
 
 
 class WorkerConfigResponse(BaseModel):
