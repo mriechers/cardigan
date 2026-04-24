@@ -685,11 +685,16 @@ export default function JobDetail() {
                   <div className="flex items-center space-x-3">
                     {phaseStatusIcon(phase.status)}
                     <span className="text-white">{phase.name}</span>
+                    {phase.model && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-gray-700 text-gray-300 font-mono">
+                        {phase.model}
+                      </span>
+                    )}
                     {phase.tier_label && (
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${
-                        phase.tier === 2 ? 'bg-purple-900/50 text-purple-300' :
-                        phase.tier === 1 ? 'bg-blue-900/50 text-blue-300' :
-                        'bg-green-900/50 text-green-300'
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                        phase.tier === 2 ? 'bg-purple-900/30 text-purple-400' :
+                        phase.tier === 1 ? 'bg-blue-900/30 text-blue-400' :
+                        'bg-green-900/30 text-green-400'
                       }`}>
                         {phase.tier_label}
                       </span>
@@ -717,18 +722,9 @@ export default function JobDetail() {
                     )}
                   </div>
                 </div>
-                {(phase.model || phase.tier_reason) && (
-                  <div className="mt-1 ml-8 text-xs text-gray-500 space-y-0.5">
-                    {phase.model && (
-                      <div>
-                        Model: <span className="text-gray-400 font-mono">{phase.model}</span>
-                      </div>
-                    )}
-                    {phase.tier_reason && (
-                      <div>
-                        Reason: <span className="text-gray-400">{phase.tier_reason}</span>
-                      </div>
-                    )}
+                {phase.tier_reason && (
+                  <div className="mt-1 ml-8 text-xs text-gray-500">
+                    <span className="text-gray-400">{phase.tier_reason}</span>
                   </div>
                 )}
                 {phase.previous_runs && phase.previous_runs.length > 0 && (
@@ -737,12 +733,7 @@ export default function JobDetail() {
                     {phase.previous_runs.map((run, i) => (
                       <div key={i} className="flex items-center gap-2 text-gray-500 ml-2">
                         <span className="text-gray-600">#{i + 1}</span>
-                        <span className={`px-1.5 py-0 rounded text-[10px] ${
-                          run.tier === 2 ? 'bg-purple-900/30 text-purple-400' :
-                          run.tier === 1 ? 'bg-blue-900/30 text-blue-400' :
-                          'bg-green-900/30 text-green-400'
-                        }`}>{run.tier_label || 'unknown'}</span>
-                        {run.model && <span className="font-mono">{run.model}</span>}
+                        {run.model && <span className="font-mono text-gray-400">{run.model}</span>}
                         <span>${(run.cost || 0).toFixed(4)}</span>
                       </div>
                     ))}
