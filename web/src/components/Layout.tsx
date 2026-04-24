@@ -109,16 +109,7 @@ export default function Layout() {
               </NavLink>
               <NavLink
                 to="/queue"
-                className={({ isActive }) => {
-                  // Also highlight when on root path
-                  const onRoot = window.location.pathname === '/'
-                  const active = isActive || onRoot
-                  return `px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    active
-                      ? 'bg-gray-700 text-white'
-                      : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                  }`
-                }}
+                className={navLinkClass}
               >
                 Queue
               </NavLink>

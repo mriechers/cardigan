@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import Layout from './components/Layout'
 import ReadyForWork from './pages/ReadyForWork'
 import Queue from './pages/Queue'
@@ -15,7 +15,7 @@ function App() {
       <ToastProvider>
         <Routes>
           <Route path="/" element={<Layout />}>
-            <Route index element={<Queue />} />
+            <Route index element={<Navigate to="/queue" replace />} />
             <Route path="ready" element={<ReadyForWork />} />
             <Route path="queue" element={<Queue />} />
             <Route path="jobs/:id" element={<JobDetail />} />

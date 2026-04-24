@@ -44,6 +44,8 @@ export default function StatusBar() {
           to="/settings"
           className="flex items-center space-x-2 hover:bg-gray-800 px-2 py-1 rounded transition-colors"
           title="View system settings"
+          role="status"
+          aria-live="polite"
         >
           <div
             className={`w-1.5 h-1.5 rounded-full ${
