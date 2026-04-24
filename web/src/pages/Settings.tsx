@@ -111,6 +111,7 @@ export default function Settings() {
   const [pendingPhaseModels, setPendingPhaseModels] = useState<Record<string, string> | null>(null)
   const [pendingWorker, setPendingWorker] = useState<Partial<WorkerConfig> | null>(null)
   const [pendingIngest, setPendingIngest] = useState<Partial<IngestConfigUpdate> | null>(null)
+  const [refreshingModels, setRefreshingModels] = useState(false)
 
   const fetchConfig = useCallback(async () => {
     try {
@@ -183,6 +184,23 @@ export default function Settings() {
     const interval = setInterval(fetchSystemStatus, 5000)
     return () => clearInterval(interval)
   }, [activeTab, fetchSystemStatus])
+
+  const handleRefreshModels = async () => {
+    try {
+      setRefreshingModels(true)
+      const res = await fetch('/api/config/models/refresh', { method: 'POST' })
+      if (!res.ok) throw new Error('Failed to refresh')
+      const data = await res.json()
+      setPhaseModels(data)
+      setSuccess('Model roster refreshed from OpenRouter')
+      setTimeout(() => setSuccess(null), 3000)
+    } catch {
+      setError('Could not refresh models from OpenRouter')
+      setTimeout(() => setError(null), 5000)
+    } finally {
+      setRefreshingModels(false)
+    }
+  }
 
   const handlePhaseModelChange = (phase: string, modelId: string) => {
     const current = pendingPhaseModels || phaseModels?.phase_models || {}
@@ -463,7 +481,17 @@ export default function Settings() {
           <div className="space-y-6">
             {/* Agent Model Assignment */}
             <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
-              <h2 className="text-lg font-semibold text-white mb-4">Agent Models</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-white">Agent Models</h2>
+                <button
+                  onClick={handleRefreshModels}
+                  disabled={refreshingModels}
+                  className="text-xs text-gray-400 hover:text-white transition-colors disabled:opacity-50"
+                  title="Refresh available models from OpenRouter"
+                >
+                  {refreshingModels ? 'Refreshing…' : 'Refresh models'}
+                </button>
+              </div>
               <p className="text-sm text-gray-400 mb-6">
                 Choose which model runs each agent. On failure, the system escalates
                 to the next tier automatically.

@@ -190,6 +190,38 @@
       "min_tier": 1
     }
   },
+  "model_families": [
+    {
+      "name": "Claude Haiku",
+      "provider": "Anthropic",
+      "tier": 0,
+      "patterns": ["anthropic/claude-haiku-*"]
+    },
+    {
+      "name": "Claude Sonnet",
+      "provider": "Anthropic",
+      "tier": 1,
+      "patterns": ["anthropic/claude-sonnet-*"]
+    },
+    {
+      "name": "Claude Opus",
+      "provider": "Anthropic",
+      "tier": 2,
+      "patterns": ["anthropic/claude-opus-*"]
+    },
+    {
+      "name": "Gemini Flash",
+      "provider": "Google",
+      "tier": 0,
+      "patterns": ["google/gemini-*-flash*"]
+    },
+    {
+      "name": "Gemini Pro",
+      "provider": "Google",
+      "tier": 1,
+      "patterns": ["google/gemini-*-pro*"]
+    }
+  ],
   "available_models": [
     {
       "id": "anthropic/claude-haiku-4-5-20251001",
