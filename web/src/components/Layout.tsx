@@ -102,13 +102,6 @@ export default function Layout() {
             </div>
             <div className="flex items-center space-x-1">
               <NavLink
-                to="/"
-                className={navLinkClass}
-                end
-              >
-                Dashboard
-              </NavLink>
-              <NavLink
                 to="/ready"
                 className={navLinkClass}
               >
@@ -116,7 +109,16 @@ export default function Layout() {
               </NavLink>
               <NavLink
                 to="/queue"
-                className={navLinkClass}
+                className={({ isActive }) => {
+                  // Also highlight when on root path
+                  const onRoot = window.location.pathname === '/'
+                  const active = isActive || onRoot
+                  return `px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    active
+                      ? 'bg-gray-700 text-white'
+                      : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                  }`
+                }}
               >
                 Queue
               </NavLink>
@@ -131,12 +133,6 @@ export default function Layout() {
                 className={navLinkClass}
               >
                 Settings
-              </NavLink>
-              <NavLink
-                to="/system"
-                className={navLinkClass}
-              >
-                System
               </NavLink>
               <NavLink
                 to="/help"
