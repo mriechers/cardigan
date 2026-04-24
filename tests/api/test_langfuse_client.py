@@ -197,7 +197,7 @@ class TestTraceGeneration:
             job_id=42,
             phase="analyst",
             tier=0,
-            tier_label="cheapskate",
+            tier_label="economy",
             backend="openrouter",
         )
 

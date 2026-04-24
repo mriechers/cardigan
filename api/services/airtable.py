@@ -50,6 +50,7 @@ class AirtableClient:
     BASE_ID = "appZ2HGwhiifQToB6"
     TABLE_ID = "tblTKFOwTvK7xw1H5"
     TABLE_NAME = "✔️Single Source of Truth"
+    PROJECTS_TABLE_ID = "tblU9LfZeVNicdB5e"
     INTERFACE_PAGE_ID = "pagCh7J2dYzqPC3bH"  # SST interface view
     MEDIA_ID_FIELD = "Media ID"
     MEDIA_ID_FIELD_ID = "fld8k42kJeWMHA963"
@@ -190,6 +191,31 @@ class AirtableClient:
             httpx.HTTPError: On network or API errors (except 404)
         """
         url = f"{self.API_BASE_URL}/{self.BASE_ID}/{self.TABLE_ID}/{record_id}"
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                response = await client.get(url, headers=self.headers)
+                response.raise_for_status()
+                return response.json()
+
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 404:
+                    return None
+                raise
+            except httpx.HTTPError:
+                raise
+
+    async def get_project_record(self, record_id: str) -> Optional[dict]:
+        """
+        Fetch a specific Project record by Airtable record ID.
+
+        Args:
+            record_id: Airtable record ID (e.g., "recXXXXXXXXXXXXXX")
+
+        Returns:
+            Record dict if found, None if not found.
+        """
+        url = f"{self.API_BASE_URL}/{self.BASE_ID}/{self.PROJECTS_TABLE_ID}/{record_id}"
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:

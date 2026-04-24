@@ -13,6 +13,7 @@ COPY api/ api/
 COPY config/ config/
 # Copy .claude subdirectories if they exist (agents for system prompts, templates for output formats)
 COPY .claude/ .claude/
+COPY knowledge/ knowledge/
 COPY alembic.ini* ./
 COPY pyproject.toml* ./
 COPY run_worker.py .

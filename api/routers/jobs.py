@@ -6,12 +6,13 @@ Provides endpoints for job detail retrieval, updates, and control operations.
 import logging
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from api.models.events import EventCreate, EventData, EventType, SessionEvent
 from api.models.job import Job, JobStatus, JobUpdate, PhaseStatus
@@ -198,9 +199,9 @@ async def retry_job(job_id: int):
     for phase in phases:
         if phase.tier is not None and phase.tier > max_previous_tier:
             max_previous_tier = phase.tier
-    escalated_tier = min(max_previous_tier + 1, 2)  # Cap at big-brain (tier 2)
+    escalated_tier = min(max_previous_tier + 1, 2)  # Cap at tier 2 (Claude Opus)
 
-    tier_labels = {0: "cheapskate", 1: "default", 2: "big-brain"}
+    tier_labels = {0: "economy", 1: "standard", 2: "premium"}
     logger.info(
         "Retry with escalation",
         extra={
@@ -327,6 +328,179 @@ async def cancel_job(job_id: int):
     return updated_job
 
 
+TRANSCRIPT_REPLACEABLE_STATES = {
+    JobStatus.failed,
+    JobStatus.paused,
+    JobStatus.pending,
+    JobStatus.completed,
+    JobStatus.cancelled,
+}
+
+TRANSCRIPTS_DIR = Path(os.getenv("TRANSCRIPTS_DIR", "transcripts"))
+ALLOWED_EXTENSIONS = {".txt", ".srt"}
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+
+
+@router.post("/{job_id}/replace-transcript", response_model=Job)
+async def replace_transcript(
+    job_id: int,
+    file: UploadFile = File(..., description="Replacement transcript file (.txt or .srt)"),
+):
+    """Replace a job's transcript file and reset for reprocessing.
+
+    Accepts a new transcript upload for an existing job. The old transcript
+    is kept (not deleted). The job is reset to pending with all phases cleared.
+
+    Useful when a corrected transcript is available and you want to reprocess
+    without creating a new job.
+
+    Args:
+        job_id: Job ID to update
+        file: New transcript file
+
+    Returns:
+        Updated job record reset to pending
+
+    Raises:
+        HTTPException: 404 if job not found, 400 if invalid file or state
+    """
+    job = await get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    if job.status not in TRANSCRIPT_REPLACEABLE_STATES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot replace transcript for job in status '{job.status}'. "
+            f"Only {', '.join(s.value for s in TRANSCRIPT_REPLACEABLE_STATES)} jobs are eligible.",
+        )
+
+    # Validate file
+    file_ext = Path(file.filename or "").suffix.lower()
+    if file_ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type. Allowed: {', '.join(ALLOWED_EXTENSIONS)}",
+        )
+
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large. Maximum size: {MAX_FILE_SIZE / 1024 / 1024:.0f} MB",
+        )
+
+    # Save new transcript
+    TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+    file_path = TRANSCRIPTS_DIR / (file.filename or "")
+    file_path.write_bytes(content)
+    logger.info(f"Job {job_id}: Saved replacement transcript: {file_path}")
+
+    # Recalculate metadata
+    from api.routers.queue import calculate_transcript_metrics_from_file
+    from api.services.utils import extract_media_id
+
+    new_media_id = extract_media_id(file.filename or "")
+    duration_minutes, word_count = calculate_transcript_metrics_from_file(file.filename or "")
+
+    old_transcript = job.transcript_file
+    old_media_id = job.media_id
+
+    # Reset all phases to pending
+    from api.models.job import JobPhase
+
+    reset_phases = []
+    for phase in job.phases or []:
+        phase_dict = phase.model_dump()
+        # Archive previous run if it had results
+        if phase_dict.get("model") or phase_dict.get("tier") is not None:
+            prev_run = {
+                "tier": phase_dict.get("tier"),
+                "tier_label": phase_dict.get("tier_label"),
+                "model": phase_dict.get("model"),
+                "cost": phase_dict.get("cost", 0),
+                "tokens": phase_dict.get("tokens", 0),
+                "completed_at": phase_dict.get("completed_at"),
+            }
+            previous_runs = phase_dict.get("previous_runs") or []
+            previous_runs.append(prev_run)
+            phase_dict["previous_runs"] = previous_runs
+
+        phase_dict["status"] = "pending"
+        phase_dict["completed_at"] = None
+        phase_dict["error_message"] = None
+        phase_dict["cost"] = 0
+        phase_dict["tokens"] = 0
+        phase_dict["model"] = None
+        phase_dict["tier"] = None
+        phase_dict["tier_label"] = None
+        phase_dict["tier_reason"] = None
+        phase_dict["attempts"] = None
+        phase_dict["metadata"] = None
+        reset_phases.append(phase_dict)
+
+    # Build update
+    project_name = Path(file.filename or "").stem
+    for suffix in ["_ForClaude", "_forclaude", "_transcript"]:
+        if project_name.endswith(suffix):
+            project_name = project_name[: -len(suffix)]
+
+    job_update = JobUpdate(
+        status=JobStatus.pending,
+        transcript_file=file.filename or "",
+        project_name=project_name,
+        project_path=f"/data/output/{project_name}",
+        media_id=new_media_id,
+        duration_minutes=duration_minutes,
+        word_count=word_count,
+        error_message="",
+        current_phase=None,
+        actual_cost=0.0,
+        phases=[JobPhase(**p) for p in reset_phases],
+    )
+    updated_job = await update_job(job_id, job_update)
+
+    # Re-link Airtable if media_id changed
+    if new_media_id and new_media_id != old_media_id:
+        try:
+            airtable_client = AirtableClient()
+            record = await airtable_client.search_sst_by_media_id(new_media_id)
+            if record:
+                record_id = record["id"]
+                airtable_url = airtable_client.get_sst_url(record_id)
+                link_update = JobUpdate(
+                    airtable_record_id=record_id,
+                    airtable_url=airtable_url,
+                )
+                updated_job = await update_job(job_id, link_update)
+                logger.info(f"Job {job_id}: Re-linked to SST record {record_id}")
+        except Exception as e:
+            logger.warning(f"Job {job_id}: Airtable re-link failed - {e}")
+
+    # Log the replacement event
+    await log_event(
+        EventCreate(
+            job_id=job_id,
+            event_type=EventType.user_action,
+            data=EventData(
+                extra={
+                    "action": "transcript_replaced",
+                    "old_transcript": old_transcript,
+                    "new_transcript": file.filename,
+                    "old_media_id": old_media_id,
+                    "new_media_id": new_media_id,
+                }
+            ),
+        )
+    )
+
+    logger.info(
+        f"Job {job_id}: Transcript replaced {old_transcript} -> {file.filename}, "
+        f"media_id {old_media_id} -> {new_media_id}"
+    )
+    return updated_job
+
+
 @router.get("/{job_id}/events", response_model=List[SessionEvent])
 async def get_job_events(job_id: int):
     """Retrieve all events for a specific job.
@@ -355,7 +529,7 @@ async def get_job_events(job_id: int):
 
 
 @router.get("/{job_id}/outputs/{filename}")
-async def get_job_output(job_id: int, filename: str):
+async def get_job_output(job_id: int, filename: str, download: bool = Query(default=False)):
     """Retrieve an output file for a specific job.
 
     Returns the contents of a generated output file (markdown, json, etc.).
@@ -364,6 +538,7 @@ async def get_job_output(job_id: int, filename: str):
     Args:
         job_id: Job ID to get output for
         filename: Name of the output file (e.g., analyst_output.md)
+        download: If True, set Content-Disposition header to trigger browser download
 
     Returns:
         File contents as plain text
@@ -417,10 +592,11 @@ async def get_job_output(job_id: int, filename: str):
     content = file_path.read_text(encoding="utf-8")
 
     # Determine content type
-    if filename.endswith(".json"):
-        return PlainTextResponse(content, media_type="application/json")
-    else:
-        return PlainTextResponse(content, media_type="text/markdown")
+    media_type = "application/json" if filename.endswith(".json") else "text/markdown"
+    headers = {}
+    if download:
+        headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return PlainTextResponse(content, media_type=media_type, headers=headers)
 
 
 @router.get("/{job_id}/sst-metadata", response_model=SSTMetadata)
@@ -476,6 +652,171 @@ async def get_sst_metadata(job_id: int):
         raise HTTPException(status_code=502, detail="Failed to fetch metadata from Airtable")
 
 
+class KeywordReportUploadResponse(BaseModel):
+    """Response for keyword report upload."""
+
+    filename: str
+    version: int
+    message: str
+
+
+class KeywordReportInfo(BaseModel):
+    """Info about a single keyword report file."""
+
+    filename: str
+    version: int
+    uploaded_at: Optional[str] = None
+
+
+class KeywordReportsListResponse(BaseModel):
+    """Response for listing keyword reports."""
+
+    reports: List[KeywordReportInfo]
+
+
+@router.post("/{job_id}/keyword-report", response_model=KeywordReportUploadResponse)
+async def upload_keyword_report(
+    job_id: int,
+    file: UploadFile = File(..., description="SEMRush keyword export CSV or text file"),
+):
+    """Upload a SEMRush keyword report CSV for a job.
+
+    Saves the file as keyword_report_v{N}.md in the job's project directory,
+    prepending a markdown header with upload timestamp and source filename.
+    The version number auto-increments from existing files.
+
+    Args:
+        job_id: Job ID to attach the report to
+        file: CSV or text file from SEMRush keyword export
+
+    Returns:
+        Filename and version number of the saved report
+
+    Raises:
+        HTTPException: 404 if job not found or no project path configured,
+                       400 if file type not allowed
+    """
+    job = await get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    if not job.project_path:
+        raise HTTPException(status_code=404, detail="Job has no output directory configured")
+
+    # Validate file type
+    allowed_content_types = {"text/csv", "text/plain", "application/csv", "application/octet-stream"}
+    original_filename = file.filename or "keyword_report.csv"
+    ext = Path(original_filename).suffix.lower()
+    if ext not in {".csv", ".txt", ".tsv"} and (file.content_type or "") not in allowed_content_types:
+        raise HTTPException(
+            status_code=400,
+            detail="Only CSV or text files are accepted for keyword reports.",
+        )
+
+    # Security: resolve project path within OUTPUT directory
+    output_dir = Path(os.getenv("OUTPUT_DIR", "OUTPUT")).resolve()
+    project_path = Path(job.project_path).resolve()
+    if not project_path.is_relative_to(output_dir):
+        raise HTTPException(status_code=400, detail="Invalid project path - outside output directory")
+
+    # Determine next version number
+    existing = sorted(project_path.glob("keyword_report_v*.md"))
+    next_version = len(existing) + 1
+
+    # Read uploaded content
+    content_bytes = await file.read()
+    csv_content = content_bytes.decode("utf-8", errors="replace")
+
+    # Build markdown document
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    md_content = f"""# SEMRush Keyword Report
+
+**Uploaded:** {timestamp}
+**Source file:** {original_filename}
+
+---
+
+{csv_content}
+"""
+
+    filename = f"keyword_report_v{next_version}.md"
+    file_path = project_path / filename
+    file_path.write_text(md_content, encoding="utf-8")
+
+    logger.info(
+        "Keyword report uploaded",
+        extra={"job_id": job_id, "filename": filename, "version": next_version},
+    )
+
+    return KeywordReportUploadResponse(
+        filename=filename,
+        version=next_version,
+        message=f"Keyword report uploaded as {filename}. It will be included in the next SEO phase run.",
+    )
+
+
+@router.get("/{job_id}/keyword-reports", response_model=KeywordReportsListResponse)
+async def list_keyword_reports(job_id: int):
+    """List all uploaded keyword reports for a job.
+
+    Returns version numbers and upload timestamps for each report file.
+
+    Args:
+        job_id: Job ID to list reports for
+
+    Returns:
+        List of keyword report metadata
+
+    Raises:
+        HTTPException: 404 if job not found
+    """
+    job = await get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    if not job.project_path:
+        return KeywordReportsListResponse(reports=[])
+
+    output_dir = Path(os.getenv("OUTPUT_DIR", "OUTPUT")).resolve()
+    project_path = Path(job.project_path).resolve()
+    if not project_path.is_relative_to(output_dir) or not project_path.exists():
+        return KeywordReportsListResponse(reports=[])
+
+    reports = []
+    for f in sorted(project_path.glob("keyword_report_v*.md")):
+        match = re.match(r"^keyword_report_v(\d+)\.md$", f.name)
+        version = int(match.group(1)) if match else 0
+        # Extract upload timestamp from file header if present
+        uploaded_at = None
+        try:
+            first_lines = f.read_text(encoding="utf-8").splitlines()
+            for line in first_lines[:6]:
+                if line.startswith("**Uploaded:**"):
+                    uploaded_at = line.replace("**Uploaded:**", "").strip()
+                    break
+        except Exception:
+            pass
+        reports.append(KeywordReportInfo(filename=f.name, version=version, uploaded_at=uploaded_at))
+
+    return KeywordReportsListResponse(reports=reports)
+
+
+class PhaseRetryRequest(BaseModel):
+    """Request body for phase retry with optional tier override and editorial feedback."""
+
+    tier: Optional[int] = Field(
+        None,
+        ge=0,
+        description="Force specific tier index (0=economy, 1=standard, 2=premium). "
+        "If not specified, auto-escalates from the tier previously used.",
+    )
+    feedback: Optional[str] = Field(
+        None,
+        description="Editorial feedback to guide the retry (e.g., 'add a chapter for topic X', "
+        "'merge the first two chapters'). Injected into the agent prompt.",
+    )
+
+
 class PhaseRetryResponse(BaseModel):
     """Response for phase retry request."""
 
@@ -501,26 +842,24 @@ async def retry_phase(
     job_id: int,
     phase_name: str,
     background_tasks: BackgroundTasks,
-    tier: Optional[int] = Query(
-        default=None,
-        ge=0,
-        le=2,
-        description="Force specific tier: 0=cheapskate, 1=default, 2=big-brain. "
-        "If not specified, auto-escalates from the tier previously used.",
-    ),
+    body: PhaseRetryRequest = None,
 ):
-    """Retry a single phase for a job with automatic escalation.
+    """Retry a single phase for a job with optional tier override and editorial feedback.
 
     Re-runs one output (e.g., timestamp) without re-running the entire
-    pipeline. If no tier is specified, automatically escalates to the
-    next tier above what was previously used for this phase.
+    pipeline. If no tier is specified in the request body, automatically
+    escalates to the next tier above what was previously used for this phase.
+
+    Accepts an optional JSON body with:
+      - tier: 0=cheapskate, 1=default, 2=big-brain (omit to auto-escalate)
+      - feedback: editorial guidance injected into the agent prompt
 
     Args:
         job_id: Job ID to retry a phase for
-        phase_name: Phase name (analyst, formatter, seo, manager, timestamp)
-                   OR output key (analysis, seo_metadata, timestamp_report, etc.)
-        tier: Optional tier override (0=cheapskate, 1=default, 2=big-brain).
-              If omitted, auto-escalates from previous tier.
+        phase_name: Phase name (analyst, formatter, seo, manager, timestamp,
+                    copy_editor) OR output key (analysis, seo_metadata,
+                    timestamp_report, etc.)
+        body: Optional JSON body with tier and/or feedback fields
 
     Returns:
         PhaseRetryResponse with status
@@ -528,6 +867,10 @@ async def retry_phase(
     Raises:
         HTTPException: 404 if job not found, 400 if invalid phase
     """
+    if body is None:
+        body = PhaseRetryRequest()
+    tier = body.tier
+    feedback = body.feedback
     # Map output key to phase name if needed
     if phase_name in OUTPUT_TO_PHASE:
         phase_name = OUTPUT_TO_PHASE[phase_name]
@@ -552,7 +895,7 @@ async def retry_phase(
             if phase.name == phase_name and phase.tier is not None:
                 previous_tier = phase.tier
                 break
-        effective_tier = min(previous_tier + 1, 2)
+        effective_tier = previous_tier + 1
         logger.info(
             "Auto-escalating phase retry",
             extra={
@@ -583,6 +926,7 @@ async def retry_phase(
                     "tier": effective_tier,
                     "auto_escalated": tier is None,
                     "original_model": original_model,
+                    "has_feedback": feedback is not None,
                 },
             ),
         )
@@ -596,7 +940,7 @@ async def retry_phase(
         from api.services.worker import JobWorker
 
         worker = JobWorker()
-        result = await worker.retry_single_phase(job_id, phase_name, force_tier=effective_tier)
+        result = await worker.retry_single_phase(job_id, phase_name, force_tier=effective_tier, feedback=feedback)
         if not result.get("success"):
             logger.error(
                 "Phase retry failed",
@@ -607,7 +951,7 @@ async def retry_phase(
 
     background_tasks.add_task(run_retry)
 
-    tier_labels = {0: "cheapskate", 1: "default", 2: "big-brain"}
+    tier_labels = {0: "economy", 1: "standard", 2: "premium"}
     escalation_note = " (auto-escalated)" if tier is None else ""
     tier_msg = f" at tier {effective_tier} ({tier_labels.get(effective_tier, '?')}){escalation_note}"
     return PhaseRetryResponse(

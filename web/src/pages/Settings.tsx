@@ -24,6 +24,19 @@ interface RoutingConfig {
   escalation: EscalationConfig
 }
 
+interface AvailableModel {
+  id: string
+  name: string
+  provider: string
+  tier: number
+}
+
+interface PhaseModelsConfig {
+  phase_models: Record<string, string>
+  available_models: AvailableModel[]
+  available_phases: string[]
+}
+
 interface WorkerConfig {
   max_concurrent_jobs: number
   poll_interval_seconds: number
@@ -81,6 +94,7 @@ interface SystemStatus {
 export default function Settings() {
   const { preferences, updatePreferences } = usePreferences()
   const [routing, setRouting] = useState<RoutingConfig | null>(null)
+  const [phaseModels, setPhaseModels] = useState<PhaseModelsConfig | null>(null)
   const [worker, setWorker] = useState<WorkerConfig | null>(null)
   const [ingestConfig, setIngestConfig] = useState<IngestConfig | null>(null)
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null)
@@ -92,14 +106,16 @@ export default function Settings() {
 
   // Track unsaved changes
   const [pendingRouting, setPendingRouting] = useState<Partial<RoutingConfig> | null>(null)
+  const [pendingPhaseModels, setPendingPhaseModels] = useState<Record<string, string> | null>(null)
   const [pendingWorker, setPendingWorker] = useState<Partial<WorkerConfig> | null>(null)
   const [pendingIngest, setPendingIngest] = useState<Partial<IngestConfigUpdate> | null>(null)
 
   const fetchConfig = useCallback(async () => {
     try {
       setLoading(true)
-      const [routingRes, workerRes] = await Promise.all([
+      const [routingRes, modelsRes, workerRes] = await Promise.all([
         fetch('/api/config/routing'),
+        fetch('/api/config/models'),
         fetch('/api/config/worker')
       ])
 
@@ -113,8 +129,12 @@ export default function Settings() {
       const routingData = await routingRes.json()
       const workerData = await workerRes.json()
       setRouting(routingData)
+      if (modelsRes.ok) {
+        setPhaseModels(await modelsRes.json())
+      }
       setWorker(workerData)
       setPendingRouting(null)
+      setPendingPhaseModels(null)
       setPendingWorker(null)
       setError(null)
     } catch (err) {
@@ -162,12 +182,9 @@ export default function Settings() {
     return () => clearInterval(interval)
   }, [activeTab, fetchSystemStatus])
 
-  const handlePhaseBaseTierChange = (phase: string, tier: number) => {
-    const current = pendingRouting?.phase_base_tiers || routing?.phase_base_tiers || {}
-    setPendingRouting({
-      ...pendingRouting,
-      phase_base_tiers: { ...current, [phase]: tier }
-    })
+  const handlePhaseModelChange = (phase: string, modelId: string) => {
+    const current = pendingPhaseModels || phaseModels?.phase_models || {}
+    setPendingPhaseModels({ ...current, [phase]: modelId })
   }
 
   const handleThresholdChange = (index: number, value: number | null) => {
@@ -226,6 +243,25 @@ export default function Settings() {
         }
       }
 
+      // Save phase model assignments if changed
+      if (pendingPhaseModels) {
+        const res = await fetch('/api/config/models', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phase_models: pendingPhaseModels })
+        })
+        if (!res.ok) {
+          let detail = 'Failed to save model assignments'
+          try {
+            const data = await res.json()
+            detail = data.detail || detail
+          } catch {
+            // Response wasn't JSON
+          }
+          throw new Error(detail)
+        }
+      }
+
       // Save worker config if changed
       if (pendingWorker) {
         const res = await fetch('/api/config/worker', {
@@ -273,7 +309,7 @@ export default function Settings() {
     setPendingIngest(null)
   }
 
-  const hasChanges = pendingRouting !== null || pendingWorker !== null || pendingIngest !== null
+  const hasChanges = pendingRouting !== null || pendingPhaseModels !== null || pendingWorker !== null || pendingIngest !== null
 
   const getCurrentWorker = (): WorkerConfig => {
     return {
@@ -295,10 +331,6 @@ export default function Settings() {
       ignore_directories: ingestConfig?.ignore_directories ?? [],
       next_scan_at: ingestConfig?.next_scan_at ?? null
     }
-  }
-
-  const getCurrentPhaseBaseTier = (phase: string): number => {
-    return pendingRouting?.phase_base_tiers?.[phase] ?? routing?.phase_base_tiers?.[phase] ?? 0
   }
 
   const getCurrentThresholds = (): DurationThreshold[] => {
@@ -427,19 +459,25 @@ export default function Settings() {
         {/* AGENTS TAB */}
         {activeTab === 'agents' && (
           <div className="space-y-6">
-            {/* Agent Base Tier Assignment */}
+            {/* Agent Model Assignment */}
             <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
-              <h2 className="text-lg font-semibold text-white mb-4">Agent Base Tiers</h2>
+              <h2 className="text-lg font-semibold text-white mb-4">Agent Models</h2>
               <p className="text-sm text-gray-400 mb-6">
-                Set the starting tier for each agent. Short transcripts will use this tier.
-                Longer transcripts may automatically escalate based on duration thresholds.
+                Choose which model runs each agent. On failure, the system escalates
+                to the next tier automatically.
               </p>
 
               <div className="space-y-4">
                 {AGENT_INFO.map((agent) => {
-                  const currentTier = getCurrentPhaseBaseTier(agent.id)
-                  const color = getTierColor(currentTier)
-                  const styles = TIER_STYLES[color]
+                  const currentModel = pendingPhaseModels?.[agent.id]
+                    || phaseModels?.phase_models?.[agent.id]
+                    || ''
+                  const models = phaseModels?.available_models || []
+                  const selectedModel = models.find(m => m.id === currentModel)
+                  const tierColor = selectedModel
+                    ? TIER_COLORS[selectedModel.tier] || 'cyan'
+                    : 'cyan'
+                  const styles = TIER_STYLES[tierColor]
 
                   return (
                     <div key={agent.id} className="flex items-center justify-between p-4 bg-gray-900 rounded-lg">
@@ -453,21 +491,30 @@ export default function Settings() {
                         </div>
                       </div>
 
-                      <label htmlFor={`tier-${agent.id}`} className="sr-only">
-                        Base tier for {agent.name}
+                      <label htmlFor={`model-${agent.id}`} className="sr-only">
+                        Model for {agent.name}
                       </label>
                       <select
-                        id={`tier-${agent.id}`}
-                        value={currentTier}
-                        onChange={(e) => handlePhaseBaseTierChange(agent.id, parseInt(e.target.value))}
-                        className={`px-3 py-2 rounded-md border text-sm font-medium ${styles.bg} ${styles.border} ${styles.text}`}
-                        aria-label={`Select base tier for ${agent.name} agent`}
+                        id={`model-${agent.id}`}
+                        value={currentModel}
+                        onChange={(e) => handlePhaseModelChange(agent.id, e.target.value)}
+                        className={`px-3 py-2 rounded-md border text-sm font-medium min-w-[220px] ${styles.bg} ${styles.border} ${styles.text}`}
+                        aria-label={`Select model for ${agent.name} agent`}
                       >
-                        {routing?.tier_labels?.map((label, idx) => (
-                          <option key={idx} value={idx} className="bg-gray-800 text-white">
-                            {label}
-                          </option>
-                        ))}
+                        {[0, 1, 2].map(tier => {
+                          const tierModels = models.filter(m => m.tier === tier)
+                          if (tierModels.length === 0) return null
+                          const tierLabel = routing?.tier_labels?.[tier] || `tier ${tier}`
+                          return (
+                            <optgroup key={tier} label={tierLabel}>
+                              {tierModels.map(m => (
+                                <option key={m.id} value={m.id} className="bg-gray-800 text-white">
+                                  {m.name} ({m.provider})
+                                </option>
+                              ))}
+                            </optgroup>
+                          )
+                        })}
                       </select>
                     </div>
                   )

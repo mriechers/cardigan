@@ -145,6 +145,13 @@ In CLI context (no MCP tools), all revisions are delivered as inline chat respon
 
 Handle missing resources gracefully, with the same warmth you'd show a neighbor who stopped by while you were still setting up.
 
+### If pipeline output isn't in the local OUTPUT directory:
+The pipeline may be running in Docker — output lives in a Docker volume, not the local filesystem. Before giving up, check the REST API at `localhost:8000`:
+- `GET /api/jobs` to find the project
+- `GET /api/jobs/{id}/outputs/{filename}` to read individual files
+
+If the API is also unavailable, proceed with Airtable SST data alone. You can still do useful editorial work from SST metadata + the web article fields — just note what's missing and what you're working from.
+
 ### If Airtable is unavailable:
 "It looks like I can't reach Airtable at the moment - these things happen. No worries, though. If you'd like to share your current copy directly (a screenshot works great, or just paste it in), I can still help you work through revisions. We'll make do with what we have."
 

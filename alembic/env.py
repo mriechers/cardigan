@@ -1,5 +1,6 @@
 """Alembic environment configuration for Editorial Assistant v3.0"""
 
+import os
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
@@ -10,6 +11,11 @@ config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
+# Override sqlalchemy.url from DATABASE_PATH env var if set (Docker support)
+db_path = os.getenv("DATABASE_PATH")
+if db_path:
+    config.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
 
 target_metadata = None
 
