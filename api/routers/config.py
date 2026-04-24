@@ -180,7 +180,15 @@ async def get_routing_config():
         {"max_minutes": 45, "tier": 1},
         {"max_minutes": None, "tier": 2},
     ]
-    default_phase_tiers = {"analyst": 0, "formatter": 1, "seo": 0, "manager": 2, "timestamp": 1, "copy_editor": 2, "chat": 1}
+    default_phase_tiers = {
+        "analyst": 0,
+        "formatter": 1,
+        "seo": 0,
+        "manager": 2,
+        "timestamp": 1,
+        "copy_editor": 2,
+        "chat": 1,
+    }
     default_escalation = {
         "enabled": True,
         "on_failure": True,
@@ -265,7 +273,9 @@ class PhaseModelsUpdate(BaseModel):
     phase_models: Dict[str, str] = Field(
         ...,
         description="Mapping of phase names to model IDs",
-        examples=[{"analyst": "anthropic/claude-haiku-4-5-20251001", "formatter": "anthropic/claude-sonnet-4-5-20250514"}],
+        examples=[
+            {"analyst": "anthropic/claude-haiku-4-5-20251001", "formatter": "anthropic/claude-sonnet-4-5-20250514"}
+        ],
     )
 
 
@@ -316,9 +326,7 @@ async def update_phase_models(update: PhaseModelsUpdate):
                 status_code=400, detail=f"Invalid phase: {phase}. Valid phases: {', '.join(sorted(valid_phases))}"
             )
         if available_model_ids and model_id not in available_model_ids:
-            raise HTTPException(
-                status_code=400, detail=f"Unknown model: {model_id}. Check available_models in config."
-            )
+            raise HTTPException(status_code=400, detail=f"Unknown model: {model_id}. Check available_models in config.")
 
     # Merge with existing (partial update)
     phase_models = config.get("phase_models", DEFAULT_PHASE_MODELS)
