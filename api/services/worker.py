@@ -341,7 +341,7 @@ class JobWorker:
         # Set forced tier in context if specified
         if force_tier is not None:
             context["_force_tier"] = force_tier
-            tier_labels = {0: "cheapskate", 1: "default", 2: "big-brain"}
+            tier_labels = {0: "economy", 1: "standard", 2: "premium"}
             logger.info(
                 "Forcing tier override",
                 extra={
@@ -435,6 +435,21 @@ class JobWorker:
 
             await update_job(job_id, JobUpdate(phases=phases))
 
+            # Extract glossary entries from editorial feedback (fire-and-forget)
+            if feedback and phase_result.get("status") == "completed":
+                try:
+                    added = await self._extract_glossary_entries(feedback, job_id)
+                    if added:
+                        logger.info(
+                            "Glossary updated from editorial feedback",
+                            extra={"job_id": job_id, "entries_added": added},
+                        )
+                except Exception as e:
+                    logger.warning(
+                        "Glossary extraction failed (non-fatal)",
+                        extra={"job_id": job_id, "error": str(e)},
+                    )
+
             return {
                 "success": True,
                 "phase": phase_name,
@@ -447,8 +462,141 @@ class JobWorker:
             )
             return {"success": False, "error": str(e)}
 
+    async def _extract_glossary_entries(self, feedback: str, job_id: int) -> int:
+        """Extract glossary-worthy corrections from editorial feedback.
+
+        Sends feedback through a lightweight LLM call to identify name
+        corrections, spelling fixes, and terms that should be added to
+        knowledge/glossary.md. Returns the number of entries added.
+        """
+        glossary_path = KNOWLEDGE_DIR / "glossary.md"
+        if not glossary_path.exists():
+            return 0
+
+        current_glossary = glossary_path.read_text()
+
+        system_prompt = """You extract name corrections and spelling fixes from editorial feedback on transcripts.
+
+Given editorial feedback, identify any corrections that should be added to a glossary for future transcripts. Focus on:
+- Name spelling corrections (e.g., "used Shawn instead of Sean")
+- Proper noun fixes
+- Recurring terms that were wrong
+
+For each correction, output ONE line in this exact format:
+CORRECTION: wrong_form -> correct_form | context
+
+If there are no glossary-worthy corrections in the feedback, output exactly:
+NO_CORRECTIONS
+
+Do NOT include general formatting feedback, style notes, or paraphrasing observations — only specific spelling/naming corrections."""
+
+        user_prompt = f"""Editorial feedback:
+---
+{feedback}
+---
+
+Current glossary (to avoid duplicates):
+---
+{current_glossary}
+---
+
+Extract any name or spelling corrections that should be added to the glossary. Skip anything already covered."""
+
+        # Use cheapest tier for this lightweight extraction
+        backend = self.llm.get_backend_for_phase("analyst", {}, tier_override=0)
+
+        response = await self.llm.generate(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            backend=backend,
+            timeout=30,
+        )
+
+        content = response.content.strip()
+
+        if "NO_CORRECTIONS" in content:
+            return 0
+
+        # Parse corrections and append to glossary
+        new_entries = []
+        for line in content.split("\n"):
+            line = line.strip()
+            if not line.startswith("CORRECTION:"):
+                continue
+            # Parse "CORRECTION: wrong_form -> correct_form | context"
+            try:
+                correction_part = line[len("CORRECTION:"):].strip()
+                if " -> " not in correction_part:
+                    continue
+                forms, _, context = correction_part.partition("|")
+                wrong, _, correct = forms.partition("->")
+                wrong = wrong.strip()
+                correct = correct.strip()
+                context = context.strip() if context else ""
+
+                if not wrong or not correct:
+                    continue
+
+                # Check if this correction is already in the glossary
+                if wrong.lower() in current_glossary.lower() and correct.lower() in current_glossary.lower():
+                    continue
+
+                new_entries.append((correct, wrong, context))
+            except Exception:
+                continue
+
+        if not new_entries:
+            return 0
+
+        # Append to the Editor Corrections section
+        lines = current_glossary.split("\n")
+        insert_idx = None
+        for i, line in enumerate(lines):
+            if line.strip() == "## Name Disambiguation":
+                # Insert before Name Disambiguation section
+                insert_idx = i
+                break
+            if line.strip() == "## Editor Corrections":
+                # Find the end of the table in this section
+                for j in range(i + 1, len(lines)):
+                    if lines[j].startswith("## "):
+                        insert_idx = j
+                        break
+                    # Track last table row
+                    if lines[j].startswith("|") and not lines[j].startswith("| Correct"):
+                        insert_idx = j + 1
+                if insert_idx is None:
+                    insert_idx = len(lines)
+                break
+
+        if insert_idx is None:
+            # No Editor Corrections section found; append at end
+            insert_idx = len(lines)
+
+        new_lines = []
+        for correct, wrong, context in new_entries:
+            new_lines.append(f"| {correct} | {wrong} | {context} |")
+
+        for offset, new_line in enumerate(new_lines):
+            lines.insert(insert_idx + offset, new_line)
+
+        glossary_path.write_text("\n".join(lines))
+
+        logger.info(
+            "Appended glossary entries from editorial feedback",
+            extra={
+                "job_id": job_id,
+                "entries": [f"{w} -> {c}" for c, w, _ in new_entries],
+            },
+        )
+
+        return len(new_entries)
+
     async def process_job(self, job: Dict[str, Any]):
         """Process a single job through all phases."""
+        # Reload config before each job so Settings changes take effect
+        self.llm.reload_config()
+
         job_id = job["id"]
         self._current_job_id = job_id
         project_name = job.get("project_name", "Unknown")
@@ -1297,6 +1445,11 @@ class JobWorker:
                         chunking_config=chunking_config,
                     )
 
+        # Check for direct model assignment (phase_models config)
+        phase_models = self.llm.config.get("phase_models", {})
+        forced_tier = context.get("_force_tier")
+        direct_model = phase_models.get(phase_name) if forced_tier is None else None
+
         # Get escalation config
         escalation_config = self.llm.get_escalation_config()
         escalation_enabled = escalation_config.get("enabled", True)
@@ -1304,30 +1457,36 @@ class JobWorker:
         escalate_on_timeout = escalation_config.get("on_timeout", True)
         timeout_seconds = escalation_config.get("timeout_seconds", 120)
 
-        # Check if tier is being forced (e.g., by manager escalation)
-        forced_tier = context.get("_force_tier")
+        # Determine initial tier from the direct model's tier, forced tier, or duration thresholds
+        routing_config = self.llm.config.get("routing", {})
+        tier_labels = routing_config.get("tier_labels", ["economy", "standard", "premium"])
 
-        # Force big-brain tier for QA phases (manager)
-        if phase_name in self.FORCE_BIG_BRAIN_PHASES:
-            initial_tier = 2  # big-brain tier
-            initial_tier_reason = f"{phase_name} phase always uses big-brain tier for quality oversight"
+        if direct_model:
+            # Look up the model's tier from available_models for tracking
+            available_models = self.llm.config.get("available_models", [])
+            model_tier = 0
+            for m in available_models:
+                if m["id"] == direct_model:
+                    model_tier = m.get("tier", 0)
+                    break
+            initial_tier = model_tier
+            initial_tier_reason = f"configured model: {direct_model}"
+        elif phase_name in self.FORCE_BIG_BRAIN_PHASES:
+            initial_tier = 2
+            initial_tier_reason = f"{phase_name} phase always uses premium tier for quality oversight"
         elif forced_tier is not None:
             initial_tier = forced_tier
             initial_tier_reason = f"Forced tier {forced_tier} by manager escalation"
         else:
-            # Get initial tier based on context (duration thresholds)
             initial_tier, initial_tier_reason = self.llm.get_tier_for_phase_with_reason(phase_name, context)
 
-            # Apply minimum tier floor for certain phases (e.g., timestamp needs at least default)
             min_tier = self.MINIMUM_TIER_PHASES.get(phase_name)
             if min_tier is not None and initial_tier < min_tier:
                 initial_tier = min_tier
-                initial_tier_reason = f"{phase_name} phase requires minimum tier {min_tier} (default tier)"
+                initial_tier_reason = f"{phase_name} phase requires minimum tier {min_tier}"
 
         current_tier = initial_tier
         tier_reason = initial_tier_reason
-        routing_config = self.llm.config.get("routing", {})
-        tier_labels = routing_config.get("tier_labels", ["cheapskate", "default", "big-brain"])
 
         # Load prompts once (don't reload on each retry)
         system_prompt = self._load_agent_prompt(phase_name)
@@ -1344,17 +1503,29 @@ class JobWorker:
         max_escalation_attempts = 10  # Safety guard against infinite loops
 
         while attempts < max_escalation_attempts:
-            # Get backend for current tier
-            backend = self.llm.get_backend_for_phase(phase_name, context, tier_override=current_tier)
+            # Get backend and model for current attempt
+            if direct_model and attempts == 0:
+                # First attempt uses the configured model directly
+                backend = "openrouter-direct"
+                model_override = direct_model
+            else:
+                # Fallback to tier-based routing (escalation or no direct model)
+                backend = self.llm.get_backend_for_phase(phase_name, context, tier_override=current_tier)
+                model_override = None
+                # On escalation, clear direct_model so subsequent attempts use tier routing
+                if direct_model and attempts > 0:
+                    direct_model = None
+
             tier_label = tier_labels[current_tier] if current_tier < len(tier_labels) else f"tier-{current_tier}"
             logger.info(
-                "Phase attempting with tier",
+                "Phase attempting",
                 extra={
                     "job_id": job_id,
                     "phase": phase_name,
                     "tier": current_tier,
                     "tier_label": tier_label,
                     "backend": backend,
+                    "model": model_override or "(preset)",
                 },
             )
 
@@ -1366,7 +1537,8 @@ class JobWorker:
                     data=EventData(
                         phase=phase_name,
                         backend=backend,
-                        extra={"tier": current_tier, "tier_label": tier_label, "attempt": attempts + 1},
+                        extra={"tier": current_tier, "tier_label": tier_label, "attempt": attempts + 1,
+                               "model": model_override},
                     ),
                 )
             )
@@ -1386,6 +1558,7 @@ class JobWorker:
                     self.llm.chat(
                         messages=messages,
                         backend=backend,
+                        model=model_override,
                         job_id=job_id,
                         phase=phase_name,
                         tier=current_tier,
@@ -1559,6 +1732,12 @@ class JobWorker:
         analysis = context.get("analyst_output", "")
         sst_context = context.get("sst_context")
 
+        # Load glossary for chunked formatter (mirrors _build_phase_prompt)
+        glossary_section = ""
+        glossary_path = KNOWLEDGE_DIR / "glossary.md"
+        if glossary_path.exists():
+            glossary_section = f"\n## Transcript Glossary\n\n{glossary_path.read_text()}\n\n"
+
         # Build SST section (reuse logic from _build_phase_prompt)
         sst_section = ""
         if sst_context:
@@ -1578,28 +1757,44 @@ class JobWorker:
                 if sst_context.get(key):
                     sst_section += f"**{key.replace('_', ' ').title()}:** {sst_context[key]}\n"
 
-        # Get tier/backend for this phase
+        # Get tier/backend for this phase — check for direct model assignment first
+        phase_models = self.llm.config.get("phase_models", {})
         forced_tier = context.get("_force_tier")
-        if forced_tier is not None:
-            current_tier = forced_tier
-            tier_reason = f"Forced tier {forced_tier} by manager escalation"
-        else:
-            current_tier, tier_reason = self.llm.get_tier_for_phase_with_reason("formatter", context)
+        direct_model = phase_models.get("formatter") if forced_tier is None else None
 
-        # Apply minimum tier for chunked formatting (cheapskate models condense too aggressively)
-        min_tier = chunking_config.get("min_tier")
-        if min_tier is not None and current_tier < min_tier:
-            logger.info(
-                "Applying chunked formatter min_tier",
-                extra={"from_tier": current_tier, "min_tier": min_tier},
-            )
-            current_tier = min_tier
-            tier_reason = f"Chunked formatter requires minimum tier {min_tier}"
+        if direct_model:
+            available_models = self.llm.config.get("available_models", [])
+            current_tier = 0
+            for m in available_models:
+                if m["id"] == direct_model:
+                    current_tier = m.get("tier", 0)
+                    break
+            tier_reason = f"configured model: {direct_model}"
+            backend = "openrouter-direct"
+            model_override = direct_model
+        else:
+            model_override = None
+            if forced_tier is not None:
+                current_tier = forced_tier
+                tier_reason = f"Forced tier {forced_tier} by manager escalation"
+            else:
+                current_tier, tier_reason = self.llm.get_tier_for_phase_with_reason("formatter", context)
+
+            # Apply minimum tier for chunked formatting
+            min_tier = chunking_config.get("min_tier")
+            if min_tier is not None and current_tier < min_tier:
+                logger.info(
+                    "Applying chunked formatter min_tier",
+                    extra={"from_tier": current_tier, "min_tier": min_tier},
+                )
+                current_tier = min_tier
+                tier_reason = f"Chunked formatter requires minimum tier {min_tier}"
+
+            backend = self.llm.get_backend_for_phase("formatter", context, tier_override=current_tier)
 
         routing_config = self.llm.config.get("routing", {})
-        tier_labels = routing_config.get("tier_labels", ["cheapskate", "default", "big-brain"])
+        tier_labels = routing_config.get("tier_labels", ["economy", "standard", "premium"])
         tier_label = tier_labels[current_tier] if current_tier < len(tier_labels) else f"tier-{current_tier}"
-        backend = self.llm.get_backend_for_phase("formatter", context, tier_override=current_tier)
 
         # Get timeout from backend config
         escalation_config = self.llm.get_escalation_config()
@@ -1631,13 +1826,15 @@ SPELLING: Always use "partisan" (not "partizan"), "bipartisan" (not "bipartisan"
                     user_message += "Using the following analysis as guidance:\n\n"
                     if sst_section:
                         user_message += sst_section
+                    if glossary_section:
+                        user_message += glossary_section
                     user_message += f"---\n{analysis}\n---\n\n"
                     user_message += f"Please format this transcript:\n\n---\n{chunk.content}\n---"
                 else:
                     # Continuation chunks: skip header, start with dialogue
                     user_message = f"""{verbatim_instruction}
 
-IMPORTANT: This is section {chunk.index + 1} of {total_chunks} of a long transcript being processed in parts.
+{glossary_section}IMPORTANT: This is section {chunk.index + 1} of {total_chunks} of a long transcript being processed in parts.
 DO NOT generate the metadata header (Project, Program, Duration, Date).
 DO NOT generate "# Formatted Transcript" heading.
 Begin directly with speaker attribution and dialogue.
@@ -1668,6 +1865,7 @@ Please format this transcript section:
                     self.llm.chat(
                         messages=messages,
                         backend=backend,
+                        model=model_override,
                         job_id=job_id,
                         phase="formatter",
                         tier=current_tier,
@@ -2341,12 +2539,12 @@ Output a QA report with:
         # Detect content type for Shorts-specific prompt adjustments
         content_type = context.get("content_type", "full")
 
-        # Load Wisconsin proper-noun reference for analyst and formatter phases
-        wi_reference = ""
+        # Load glossary (spelling, names, terms) for analyst and formatter phases
+        glossary = ""
         if phase_name in ("analyst", "formatter"):
-            wi_ref_path = KNOWLEDGE_DIR / "wisconsin_reference.md"
-            if wi_ref_path.exists():
-                wi_reference = f"\n## Wisconsin Proper-Noun Reference\n\n{wi_ref_path.read_text()}\n\n"
+            glossary_path = KNOWLEDGE_DIR / "glossary.md"
+            if glossary_path.exists():
+                glossary = f"\n## Transcript Glossary\n\n{glossary_path.read_text()}\n\n"
 
         if phase_name == "analyst":
             if content_type == "short":
@@ -2360,8 +2558,8 @@ Output a QA report with:
 """
             if sst_section:
                 prompt += sst_section
-            if wi_reference:
-                prompt += wi_reference
+            if glossary:
+                prompt += glossary
             prompt += f"""---
 {transcript}
 ---
@@ -2393,8 +2591,8 @@ If a caption is garbled or unclear, include your best reconstruction rather than
             prompt += "Using the following analysis as guidance:\n\n"
             if sst_section:
                 prompt += sst_section
-            if wi_reference:
-                prompt += wi_reference
+            if glossary:
+                prompt += glossary
             prompt += f"""---
 {analysis}
 ---

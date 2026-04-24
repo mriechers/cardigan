@@ -1,6 +1,14 @@
-# Wisconsin Proper-Noun Reference
+# PBS Wisconsin Transcript Glossary
 
-Quick-reference for commonly misspelled Wisconsin names in transcripts. Use this to verify caption accuracy.
+Authoritative spelling and naming reference for all transcript processing agents (analyst, formatter, copy-editor). When in doubt, this file is correct — do NOT "autocorrect" names to more common spellings.
+
+## How to Use This Glossary
+
+- **Before formatting**: Scan the glossary for names and terms that appear in the transcript
+- **When a name has multiple common spellings**: Use the spelling listed here, not the one the model "prefers"
+- **After editor review**: New corrections should be added to the appropriate section
+
+---
 
 ## Place Names
 
@@ -39,6 +47,7 @@ Quick-reference for commonly misspelled Wisconsin names in transcripts. Use this
 | Josh Kaul | Attorney General | Kohl, Call |
 | Dan Kelly | Former Supreme Court Justice | (rarely misspelled) |
 | Eric Toney | Politician | Tony, Toni |
+| Sean Duffy | Former U.S. Rep. / Secretary of Transportation | Shawn Duffy |
 
 ## Legal Cases
 
@@ -78,3 +87,21 @@ Quick-reference for commonly misspelled Wisconsin names in transcripts. Use this
 | Dells | Wisconsin Dells (tourism area) |
 | Up North | Colloquial for northern Wisconsin |
 | FIBs | Colloquial for Illinois visitors (use cautiously) |
+
+## Editor Corrections
+
+Names and terms corrected during human editorial review. These represent cases where the model consistently gets the wrong spelling or the caption source is unreliable.
+
+| Correct | Model Tendency | Context |
+|---------|---------------|---------|
+| Sean Duffy | Shawn Duffy | Former WI congressman; model confuses with IWP host Shawn Johnson |
+
+## Name Disambiguation
+
+Names that appear in PBS Wisconsin transcripts where the model may confuse similar-sounding or similar-looking names. Pay special attention when both names could plausibly appear.
+
+| Name | Role | Do NOT confuse with |
+|------|------|-------------------|
+| Shawn Johnson | IWP host (PBS Wisconsin) | Sean Duffy (politician) |
+| Sean Duffy | Former U.S. Rep. / Sec. of Transportation | Shawn Johnson (IWP host) |
+| Anya van Wagtendonk | IWP panelist | — |
