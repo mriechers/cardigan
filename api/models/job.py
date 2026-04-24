@@ -107,6 +107,9 @@ class JobUpdate(BaseModel):
 
     status: Optional[JobStatus] = None
     priority: Optional[int] = None
+    transcript_file: Optional[str] = None
+    project_name: Optional[str] = None
+    project_path: Optional[str] = None
     current_phase: Optional[str] = None
     error_message: Optional[str] = None
     estimated_cost: Optional[float] = None

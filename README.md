@@ -156,9 +156,9 @@ cd web && npm run dev
 
 | URL | Description |
 |-----|-------------|
-| http://localhost:8000 | API server |
-| http://localhost:8000/docs | Interactive API docs (Swagger) |
-| http://localhost:3000 | Web dashboard |
+| http://localhost:8100 | API server |
+| http://localhost:8100/docs | Interactive API docs (Swagger) |
+| http://localhost:3100 | Web dashboard |
 
 See [docs/QUICK_START.md](docs/QUICK_START.md) for detailed setup instructions.
 
@@ -188,10 +188,10 @@ docker compose up -d
 
 ```bash
 # API health check
-curl http://localhost:8000/api/system/health
+curl http://localhost:8100/api/system/health
 
 # Open the web dashboard
-open http://localhost:3000
+open http://localhost:3100
 ```
 
 ### Stop

@@ -6,7 +6,7 @@
       "args": ["-m", "mcp_server.server"],
       "cwd": "/Users/mriechers/Developer/cardigan-v4",
       "env": {
-        "EDITORIAL_API_URL": "http://localhost:8000"
+        "EDITORIAL_API_URL": "http://localhost:8100"
       }
     }
   }
