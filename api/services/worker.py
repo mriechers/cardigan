@@ -528,7 +528,7 @@ Extract any name or spelling corrections that should be added to the glossary. S
                 continue
             # Parse "CORRECTION: wrong_form -> correct_form | context"
             try:
-                correction_part = line[len("CORRECTION:"):].strip()
+                correction_part = line[len("CORRECTION:") :].strip()
                 if " -> " not in correction_part:
                     continue
                 forms, _, context = correction_part.partition("|")
@@ -1540,8 +1540,12 @@ Extract any name or spelling corrections that should be added to the glossary. S
                     data=EventData(
                         phase=phase_name,
                         backend=backend,
-                        extra={"tier": current_tier, "tier_label": tier_label, "attempt": attempts + 1,
-                               "model": model_override},
+                        extra={
+                            "tier": current_tier,
+                            "tier_label": tier_label,
+                            "attempt": attempts + 1,
+                            "model": model_override,
+                        },
                     ),
                 )
             )
