@@ -662,7 +662,7 @@ async def get_cost_efficiency(
             next_label = tier_labels[next_tier] if next_tier < len(tier_labels) else f"tier-{next_tier}"
             recommendation = (
                 f"Escalated {escalation_rate:.0f}% of runs. "
-                f"Wasted {formatCost(waste)} on failed attempts over {days} days. "
+                f"Wasted {format_cost(waste)} on failed attempts over {days} days. "
                 f"Consider upgrading base tier to {next_label}."
             )
             suggested_tier = next_tier
@@ -691,7 +691,7 @@ async def get_cost_efficiency(
     )
 
 
-def formatCost(cost: float) -> str:
+def format_cost(cost: float) -> str:
     """Format a cost value for display in recommendations."""
     if cost < 0.01:
         return f"${cost:.4f}"

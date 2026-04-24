@@ -1308,23 +1308,23 @@ class JobWorker:
         # Check if tier is being forced (e.g., by manager escalation)
         forced_tier = context.get("_force_tier")
 
-        # Job-level tier override from queue time (lower priority than FORCE_BIG_BRAIN_PHASES)
+        # Job-level tier override from queue time
         job_tier_override = context.get("tier_override")
 
-        # Force big-brain tier for QA phases (manager) — highest priority, cannot be overridden
+        # Priority: FORCE_BIG_BRAIN_PHASES > forced_tier (manager) > job_tier_override (user) > auto
         if phase_name in self.FORCE_BIG_BRAIN_PHASES:
             initial_tier = 2  # big-brain tier
             initial_tier_reason = f"{phase_name} phase always uses big-brain tier for quality oversight"
+        elif forced_tier is not None:
+            initial_tier = forced_tier
+            initial_tier_reason = f"Forced tier {forced_tier} by manager escalation"
         elif job_tier_override is not None:
-            # Job-level override set at queue time; applies to all non-FORCE_BIG_BRAIN phases
+            # Job-level override set at queue time; applies to all non-forced phases
             routing_config = self.llm.config.get("routing", {})
             _tier_labels = routing_config.get("tier_labels", ["cheapskate", "default", "big-brain"])
             _label = _tier_labels[job_tier_override] if job_tier_override < len(_tier_labels) else f"tier-{job_tier_override}"
             initial_tier = job_tier_override
             initial_tier_reason = f"Job-level tier override: {_label}"
-        elif forced_tier is not None:
-            initial_tier = forced_tier
-            initial_tier_reason = f"Forced tier {forced_tier} by manager escalation"
         else:
             # Get initial tier based on context (duration thresholds)
             initial_tier, initial_tier_reason = self.llm.get_tier_for_phase_with_reason(phase_name, context)

@@ -89,8 +89,7 @@ class JobCreate(BaseModel):
     tier_override: Optional[int] = Field(
         None,
         ge=0,
-        le=3,
-        description="Force all phases to use this tier (0=cheapskate, 1=default, 2=big-brain, 3=pinned)",
+        description="Force all phases to use this tier (0=cheapskate, 1=default, 2=big-brain). Validated against config at runtime.",
     )
 
 
