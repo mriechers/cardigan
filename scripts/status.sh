@@ -79,32 +79,32 @@ echo ""
 echo "Connectivity:"
 
 # Test localhost API
-echo -n "  localhost:8000:           "
-if curl -s --connect-timeout 2 http://localhost:8000/api/system/health > /dev/null 2>&1; then
+echo -n "  localhost:8100:           "
+if curl -s --connect-timeout 2 http://localhost:8100/api/system/health > /dev/null 2>&1; then
     echo "✅ Responding"
 else
     echo "❌ Not responding"
 fi
 
 # Test metadata.neighborhood API
-echo -n "  metadata.neighborhood:8000: "
-if curl -s --connect-timeout 2 http://metadata.neighborhood:8000/api/system/health > /dev/null 2>&1; then
+echo -n "  metadata.neighborhood:8100: "
+if curl -s --connect-timeout 2 http://metadata.neighborhood:8100/api/system/health > /dev/null 2>&1; then
     echo "✅ Responding"
 else
     echo "❌ Not responding"
 fi
 
 # Test localhost frontend
-echo -n "  localhost:3000:           "
-if curl -s --connect-timeout 2 http://localhost:3000 > /dev/null 2>&1; then
+echo -n "  localhost:3100:           "
+if curl -s --connect-timeout 2 http://localhost:3100 > /dev/null 2>&1; then
     echo "✅ Responding"
 else
     echo "❌ Not responding"
 fi
 
 # Test metadata.neighborhood frontend
-echo -n "  metadata.neighborhood:3000: "
-if curl -s --connect-timeout 2 http://metadata.neighborhood:3000 > /dev/null 2>&1; then
+echo -n "  metadata.neighborhood:3100: "
+if curl -s --connect-timeout 2 http://metadata.neighborhood:3100 > /dev/null 2>&1; then
     echo "✅ Responding"
 else
     echo "❌ Not responding"
@@ -113,8 +113,8 @@ fi
 # Queue stats
 echo ""
 echo "Queue Status:"
-if curl -s http://localhost:8000/api/queue/stats > /dev/null 2>&1; then
-    QUEUE=$(curl -s http://localhost:8000/api/queue/stats 2>/dev/null)
+if curl -s http://localhost:8100/api/queue/stats > /dev/null 2>&1; then
+    QUEUE=$(curl -s http://localhost:8100/api/queue/stats 2>/dev/null)
     PENDING=$(echo "$QUEUE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('pending',0))" 2>/dev/null || echo "?")
     IN_PROGRESS=$(echo "$QUEUE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('in_progress',0))" 2>/dev/null || echo "?")
     COMPLETED=$(echo "$QUEUE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('completed',0))" 2>/dev/null || echo "?")

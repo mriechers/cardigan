@@ -133,14 +133,18 @@ See `feature_list.json` for task queue and `planning/claude-progress.txt` for st
 
 ## Airtable Integration (CRITICAL)
 
-**READ-ONLY ACCESS ONLY.** AI agents must NEVER write to Airtable.
+**CONTROLLED WRITE ACCESS via `commit_sst_edits` only.**
 
-- Agents may READ Airtable data (SST records, metadata) to inform their work
-- Agents must NEVER use `create_record`, `update_records`, `delete_records`, or any write operations
-- All Airtable edits are made manually by the human user
-- If a user asks an agent to update Airtable, the agent must decline and explain this policy
+- Agents may READ Airtable data freely (SST records, metadata)
+- Agents may WRITE to Airtable **only** through the `commit_sst_edits` MCP tool, which enforces:
+  - **Field allowlist**: Only Release Title, Short Description, Long Description, Keywords, and social media fields are writable
+  - **Optimistic concurrency**: Re-fetches current values before writing; refuses if fields changed since proposal
+  - **Audit trail**: Posts a comment on the Airtable record with old/new values and reasons
+  - **User confirmation**: Agent must show `review_proposed_edits` output and get user approval before committing
+- Direct Airtable API writes outside the `propose → review → commit` workflow are prohibited
+- Agents must NEVER use `create_record`, `delete_records`, or write to non-allowlisted fields
 
-This constraint exists for data integrity and safety. The Airtable Single Source of Truth (SST) is the canonical metadata store for all PBS Wisconsin projects and must only be modified by authorized humans.
+The workflow: `propose_sst_edit` (stage) → `review_proposed_edits` (preview) → user confirms → `commit_sst_edits` (write)
 
 ### Quick Reference
 

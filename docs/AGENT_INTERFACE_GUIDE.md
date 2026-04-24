@@ -4,26 +4,26 @@ This guide is a single, high-signal entry point for agents that need to interfac
 
 ## Quick Start (Minimal Integration)
 1) Check health
-- `GET http://localhost:8000/`
-- `GET http://localhost:8000/api/system/health`
+- `GET http://localhost:8100/`
+- `GET http://localhost:8100/api/system/health`
 
 2) List queue
-- `GET http://localhost:8000/api/queue/?status=pending&page=1&page_size=50`
+- `GET http://localhost:8100/api/queue/?status=pending&page=1&page_size=50`
 
 3) Fetch job details and outputs
-- `GET http://localhost:8000/api/jobs/{job_id}`
-- `GET http://localhost:8000/api/jobs/{job_id}/outputs/manifest.json`
-- `GET http://localhost:8000/api/jobs/{job_id}/outputs/analyst_output.md`
+- `GET http://localhost:8100/api/jobs/{job_id}`
+- `GET http://localhost:8100/api/jobs/{job_id}/outputs/manifest.json`
+- `GET http://localhost:8100/api/jobs/{job_id}/outputs/analyst_output.md`
 
 4) WebSocket for live updates
-- Connect: `ws://localhost:8000/api/ws/jobs`
+- Connect: `ws://localhost:8100/api/ws/jobs`
 - Listen for `job_*` and `stats_updated` events
 
 5) MCP (Cardigan) for copy editing
 - Use MCP tools to list, load, and save project artifacts without touching the API directly.
 
 ## API Interface (HTTP)
-Base URL: `http://localhost:8000`
+Base URL: `http://localhost:8100`
 
 ### Health
 - `GET /` -> `{ "status": "ok", "version": "3.0.0-dev" }`

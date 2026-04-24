@@ -100,6 +100,12 @@
       "timeout": 300,
       "cost_per_project": 0.0,
       "enabled": true
+    },
+    "openrouter-direct": {
+      "type": "openrouter",
+      "endpoint": "https://openrouter.ai/api/v1/chat/completions",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "timeout": 300
     }
   },
   "auto_select": {
@@ -120,25 +126,24 @@
     "heartbeat_interval_seconds": 60
   },
   "phase_backends": {
-    "analyst": "openrouter",
-    "formatter": "openrouter-claude",
+    "analyst": "openrouter-cheapskate",
+    "formatter": "openrouter",
     "seo": "openrouter-cheapskate",
     "manager": "openrouter-big-brain",
-    "copy_editor": "openrouter",
+    "timestamp": "openrouter",
+    "copy_editor": "openrouter-big-brain",
     "chat": "openrouter"
   },
   "routing": {
     "tiers": [
       "openrouter-cheapskate",
       "openrouter",
-      "openrouter-big-brain",
-      "openrouter-claude"
+      "openrouter-big-brain"
     ],
     "tier_labels": [
-      "Claude Haiku",
-      "Claude Sonnet",
-      "Claude Opus",
-      "Claude (pinned)"
+      "economy",
+      "standard",
+      "premium"
     ],
     "duration_thresholds": [
       {
@@ -156,9 +161,10 @@
     ],
     "phase_base_tiers": {
       "analyst": 0,
-      "formatter": 3,
+      "formatter": 1,
       "seo": 0,
       "manager": 2,
+      "timestamp": 1,
       "copy_editor": 2,
       "chat": 1
     },
@@ -183,6 +189,47 @@
       "max_parallel": 3,
       "min_tier": 1
     }
+  },
+  "available_models": [
+    {
+      "id": "anthropic/claude-haiku-4-5-20251001",
+      "name": "Claude Haiku 4.5",
+      "provider": "Anthropic",
+      "tier": 0
+    },
+    {
+      "id": "google/gemini-2.0-flash-001",
+      "name": "Gemini 2.0 Flash",
+      "provider": "Google",
+      "tier": 0
+    },
+    {
+      "id": "anthropic/claude-sonnet-4-5-20250514",
+      "name": "Claude Sonnet 4.5",
+      "provider": "Anthropic",
+      "tier": 1
+    },
+    {
+      "id": "google/gemini-2.5-pro-preview",
+      "name": "Gemini 2.5 Pro",
+      "provider": "Google",
+      "tier": 1
+    },
+    {
+      "id": "anthropic/claude-opus-4-5-20250514",
+      "name": "Claude Opus 4.5",
+      "provider": "Anthropic",
+      "tier": 2
+    }
+  ],
+  "phase_models": {
+    "analyst": "anthropic/claude-haiku-4-5-20251001",
+    "formatter": "anthropic/claude-sonnet-4-5-20250514",
+    "seo": "anthropic/claude-haiku-4-5-20251001",
+    "manager": "anthropic/claude-opus-4-5-20250514",
+    "timestamp": "anthropic/claude-sonnet-4-5-20250514",
+    "copy_editor": "anthropic/claude-opus-4-5-20250514",
+    "chat": "anthropic/claude-sonnet-4-5-20250514"
   },
   "openrouter_presets": {
     "ai-editorial-assistant": {

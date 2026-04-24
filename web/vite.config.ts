@@ -15,7 +15,7 @@ export default defineConfig({
     allowedHosts: ['metadata.neighborhood', 'localhost', 'cardigan.bymarkriechers.com'],
     proxy: {
       '/api': {
-        target: 'http://metadata.neighborhood:8000',
+        target: 'http://metadata.neighborhood:8100',
         changeOrigin: true,
         ws: true,
       },

@@ -11,7 +11,7 @@
 - Airtable: READ-ONLY SST lookups (requires `AIRTABLE_API_KEY`)
 
 ## Environment
-- `EDITORIAL_API_URL` (default `http://localhost:8000`)
+- `EDITORIAL_API_URL` (default `http://localhost:8100`)
 - `EDITORIAL_OUTPUT_DIR` (default `OUTPUT`)
 - `EDITORIAL_TRANSCRIPTS_DIR` (default `transcripts`)
 - `AIRTABLE_API_KEY` (optional; required for SST lookups)

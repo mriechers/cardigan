@@ -46,6 +46,13 @@ export const AGENT_INFO: AgentInfo[] = [
       'Reviews all automated outputs for quality before completion. Audits cheaper model work and flags issues. Always runs on big-brain tier for oversight.',
   },
   {
+    id: 'timestamp',
+    name: 'Timestamp',
+    icon: '⏱️',
+    description:
+      'Generates chapter timestamps with descriptive labels for long-form content. Uses SRT captions to identify topic transitions and segment boundaries.',
+  },
+  {
     id: 'copy_editor',
     name: 'Copy Editor',
     icon: '✏️',

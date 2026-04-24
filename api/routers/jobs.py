@@ -199,9 +199,9 @@ async def retry_job(job_id: int):
     for phase in phases:
         if phase.tier is not None and phase.tier > max_previous_tier:
             max_previous_tier = phase.tier
-    escalated_tier = min(max_previous_tier + 1, 3)  # Cap at tier 3 (Claude pinned)
+    escalated_tier = min(max_previous_tier + 1, 2)  # Cap at tier 2 (Claude Opus)
 
-    tier_labels = {0: "Claude Haiku", 1: "Claude Sonnet", 2: "Claude Opus", 3: "Claude (pinned)"}
+    tier_labels = {0: "economy", 1: "standard", 2: "premium"}
     logger.info(
         "Retry with escalation",
         extra={
@@ -325,6 +325,179 @@ async def cancel_job(job_id: int):
     job_update = JobUpdate(status=JobStatus.cancelled)
     updated_job = await update_job(job_id, job_update)
 
+    return updated_job
+
+
+TRANSCRIPT_REPLACEABLE_STATES = {
+    JobStatus.failed,
+    JobStatus.paused,
+    JobStatus.pending,
+    JobStatus.completed,
+    JobStatus.cancelled,
+}
+
+TRANSCRIPTS_DIR = Path(os.getenv("TRANSCRIPTS_DIR", "transcripts"))
+ALLOWED_EXTENSIONS = {".txt", ".srt"}
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+
+
+@router.post("/{job_id}/replace-transcript", response_model=Job)
+async def replace_transcript(
+    job_id: int,
+    file: UploadFile = File(..., description="Replacement transcript file (.txt or .srt)"),
+):
+    """Replace a job's transcript file and reset for reprocessing.
+
+    Accepts a new transcript upload for an existing job. The old transcript
+    is kept (not deleted). The job is reset to pending with all phases cleared.
+
+    Useful when a corrected transcript is available and you want to reprocess
+    without creating a new job.
+
+    Args:
+        job_id: Job ID to update
+        file: New transcript file
+
+    Returns:
+        Updated job record reset to pending
+
+    Raises:
+        HTTPException: 404 if job not found, 400 if invalid file or state
+    """
+    job = await get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    if job.status not in TRANSCRIPT_REPLACEABLE_STATES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot replace transcript for job in status '{job.status}'. "
+            f"Only {', '.join(s.value for s in TRANSCRIPT_REPLACEABLE_STATES)} jobs are eligible.",
+        )
+
+    # Validate file
+    file_ext = Path(file.filename or "").suffix.lower()
+    if file_ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type. Allowed: {', '.join(ALLOWED_EXTENSIONS)}",
+        )
+
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large. Maximum size: {MAX_FILE_SIZE / 1024 / 1024:.0f} MB",
+        )
+
+    # Save new transcript
+    TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+    file_path = TRANSCRIPTS_DIR / (file.filename or "")
+    file_path.write_bytes(content)
+    logger.info(f"Job {job_id}: Saved replacement transcript: {file_path}")
+
+    # Recalculate metadata
+    from api.routers.queue import calculate_transcript_metrics_from_file
+    from api.services.utils import extract_media_id
+
+    new_media_id = extract_media_id(file.filename or "")
+    duration_minutes, word_count = calculate_transcript_metrics_from_file(file.filename or "")
+
+    old_transcript = job.transcript_file
+    old_media_id = job.media_id
+
+    # Reset all phases to pending
+    from api.models.job import JobPhase
+
+    reset_phases = []
+    for phase in job.phases or []:
+        phase_dict = phase.model_dump()
+        # Archive previous run if it had results
+        if phase_dict.get("model") or phase_dict.get("tier") is not None:
+            prev_run = {
+                "tier": phase_dict.get("tier"),
+                "tier_label": phase_dict.get("tier_label"),
+                "model": phase_dict.get("model"),
+                "cost": phase_dict.get("cost", 0),
+                "tokens": phase_dict.get("tokens", 0),
+                "completed_at": phase_dict.get("completed_at"),
+            }
+            previous_runs = phase_dict.get("previous_runs") or []
+            previous_runs.append(prev_run)
+            phase_dict["previous_runs"] = previous_runs
+
+        phase_dict["status"] = "pending"
+        phase_dict["completed_at"] = None
+        phase_dict["error_message"] = None
+        phase_dict["cost"] = 0
+        phase_dict["tokens"] = 0
+        phase_dict["model"] = None
+        phase_dict["tier"] = None
+        phase_dict["tier_label"] = None
+        phase_dict["tier_reason"] = None
+        phase_dict["attempts"] = None
+        phase_dict["metadata"] = None
+        reset_phases.append(phase_dict)
+
+    # Build update
+    project_name = Path(file.filename or "").stem
+    for suffix in ["_ForClaude", "_forclaude", "_transcript"]:
+        if project_name.endswith(suffix):
+            project_name = project_name[: -len(suffix)]
+
+    job_update = JobUpdate(
+        status=JobStatus.pending,
+        transcript_file=file.filename or "",
+        project_name=project_name,
+        project_path=f"/data/output/{project_name}",
+        media_id=new_media_id,
+        duration_minutes=duration_minutes,
+        word_count=word_count,
+        error_message="",
+        current_phase=None,
+        actual_cost=0.0,
+        phases=[JobPhase(**p) for p in reset_phases],
+    )
+    updated_job = await update_job(job_id, job_update)
+
+    # Re-link Airtable if media_id changed
+    if new_media_id and new_media_id != old_media_id:
+        try:
+            airtable_client = AirtableClient()
+            record = await airtable_client.search_sst_by_media_id(new_media_id)
+            if record:
+                record_id = record["id"]
+                airtable_url = airtable_client.get_sst_url(record_id)
+                link_update = JobUpdate(
+                    airtable_record_id=record_id,
+                    airtable_url=airtable_url,
+                )
+                updated_job = await update_job(job_id, link_update)
+                logger.info(f"Job {job_id}: Re-linked to SST record {record_id}")
+        except Exception as e:
+            logger.warning(f"Job {job_id}: Airtable re-link failed - {e}")
+
+    # Log the replacement event
+    await log_event(
+        EventCreate(
+            job_id=job_id,
+            event_type=EventType.user_action,
+            data=EventData(
+                extra={
+                    "action": "transcript_replaced",
+                    "old_transcript": old_transcript,
+                    "new_transcript": file.filename,
+                    "old_media_id": old_media_id,
+                    "new_media_id": new_media_id,
+                }
+            ),
+        )
+    )
+
+    logger.info(
+        f"Job {job_id}: Transcript replaced {old_transcript} -> {file.filename}, "
+        f"media_id {old_media_id} -> {new_media_id}"
+    )
     return updated_job
 
 
@@ -634,7 +807,7 @@ class PhaseRetryRequest(BaseModel):
     tier: Optional[int] = Field(
         None,
         ge=0,
-        description="Force specific tier index (0=Claude Haiku, 1=Claude Sonnet, 2=Claude Opus, 3=Claude pinned). "
+        description="Force specific tier index (0=economy, 1=standard, 2=premium). "
         "If not specified, auto-escalates from the tier previously used.",
     )
     feedback: Optional[str] = Field(
@@ -778,7 +951,7 @@ async def retry_phase(
 
     background_tasks.add_task(run_retry)
 
-    tier_labels = {0: "Claude Haiku", 1: "Claude Sonnet", 2: "Claude Opus", 3: "Claude (pinned)"}
+    tier_labels = {0: "economy", 1: "standard", 2: "premium"}
     escalation_note = " (auto-escalated)" if tier is None else ""
     tier_msg = f" at tier {effective_tier} ({tier_labels.get(effective_tier, '?')}){escalation_note}"
     return PhaseRetryResponse(

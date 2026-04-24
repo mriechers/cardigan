@@ -15,7 +15,7 @@ from pathlib import Path
 import httpx
 
 TRANSCRIPTS_DIR = Path("transcripts")
-API_BASE = "http://localhost:8000"
+API_BASE = "http://localhost:8100"
 POLL_INTERVAL = 5  # seconds
 
 

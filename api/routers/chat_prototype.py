@@ -74,10 +74,13 @@ async def send_chat_message(request: ChatRequest) -> ChatResponse:
         llm = get_llm_client()
         chat_config = llm.config.get("chat", {})
 
+        # Route through the tier system (respects phase_base_tiers setting)
+        backend = llm.get_backend_for_phase("chat")
+
         # Make the LLM call
         response = await llm.chat(
             messages=messages,
-            backend=chat_config.get("backend", "openrouter"),
+            backend=backend,
             phase="chat",  # For Langfuse tracing
             max_tokens=chat_config.get("max_tokens", 4096),
             temperature=chat_config.get("temperature", 0.7),
