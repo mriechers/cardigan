@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { usePreferences, TextSize } from '../context/PreferencesContext'
 import { AGENT_INFO } from '../constants/agents'
+import ModelStatsWidget from '../components/ModelStatsWidget'
+import PhaseStatsWidget from '../components/PhaseStatsWidget'
 
 interface DurationThreshold {
   max_minutes: number | null
@@ -1151,6 +1153,12 @@ export default function Settings() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Model Usage Stats (from Langfuse) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <ModelStatsWidget />
+        <PhaseStatsWidget />
       </div>
     </div>
   )
