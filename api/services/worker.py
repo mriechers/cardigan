@@ -505,11 +505,14 @@ Extract any name or spelling corrections that should be added to the glossary. S
         # Use cheapest tier for this lightweight extraction
         backend = self.llm.get_backend_for_phase("analyst", {}, tier_override=0)
 
-        response = await self.llm.generate(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
+        response = await self.llm.chat(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
             backend=backend,
-            timeout=30,
+            job_id=job_id,
+            phase="glossary_extraction",
         )
 
         content = response.content.strip()
@@ -2113,8 +2116,14 @@ REASON: [Brief explanation - 1-2 sentences]
             logger.info("Running recovery analysis", extra={"job_id": job_id, "backend": backend_name})
 
             # Run the analysis
-            response = await self.llm.generate(
-                system_prompt=system_prompt, user_prompt=decision_prompt, backend=backend_name, timeout=120
+            response = await self.llm.chat(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": decision_prompt},
+                ],
+                backend=backend_name,
+                job_id=job_id,
+                phase="recovery_analysis",
             )
 
             # Parse the decision - search full content for action pattern
