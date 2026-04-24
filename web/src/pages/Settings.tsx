@@ -482,42 +482,40 @@ export default function Settings() {
                   const styles = TIER_STYLES[tierColor]
 
                   return (
-                    <div key={agent.id} className="flex items-center justify-between p-4 bg-gray-900 rounded-lg">
-                      <div className="flex items-center space-x-4">
-                        <div className="w-10 h-10 rounded-full bg-gray-800 flex items-center justify-center text-lg">
-                          {agent.icon}
+                    <div key={agent.id} className="p-4 bg-gray-900 rounded-lg space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-3">
+                          <span className="text-lg">{agent.icon}</span>
+                          <span className="font-medium text-white">{agent.name}</span>
                         </div>
-                        <div>
-                          <div className="font-medium text-white">{agent.name}</div>
-                          <div className="text-sm text-gray-400">{agent.description}</div>
-                        </div>
-                      </div>
 
-                      <label htmlFor={`model-${agent.id}`} className="sr-only">
-                        Model for {agent.name}
-                      </label>
-                      <select
-                        id={`model-${agent.id}`}
-                        value={currentModel}
-                        onChange={(e) => handlePhaseModelChange(agent.id, e.target.value)}
-                        className={`px-3 py-2 rounded-md border text-sm font-medium min-w-[220px] ${styles.bg} ${styles.border} ${styles.text}`}
-                        aria-label={`Select model for ${agent.name} agent`}
-                      >
-                        {[0, 1, 2].map(tier => {
-                          const tierModels = models.filter(m => m.tier === tier)
-                          if (tierModels.length === 0) return null
-                          const tierLabel = routing?.tier_labels?.[tier] || `tier ${tier}`
-                          return (
-                            <optgroup key={tier} label={tierLabel}>
-                              {tierModels.map(m => (
-                                <option key={m.id} value={m.id} className="bg-gray-800 text-white">
-                                  {m.name} ({m.provider})
-                                </option>
-                              ))}
-                            </optgroup>
-                          )
-                        })}
-                      </select>
+                        <label htmlFor={`model-${agent.id}`} className="sr-only">
+                          Model for {agent.name}
+                        </label>
+                        <select
+                          id={`model-${agent.id}`}
+                          value={currentModel}
+                          onChange={(e) => handlePhaseModelChange(agent.id, e.target.value)}
+                          className={`px-3 py-2 rounded-md border text-sm font-medium ${styles.bg} ${styles.border} ${styles.text}`}
+                          aria-label={`Select model for ${agent.name} agent`}
+                        >
+                          {[0, 1, 2].map(tier => {
+                            const tierModels = models.filter(m => m.tier === tier)
+                            if (tierModels.length === 0) return null
+                            const tierLabel = routing?.tier_labels?.[tier] || `tier ${tier}`
+                            return (
+                              <optgroup key={tier} label={tierLabel}>
+                                {tierModels.map(m => (
+                                  <option key={m.id} value={m.id} className="bg-gray-800 text-white">
+                                    {m.name}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )
+                          })}
+                        </select>
+                      </div>
+                      <p className="text-sm text-gray-500 pl-8 max-w-prose">{agent.description}</p>
                     </div>
                   )
                 })}
