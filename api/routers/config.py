@@ -326,6 +326,11 @@ async def update_phase_models(update: PhaseModelsUpdate):
     config["phase_models"] = phase_models
     _save_config(config)
 
+    # Reload the live LLM client so changes take effect immediately
+    from api.services.llm import get_llm_client
+
+    get_llm_client().reload_config()
+
     return await get_phase_models()
 
 

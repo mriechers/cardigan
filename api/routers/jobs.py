@@ -807,7 +807,7 @@ class PhaseRetryRequest(BaseModel):
     tier: Optional[int] = Field(
         None,
         ge=0,
-        description="Force specific tier index (0=Claude Haiku, 1=Claude Sonnet, 2=Claude Opus). "
+        description="Force specific tier index (0=economy, 1=standard, 2=premium). "
         "If not specified, auto-escalates from the tier previously used.",
     )
     feedback: Optional[str] = Field(
