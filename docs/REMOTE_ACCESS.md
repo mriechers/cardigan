@@ -14,11 +14,11 @@ Cloudflare Edge (TLS termination + Access auth)
   |
   | cloudflared tunnel (encrypted QUIC, outbound from your Mac)
   v
-localhost:3000 (Vite dev server)
+localhost:3100 (Vite dev server)
   |
   | proxy /api/* and /api/ws/*
   v
-localhost:8000 (FastAPI / uvicorn)
+localhost:8100 (FastAPI / uvicorn)
 ```
 
 No ports are opened on your machine. The tunnel is outbound-only.

@@ -16,7 +16,7 @@ Tools provided:
 - Load project context (transcript, brainstorming, revisions, SST metadata)
 - Save revisions and keyword reports with auto-versioning
 
-Connects to the FastAPI backend on localhost:8000 for job metadata,
+Connects to the FastAPI backend on localhost:8100 for job metadata,
 and reads/writes directly to the OUTPUT folder for content.
 
 NOTE: Airtable writes are restricted to allowlisted fields via the
@@ -66,7 +66,7 @@ if _keychain_path.exists():
         pass  # Keychain module not available (e.g., CI/Docker)
 
 # Configuration
-API_BASE_URL = os.getenv("EDITORIAL_API_URL", "http://localhost:8000")
+API_BASE_URL = os.getenv("EDITORIAL_API_URL", "http://localhost:8100")
 OUTPUT_DIR = Path(os.getenv("EDITORIAL_OUTPUT_DIR", Path(__file__).parent.parent / "OUTPUT"))
 TRANSCRIPTS_DIR = Path(os.getenv("EDITORIAL_TRANSCRIPTS_DIR", Path(__file__).parent.parent / "transcripts"))
 

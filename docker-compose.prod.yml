@@ -2,21 +2,26 @@
 # Usage: docker compose -f docker-compose.prod.yml up -d
 #
 # Requires:
-#   - .env file with API keys and CARDIGAN_API_KEY
+#   - Secret files in ./secrets/ (one value per file, no trailing newline)
 #   - docker login to ghcr.io (see Task 7 in the plan)
+#   - Optional: CORS_ORIGINS and DOCKER_CONFIG in .env for non-secret config
 
 services:
   api:
     image: ghcr.io/mriechers/cardigan-api:latest
     ports:
-      - "8000:8000"
-    env_file: .env
+      - "8100:8000"
     environment:
       - DATABASE_PATH=/data/db/dashboard.db
       - OUTPUT_DIR=/data/output
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000}
-      - CARDIGAN_API_KEY=${CARDIGAN_API_KEY}
       - TRANSCRIPTS_DIR=/data/transcripts
+      - LANGFUSE_BASE_URL=https://us.cloud.langfuse.com
+    secrets:
+      - openrouter_api_key
+      - airtable_api_key
+      - langfuse_public_key
+      - langfuse_secret_key
     volumes:
       - db-data:/data/db
       - output-data:/data/output
@@ -33,12 +38,16 @@ services:
 
   worker:
     image: ghcr.io/mriechers/cardigan-worker:latest
-    env_file: .env
     environment:
       - DATABASE_PATH=/data/db/dashboard.db
       - OUTPUT_DIR=/data/output
-      - CARDIGAN_API_KEY=${CARDIGAN_API_KEY}
       - TRANSCRIPTS_DIR=/data/transcripts
+      - LANGFUSE_BASE_URL=https://us.cloud.langfuse.com
+    secrets:
+      - openrouter_api_key
+      - airtable_api_key
+      - langfuse_public_key
+      - langfuse_secret_key
     volumes:
       - db-data:/data/db
       - output-data:/data/output
@@ -53,9 +62,9 @@ services:
   web:
     image: ghcr.io/mriechers/cardigan-web:latest
     ports:
-      - "3000:3000"
+      - "3100:3000"
     environment:
-      - CARDIGAN_API_KEY=${CARDIGAN_API_KEY}
+      - CARDIGAN_API_KEY=${CARDIGAN_API_KEY:-}
     depends_on:
       - api
     labels:
@@ -66,14 +75,18 @@ services:
     image: ghcr.io/mriechers/cardigan-api:latest
     command: ["python", "-m", "mcp_server.server"]
     ports:
-      - "8080:8080"
-    env_file: .env
+      - "8180:8080"
     environment:
       - MCP_TRANSPORT=http
       - EDITORIAL_API_URL=http://api:8000
       - DATABASE_PATH=/data/db/dashboard.db
-      - OUTPUT_DIR=/data/output
-      - TRANSCRIPTS_DIR=/data/transcripts
+      - EDITORIAL_OUTPUT_DIR=/data/output
+      - EDITORIAL_TRANSCRIPTS_DIR=/data/transcripts
+    secrets:
+      - openrouter_api_key
+      - airtable_api_key
+      - langfuse_public_key
+      - langfuse_secret_key
     volumes:
       - db-data:/data/db
       - output-data:/data/output
@@ -114,6 +127,16 @@ services:
       # Only update containers with the watchtower.enable=true label
       - WATCHTOWER_LABEL_ENABLE=true
     restart: unless-stopped
+
+secrets:
+  openrouter_api_key:
+    file: ./secrets/openrouter_api_key
+  airtable_api_key:
+    file: ./secrets/airtable_api_key
+  langfuse_public_key:
+    file: ./secrets/langfuse_public_key
+  langfuse_secret_key:
+    file: ./secrets/langfuse_secret_key
 
 volumes:
   db-data:
