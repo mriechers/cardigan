@@ -16,51 +16,49 @@ from api.services.langfuse_client import (
     _get_langfuse_credential,
     get_langfuse_client,
 )
+from api.services.secrets import get_secret
 
 # ---------------------------------------------------------------------------
-# Credential loading
+# Credential loading (now tests api.services.secrets.get_secret)
 # ---------------------------------------------------------------------------
 
 
 class TestCredentialLoading:
-    """Tests for _get_langfuse_credential() priority order."""
+    """Tests for get_secret() priority order (Docker file → env → Keychain)."""
 
     @patch.dict("os.environ", {"LANGFUSE_PUBLIC_KEY": "pk-from-env"}, clear=False)
     def test_env_takes_priority_over_keychain(self):
         """Environment variable should be returned even if Keychain has a value."""
-        with patch("api.services.langfuse_client._keychain_get_secret", lambda k: "pk-from-keychain"):
-            result = _get_langfuse_credential("LANGFUSE_PUBLIC_KEY")
+        with patch("api.services.secrets._keychain_get_secret", lambda k: "pk-from-keychain"):
+            result = get_secret("LANGFUSE_PUBLIC_KEY")
         assert result == "pk-from-env"
 
-    @patch("api.services.langfuse_client.load_dotenv")
     @patch.dict("os.environ", {}, clear=True)
-    def test_falls_back_to_keychain(self, _mock_dotenv):
+    def test_falls_back_to_keychain(self):
         """When env var is missing, should fall back to Keychain."""
-        with patch("api.services.langfuse_client._keychain_get_secret", lambda k: "pk-from-keychain"):
-            result = _get_langfuse_credential("LANGFUSE_PUBLIC_KEY")
+        with patch("api.services.secrets._keychain_get_secret", lambda k: "pk-from-keychain"):
+            result = get_secret("LANGFUSE_PUBLIC_KEY")
         assert result == "pk-from-keychain"
 
-    @patch("api.services.langfuse_client.load_dotenv")
     @patch.dict("os.environ", {}, clear=True)
-    def test_returns_none_when_nothing_available(self, _mock_dotenv):
+    def test_returns_none_when_nothing_available(self):
         """When neither env nor Keychain has the key, return None."""
-        with patch("api.services.langfuse_client._keychain_get_secret", lambda k: None):
-            result = _get_langfuse_credential("LANGFUSE_PUBLIC_KEY")
+        with patch("api.services.secrets._keychain_get_secret", lambda k: None):
+            result = get_secret("LANGFUSE_PUBLIC_KEY")
         assert result is None
 
-    @patch("api.services.langfuse_client.load_dotenv")
     @patch.dict("os.environ", {}, clear=True)
-    def test_returns_none_when_keychain_unavailable(self, _mock_dotenv):
+    def test_returns_none_when_keychain_unavailable(self):
         """When Keychain module isn't loaded, return None for missing env var."""
-        with patch("api.services.langfuse_client._keychain_get_secret", None):
-            result = _get_langfuse_credential("LANGFUSE_PUBLIC_KEY")
+        with patch("api.services.secrets._keychain_get_secret", None):
+            result = get_secret("LANGFUSE_PUBLIC_KEY")
         assert result is None
 
     @patch.dict("os.environ", {"MY_KEY": "env-val"}, clear=False)
     def test_env_value_returned_when_keychain_unavailable(self):
         """Env var returned even when Keychain module isn't loaded."""
-        with patch("api.services.langfuse_client._keychain_get_secret", None):
-            result = _get_langfuse_credential("MY_KEY")
+        with patch("api.services.secrets._keychain_get_secret", None):
+            result = get_secret("MY_KEY")
         assert result == "env-val"
 
 

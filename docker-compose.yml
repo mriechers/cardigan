@@ -4,18 +4,23 @@ services:
       context: .
       dockerfile: Dockerfile.api
     ports:
-      - "8000:8000"
-    env_file: .env
+      - "8100:8000"
     environment:
       - DATABASE_PATH=/data/db/dashboard.db
       - OUTPUT_DIR=/data/output
-      - CORS_ORIGINS=http://localhost:3001
-      - CARDIGAN_API_KEY=${CARDIGAN_API_KEY}
+      - CORS_ORIGINS=http://localhost:3100
       - TRANSCRIPTS_DIR=/data/transcripts
+      - LANGFUSE_BASE_URL=https://us.cloud.langfuse.com
+    secrets:
+      - openrouter_api_key
+      - airtable_api_key
+      - langfuse_public_key
+      - langfuse_secret_key
     volumes:
       - db-data:/data/db
       - output-data:/data/output
-      - transcript-data:/data/transcripts
+      - ./transcripts:/data/transcripts
+      - ./config:/app/config
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/system/health')"]
       interval: 30s
@@ -27,19 +32,24 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.worker
-    env_file: .env
     environment:
       - DATABASE_PATH=/data/db/dashboard.db
       - OUTPUT_DIR=/data/output
-      - CARDIGAN_API_KEY=${CARDIGAN_API_KEY}
       - TRANSCRIPTS_DIR=/data/transcripts
+      - LANGFUSE_BASE_URL=https://us.cloud.langfuse.com
+    secrets:
+      - openrouter_api_key
+      - airtable_api_key
+      - langfuse_public_key
+      - langfuse_secret_key
     volumes:
       # NOTE: SQLite shared via volume between api + worker. WAL mode handles
       # concurrent access adequately for low-throughput workloads. Consider
       # PostgreSQL if write contention becomes an issue.
       - db-data:/data/db
       - output-data:/data/output
-      - transcript-data:/data/transcripts
+      - ./transcripts:/data/transcripts
+      - ./config:/app/config
     depends_on:
       api:
         condition: service_healthy
@@ -49,9 +59,9 @@ services:
       context: .
       dockerfile: Dockerfile.web
     ports:
-      - "3001:3000"
+      - "3100:3000"
     environment:
-      - CARDIGAN_API_KEY=${CARDIGAN_API_KEY}
+      - CARDIGAN_API_KEY=${CARDIGAN_API_KEY:-}
     depends_on:
       - api
 
@@ -61,18 +71,22 @@ services:
       dockerfile: Dockerfile.api
     command: ["python", "-m", "mcp_server.server"]
     ports:
-      - "8080:8080"
-    env_file: .env
+      - "8180:8080"
     environment:
       - MCP_TRANSPORT=http
       - EDITORIAL_API_URL=http://api:8000
       - DATABASE_PATH=/data/db/dashboard.db
-      - OUTPUT_DIR=/data/output
-      - TRANSCRIPTS_DIR=/data/transcripts
+      - EDITORIAL_OUTPUT_DIR=/data/output
+      - EDITORIAL_TRANSCRIPTS_DIR=/data/transcripts
+    secrets:
+      - openrouter_api_key
+      - airtable_api_key
+      - langfuse_public_key
+      - langfuse_secret_key
     volumes:
       - db-data:/data/db
       - output-data:/data/output
-      - transcript-data:/data/transcripts
+      - ./transcripts:/data/transcripts
     depends_on:
       api:
         condition: service_healthy
@@ -94,7 +108,16 @@ services:
       - tunnel
     restart: unless-stopped
 
+secrets:
+  openrouter_api_key:
+    file: ./secrets/openrouter_api_key
+  airtable_api_key:
+    file: ./secrets/airtable_api_key
+  langfuse_public_key:
+    file: ./secrets/langfuse_public_key
+  langfuse_secret_key:
+    file: ./secrets/langfuse_secret_key
+
 volumes:
   db-data:
   output-data:
-  transcript-data:

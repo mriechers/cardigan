@@ -13,55 +13,19 @@ Langfuse credentials are loaded from:
 2. macOS Keychain via keychain_secrets (fallback)
 """
 
-import importlib.util
 import json
 import os
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import httpx
-from dotenv import load_dotenv
 
 from api.services.logging import get_logger
+from api.services.secrets import get_secret as _get_langfuse_credential
 
 logger = get_logger(__name__)
-
-# Optionally load keychain_secrets without sys.path manipulation.
-# The module lives in ~/Developer/the-lodge/scripts/ and may not be
-# on sys.path, so we probe the known location with importlib.util.
-_keychain_get_secret = None
-_keychain_path = Path.home() / "Developer/the-lodge/scripts/keychain_secrets.py"
-if _keychain_path.exists():
-    try:
-        spec = importlib.util.spec_from_file_location("keychain_secrets", _keychain_path)
-        if spec and spec.loader:
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            _keychain_get_secret = getattr(mod, "get_secret", None)
-    except Exception:
-        pass
-
-
-def _get_langfuse_credential(key: str) -> Optional[str]:
-    """Get Langfuse credential from environment first, Keychain as fallback."""
-    # Ensure .env is loaded (idempotent — safe to call multiple times)
-    load_dotenv()
-
-    # Prefer environment / .env (contains current, correct keys)
-    value = os.environ.get(key)
-    if value:
-        return value
-
-    # Fall back to Keychain
-    if _keychain_get_secret:
-        value = _keychain_get_secret(key)
-        if value:
-            return value
-
-    return None
 
 
 @dataclass
