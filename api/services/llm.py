@@ -72,6 +72,8 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
     "anthropic/claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.00},
     "anthropic/claude-sonnet-4-5-20250514": {"input": 3.00, "output": 15.00},
     "anthropic/claude-opus-4-5-20250514": {"input": 15.00, "output": 75.00},
+    "anthropic/claude-sonnet-4.6": {"input": 3.00, "output": 15.00},
+    "anthropic/claude-opus-4.6": {"input": 5.00, "output": 25.00},
     "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
     "gemini-1.5-flash-8b": {"input": 0.0375, "output": 0.15},
     "gemini-1.5-pro": {"input": 1.25, "output": 5.00},
