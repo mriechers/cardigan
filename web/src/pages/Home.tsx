@@ -117,54 +117,54 @@ export default function Home() {
 
         {/* Recent Jobs */}
         <div className="bg-surface-800 rounded-lg border border-surface-700">
-        <div className="px-4 py-3 border-b border-surface-700 flex items-center justify-between">
-          <h2 className="text-lg font-medium text-white">Recent Jobs</h2>
-          <Link
-            to="/queue"
-            className="text-sm text-pbs-400 hover:text-pbs-300"
-          >
-            View all
-          </Link>
-        </div>
-        <div className="divide-y divide-surface-700">
-          {recentJobs.length === 0 ? (
-            <div className="px-6 py-12 text-center">
-              <p className="text-surface-300 font-medium">No jobs in the queue</p>
-              <p className="text-surface-400 text-sm mt-1">
-                Upload transcripts from the <Link to="/ready" className="text-pbs-400 hover:text-pbs-300">Ready for Work</Link> page to get started.
-              </p>
-            </div>
-          ) : (
-            recentJobs.map((job) => (
-              <Link
-                key={job.id}
-                to={`/jobs/${job.id}`}
-                className="block px-4 py-3 hover:bg-surface-800 transition-colors"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                      job.status === 'completed' ? 'bg-status-completed' :
-                      job.status === 'in_progress' ? 'bg-status-processing animate-pulse' :
-                      job.status === 'failed' ? 'bg-status-failed' :
-                      job.status === 'pending' ? 'bg-status-pending' :
-                      'bg-surface-500'
-                    }`} />
-                    <div>
-                      <div className="text-white font-medium">{job.project_name}</div>
-                      <div className="text-sm text-surface-400" title={formatTimestamp(job.queued_at + 'Z')}>
-                        {formatRelativeTime(job.queued_at + 'Z')}
+          <div className="px-4 py-3 border-b border-surface-700 flex items-center justify-between">
+            <h2 className="text-lg font-medium text-white">Recent Jobs</h2>
+            <Link
+              to="/queue"
+              className="text-sm text-pbs-400 hover:text-pbs-300"
+            >
+              View all
+            </Link>
+          </div>
+          <div className="divide-y divide-surface-700">
+            {recentJobs.length === 0 ? (
+              <div className="px-6 py-12 text-center">
+                <p className="text-surface-300 font-medium">No jobs in the queue</p>
+                <p className="text-surface-400 text-sm mt-1">
+                  Upload transcripts from the <Link to="/ready" className="text-pbs-400 hover:text-pbs-300">Ready for Work</Link> page to get started.
+                </p>
+              </div>
+            ) : (
+              recentJobs.map((job) => (
+                <Link
+                  key={job.id}
+                  to={`/jobs/${job.id}`}
+                  className="block px-4 py-3 hover:bg-surface-800 transition-colors"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                        job.status === 'completed' ? 'bg-status-completed' :
+                        job.status === 'in_progress' ? 'bg-status-processing animate-pulse' :
+                        job.status === 'failed' ? 'bg-status-failed' :
+                        job.status === 'pending' ? 'bg-status-pending' :
+                        'bg-surface-500'
+                      }`} />
+                      <div>
+                        <div className="text-white font-medium">{job.project_name}</div>
+                        <div className="text-sm text-surface-400" title={formatTimestamp(job.queued_at + 'Z')}>
+                          {formatRelativeTime(job.queued_at + 'Z')}
+                        </div>
                       </div>
                     </div>
+                    <span className={`text-sm font-medium ${getStatusTextColor(job.status)}`}>
+                      {job.status}
+                    </span>
                   </div>
-                  <span className={`text-sm font-medium ${getStatusTextColor(job.status)}`}>
-                    {job.status}
-                  </span>
-                </div>
-              </Link>
-            ))
-          )}
-        </div>
+                </Link>
+              ))
+            )}
+          </div>
         </div>
       </div>
     </div>
