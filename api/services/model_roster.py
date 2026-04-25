@@ -5,6 +5,7 @@ patterns, and classifies each into a cost tier. Falls back to the static
 `available_models` list in llm-config.json when OpenRouter is unreachable.
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -22,6 +23,7 @@ CONFIG_PATH = Path("config/llm-config.json")
 
 # Cache: list of model dicts + expiry timestamp
 _cache: Dict[str, Any] = {"models": None, "expires": 0.0}
+_cache_lock = asyncio.Lock()
 CACHE_TTL_SECONDS = 3600  # 1 hour
 
 
@@ -106,7 +108,7 @@ def _static_fallback(config: dict) -> List[dict]:
     return config.get("available_models", [])
 
 
-async def get_available_models(force_refresh: bool = False) -> List[dict]:
+async def get_available_models() -> List[dict]:
     """Get the current model roster, using cache when fresh.
 
     Priority:
@@ -116,34 +118,40 @@ async def get_available_models(force_refresh: bool = False) -> List[dict]:
     """
     now = time.time()
 
-    # Return cache if fresh and not forcing
-    if not force_refresh and _cache["models"] is not None and now < _cache["expires"]:
+    # Fast path: return cache if fresh
+    if _cache["models"] is not None and now < _cache["expires"]:
         return _cache["models"]
 
-    config = _load_config()
-    families = _get_family_patterns(config)
+    async with _cache_lock:
+        # Re-check after acquiring lock (another coroutine may have refreshed)
+        now = time.time()
+        if _cache["models"] is not None and now < _cache["expires"]:
+            return _cache["models"]
 
-    # If no families configured, use static list
-    if not families:
-        logger.info("No model_families configured, using static available_models")
-        return _static_fallback(config)
+        config = _load_config()
+        families = _get_family_patterns(config)
 
-    # Try dynamic fetch
-    raw_models = await fetch_openrouter_models()
-    if raw_models is None:
-        logger.info("OpenRouter fetch failed, using static fallback")
-        return _static_fallback(config)
+        # If no families configured, use static list
+        if not families:
+            logger.info("No model_families configured, using static available_models")
+            return _static_fallback(config)
 
-    classified = _classify_models(raw_models, families)
-    if not classified:
-        logger.warning("No models matched family patterns, using static fallback")
-        return _static_fallback(config)
+        # Try dynamic fetch
+        raw_models = await fetch_openrouter_models()
+        if raw_models is None:
+            logger.info("OpenRouter fetch failed, using static fallback")
+            return _static_fallback(config)
 
-    # Update cache
-    _cache["models"] = classified
-    _cache["expires"] = now + CACHE_TTL_SECONDS
-    logger.info("Refreshed model roster: %d models from OpenRouter", len(classified))
-    return classified
+        classified = _classify_models(raw_models, families)
+        if not classified:
+            logger.warning("No models matched family patterns, using static fallback")
+            return _static_fallback(config)
+
+        # Update cache
+        _cache["models"] = classified
+        _cache["expires"] = now + CACHE_TTL_SECONDS
+        logger.info("Refreshed model roster: %d models from OpenRouter", len(classified))
+        return classified
 
 
 def invalidate_cache() -> None:
