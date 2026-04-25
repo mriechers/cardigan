@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from api.services.llm import get_llm_client
+from api.services.model_roster import get_available_models, invalidate_cache
 
 router = APIRouter(prefix="/config", tags=["config"])
 
@@ -280,13 +281,13 @@ class PhaseModelsUpdate(BaseModel):
 
 
 DEFAULT_PHASE_MODELS = {
-    "analyst": "anthropic/claude-haiku-4-5-20251001",
-    "formatter": "anthropic/claude-sonnet-4-5-20250514",
-    "seo": "anthropic/claude-haiku-4-5-20251001",
-    "manager": "anthropic/claude-opus-4-5-20250514",
-    "timestamp": "anthropic/claude-sonnet-4-5-20250514",
-    "copy_editor": "anthropic/claude-opus-4-5-20250514",
-    "chat": "anthropic/claude-sonnet-4-5-20250514",
+    "analyst": "anthropic/claude-haiku-4.5",
+    "formatter": "anthropic/claude-sonnet-4.6",
+    "seo": "anthropic/claude-haiku-4.5",
+    "manager": "anthropic/claude-opus-4.6",
+    "timestamp": "anthropic/claude-sonnet-4.6",
+    "copy_editor": "anthropic/claude-opus-4.6",
+    "chat": "anthropic/claude-sonnet-4.6",
 }
 
 
@@ -296,9 +297,12 @@ async def get_phase_models():
 
     Returns which specific model is assigned to each agent phase,
     plus the full list of available models for the Settings UI.
+    Models are fetched dynamically from OpenRouter when model_families
+    is configured, falling back to the static available_models list.
     """
     config = _load_config()
-    available_models = [AvailableModel(**m) for m in config.get("available_models", [])]
+    models_data = await get_available_models()
+    available_models = [AvailableModel(**m) for m in models_data]
     phase_models = config.get("phase_models", DEFAULT_PHASE_MODELS)
     available_phases = ["analyst", "formatter", "seo", "manager", "timestamp", "copy_editor", "chat"]
 
@@ -318,7 +322,8 @@ async def update_phase_models(update: PhaseModelsUpdate):
     """
     config = _load_config()
     valid_phases = {"analyst", "formatter", "seo", "manager", "timestamp", "copy_editor", "chat"}
-    available_model_ids = {m["id"] for m in config.get("available_models", [])}
+    models_data = await get_available_models()
+    available_model_ids = {m["id"] for m in models_data}
 
     for phase, model_id in update.phase_models.items():
         if phase not in valid_phases:
@@ -339,6 +344,17 @@ async def update_phase_models(update: PhaseModelsUpdate):
 
     get_llm_client().reload_config()
 
+    return await get_phase_models()
+
+
+@router.post("/models/refresh", response_model=PhaseModelsResponse)
+async def refresh_model_roster():
+    """Force-refresh the dynamic model roster from OpenRouter.
+
+    Clears the cache and fetches a fresh model list. Useful when new
+    models have been released and you want them immediately.
+    """
+    invalidate_cache()
     return await get_phase_models()
 
 

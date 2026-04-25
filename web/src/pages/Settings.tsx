@@ -111,6 +111,7 @@ export default function Settings() {
   const [pendingPhaseModels, setPendingPhaseModels] = useState<Record<string, string> | null>(null)
   const [pendingWorker, setPendingWorker] = useState<Partial<WorkerConfig> | null>(null)
   const [pendingIngest, setPendingIngest] = useState<Partial<IngestConfigUpdate> | null>(null)
+  const [refreshingModels, setRefreshingModels] = useState(false)
 
   const fetchConfig = useCallback(async () => {
     try {
@@ -152,8 +153,8 @@ export default function Settings() {
       if (response.ok) {
         setIngestConfig(await response.json())
       }
-    } catch (err) {
-      console.error('Failed to fetch ingest config:', err)
+    } catch {
+      // Ingest config may not be available — non-critical
     }
   }, [])
 
@@ -164,8 +165,8 @@ export default function Settings() {
         const data = await res.json()
         setSystemStatus(data)
       }
-    } catch (err) {
-      console.error('Failed to fetch system status:', err)
+    } catch {
+      // System status may not be available — non-critical
     }
   }, [])
 
@@ -183,6 +184,23 @@ export default function Settings() {
     const interval = setInterval(fetchSystemStatus, 5000)
     return () => clearInterval(interval)
   }, [activeTab, fetchSystemStatus])
+
+  const handleRefreshModels = async () => {
+    try {
+      setRefreshingModels(true)
+      const res = await fetch('/api/config/models/refresh', { method: 'POST' })
+      if (!res.ok) throw new Error('Failed to refresh')
+      const data = await res.json()
+      setPhaseModels(data)
+      setSuccess('Model roster refreshed from OpenRouter')
+      setTimeout(() => setSuccess(null), 3000)
+    } catch {
+      setError('Could not refresh models from OpenRouter')
+      setTimeout(() => setError(null), 5000)
+    } finally {
+      setRefreshingModels(false)
+    }
+  }
 
   const handlePhaseModelChange = (phase: string, modelId: string) => {
     const current = pendingPhaseModels || phaseModels?.phase_models || {}
@@ -307,6 +325,7 @@ export default function Settings() {
 
   const handleReset = () => {
     setPendingRouting(null)
+    setPendingPhaseModels(null)
     setPendingWorker(null)
     setPendingIngest(null)
   }
@@ -439,6 +458,7 @@ export default function Settings() {
           {TABS.map((tab) => (
             <button
               key={tab.id}
+              id={`tab-${tab.id}`}
               role="tab"
               aria-selected={activeTab === tab.id}
               aria-controls={`panel-${tab.id}`}
@@ -457,13 +477,24 @@ export default function Settings() {
       </div>
 
       {/* Tab Panels */}
-      <div role="tabpanel" id={`panel-${activeTab}`} aria-labelledby={activeTab}>
+      <div role="tabpanel" id={`panel-${activeTab}`} aria-labelledby={`tab-${activeTab}`}>
         {/* AGENTS TAB */}
         {activeTab === 'agents' && (
           <div className="space-y-6">
             {/* Agent Model Assignment */}
             <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
-              <h2 className="text-lg font-semibold text-white mb-4">Agent Models</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-white">Agent Models</h2>
+                <button
+                  onClick={handleRefreshModels}
+                  disabled={refreshingModels}
+                  className="text-xs text-gray-400 hover:text-white transition-colors disabled:opacity-50"
+                  title="Fetch latest models from OpenRouter"
+                  aria-label="Refresh available models from OpenRouter"
+                >
+                  {refreshingModels ? 'Refreshing…' : '↻ Refresh models'}
+                </button>
+              </div>
               <p className="text-sm text-gray-400 mb-6">
                 Choose which model runs each agent. On failure, the system escalates
                 to the next tier automatically.
@@ -482,42 +513,40 @@ export default function Settings() {
                   const styles = TIER_STYLES[tierColor]
 
                   return (
-                    <div key={agent.id} className="flex items-center justify-between p-4 bg-gray-900 rounded-lg">
-                      <div className="flex items-center space-x-4">
-                        <div className="w-10 h-10 rounded-full bg-gray-800 flex items-center justify-center text-lg">
-                          {agent.icon}
+                    <div key={agent.id} className="p-4 bg-gray-900 rounded-lg space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-3">
+                          <span className="text-lg">{agent.icon}</span>
+                          <span className="font-medium text-white">{agent.name}</span>
                         </div>
-                        <div>
-                          <div className="font-medium text-white">{agent.name}</div>
-                          <div className="text-sm text-gray-400">{agent.description}</div>
-                        </div>
-                      </div>
 
-                      <label htmlFor={`model-${agent.id}`} className="sr-only">
-                        Model for {agent.name}
-                      </label>
-                      <select
-                        id={`model-${agent.id}`}
-                        value={currentModel}
-                        onChange={(e) => handlePhaseModelChange(agent.id, e.target.value)}
-                        className={`px-3 py-2 rounded-md border text-sm font-medium min-w-[220px] ${styles.bg} ${styles.border} ${styles.text}`}
-                        aria-label={`Select model for ${agent.name} agent`}
-                      >
-                        {[0, 1, 2].map(tier => {
-                          const tierModels = models.filter(m => m.tier === tier)
-                          if (tierModels.length === 0) return null
-                          const tierLabel = routing?.tier_labels?.[tier] || `tier ${tier}`
-                          return (
-                            <optgroup key={tier} label={tierLabel}>
-                              {tierModels.map(m => (
-                                <option key={m.id} value={m.id} className="bg-gray-800 text-white">
-                                  {m.name} ({m.provider})
-                                </option>
-                              ))}
-                            </optgroup>
-                          )
-                        })}
-                      </select>
+                        <label htmlFor={`model-${agent.id}`} className="sr-only">
+                          Model for {agent.name}
+                        </label>
+                        <select
+                          id={`model-${agent.id}`}
+                          value={currentModel}
+                          onChange={(e) => handlePhaseModelChange(agent.id, e.target.value)}
+                          className={`pl-3 pr-8 py-2 rounded-md border text-sm font-medium ${styles.bg} ${styles.border} ${styles.text}`}
+                          aria-label={`Select model for ${agent.name} agent`}
+                        >
+                          {[0, 1, 2].map(tier => {
+                            const tierModels = models.filter(m => m.tier === tier)
+                            if (tierModels.length === 0) return null
+                            const tierLabel = routing?.tier_labels?.[tier] || `tier ${tier}`
+                            return (
+                              <optgroup key={tier} label={tierLabel}>
+                                {tierModels.map(m => (
+                                  <option key={m.id} value={m.id} className="bg-gray-800 text-white">
+                                    {m.name}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )
+                          })}
+                        </select>
+                      </div>
+                      <p className="text-sm text-gray-400 pl-8 max-w-prose">{agent.description}</p>
                     </div>
                   )
                 })}
@@ -525,15 +554,21 @@ export default function Settings() {
 
               <div className="mt-4 flex items-center space-x-6 text-xs text-gray-400">
                 {routing?.tier_labels?.map((label, idx) => {
-                  const color = getTierColor(idx)
+                  const dotColor = ['bg-green-500', 'bg-cyan-500', 'bg-purple-500'][idx] || 'bg-gray-500'
                   return (
                     <div key={idx} className="flex items-center space-x-2">
-                      <span className="w-2 h-2 rounded-full" style={{backgroundColor: color === 'green' ? '#22c55e' : color === 'cyan' ? '#06b6d4' : '#a855f7'}} />
+                      <span className={`w-2 h-2 rounded-full ${dotColor}`} />
                       <span>{label}</span>
                     </div>
                   )
                 })}
               </div>
+            </div>
+
+            {/* Model Usage Stats (from Langfuse) */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <ModelStatsWidget />
+              <PhaseStatsWidget />
             </div>
           </div>
         )}
@@ -874,35 +909,32 @@ export default function Settings() {
             </div>
 
             {/* Link to Ready for Work page */}
-            <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+            <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-lg font-medium text-white">Ready for Work</h3>
-                  <p className="text-sm text-gray-400 mt-1">
-                    View and queue transcripts from the ingest server with search and filtering.
+                  <h3 className="text-sm font-medium text-white">Ready for Work</h3>
+                  <p className="text-xs text-gray-400 mt-1">
+                    View and queue transcripts from the ingest server.
                   </p>
                 </div>
                 <Link
                   to="/ready"
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors font-medium"
+                  className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
                 >
-                  Open Ready for Work
+                  Open →
                 </Link>
               </div>
             </div>
 
             {/* Screengrab Info */}
-            <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+            <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
               <div className="flex items-start space-x-3">
-                <div className="flex-shrink-0 w-10 h-10 bg-purple-500/20 rounded-full flex items-center justify-center">
-                  <svg className="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                  </svg>
-                </div>
+                <span className="text-purple-400 text-xl">🖼️</span>
                 <div>
-                  <h3 className="text-lg font-medium text-white">Screengrab Attachments</h3>
-                  <p className="text-sm text-gray-400 mt-1">
-                    Screengrabs are now attached contextually from the job detail page. When a completed job has matching screengrabs available, you'll see an "Attach Screengrabs" button in the job header.
+                  <h3 className="text-sm font-medium text-white">Screengrab Attachments</h3>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Screengrabs are attached from the job detail page. Completed jobs with matching
+                    screengrabs show an "Attach Screengrabs" button in the job header.
                   </p>
                 </div>
               </div>
@@ -1153,12 +1185,6 @@ export default function Settings() {
             </div>
           </div>
         )}
-      </div>
-
-      {/* Model Usage Stats (from Langfuse) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ModelStatsWidget />
-        <PhaseStatsWidget />
       </div>
     </div>
   )
