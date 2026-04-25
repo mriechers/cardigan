@@ -153,8 +153,8 @@ export default function Settings() {
       if (response.ok) {
         setIngestConfig(await response.json())
       }
-    } catch (err) {
-      console.error('Failed to fetch ingest config:', err)
+    } catch {
+      // Ingest config may not be available — non-critical
     }
   }, [])
 
@@ -165,8 +165,8 @@ export default function Settings() {
         const data = await res.json()
         setSystemStatus(data)
       }
-    } catch (err) {
-      console.error('Failed to fetch system status:', err)
+    } catch {
+      // System status may not be available — non-critical
     }
   }, [])
 
@@ -325,6 +325,7 @@ export default function Settings() {
 
   const handleReset = () => {
     setPendingRouting(null)
+    setPendingPhaseModels(null)
     setPendingWorker(null)
     setPendingIngest(null)
   }
@@ -457,6 +458,7 @@ export default function Settings() {
           {TABS.map((tab) => (
             <button
               key={tab.id}
+              id={`tab-${tab.id}`}
               role="tab"
               aria-selected={activeTab === tab.id}
               aria-controls={`panel-${tab.id}`}
@@ -475,7 +477,7 @@ export default function Settings() {
       </div>
 
       {/* Tab Panels */}
-      <div role="tabpanel" id={`panel-${activeTab}`} aria-labelledby={activeTab}>
+      <div role="tabpanel" id={`panel-${activeTab}`} aria-labelledby={`tab-${activeTab}`}>
         {/* AGENTS TAB */}
         {activeTab === 'agents' && (
           <div className="space-y-6">
@@ -487,9 +489,10 @@ export default function Settings() {
                   onClick={handleRefreshModels}
                   disabled={refreshingModels}
                   className="text-xs text-gray-400 hover:text-white transition-colors disabled:opacity-50"
-                  title="Refresh available models from OpenRouter"
+                  title="Fetch latest models from OpenRouter"
+                  aria-label="Refresh available models from OpenRouter"
                 >
-                  {refreshingModels ? 'Refreshing…' : 'Refresh models'}
+                  {refreshingModels ? 'Refreshing…' : '↻ Refresh models'}
                 </button>
               </div>
               <p className="text-sm text-gray-400 mb-6">
@@ -543,7 +546,7 @@ export default function Settings() {
                           })}
                         </select>
                       </div>
-                      <p className="text-sm text-gray-500 pl-8 max-w-prose">{agent.description}</p>
+                      <p className="text-sm text-gray-400 pl-8 max-w-prose">{agent.description}</p>
                     </div>
                   )
                 })}
@@ -551,15 +554,21 @@ export default function Settings() {
 
               <div className="mt-4 flex items-center space-x-6 text-xs text-gray-400">
                 {routing?.tier_labels?.map((label, idx) => {
-                  const color = getTierColor(idx)
+                  const dotColor = ['bg-green-500', 'bg-cyan-500', 'bg-purple-500'][idx] || 'bg-gray-500'
                   return (
                     <div key={idx} className="flex items-center space-x-2">
-                      <span className="w-2 h-2 rounded-full" style={{backgroundColor: color === 'green' ? '#22c55e' : color === 'cyan' ? '#06b6d4' : '#a855f7'}} />
+                      <span className={`w-2 h-2 rounded-full ${dotColor}`} />
                       <span>{label}</span>
                     </div>
                   )
                 })}
               </div>
+            </div>
+
+            {/* Model Usage Stats (from Langfuse) */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <ModelStatsWidget />
+              <PhaseStatsWidget />
             </div>
           </div>
         )}
@@ -900,35 +909,32 @@ export default function Settings() {
             </div>
 
             {/* Link to Ready for Work page */}
-            <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+            <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-lg font-medium text-white">Ready for Work</h3>
-                  <p className="text-sm text-gray-400 mt-1">
-                    View and queue transcripts from the ingest server with search and filtering.
+                  <h3 className="text-sm font-medium text-white">Ready for Work</h3>
+                  <p className="text-xs text-gray-400 mt-1">
+                    View and queue transcripts from the ingest server.
                   </p>
                 </div>
                 <Link
                   to="/ready"
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors font-medium"
+                  className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
                 >
-                  Open Ready for Work
+                  Open →
                 </Link>
               </div>
             </div>
 
             {/* Screengrab Info */}
-            <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+            <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
               <div className="flex items-start space-x-3">
-                <div className="flex-shrink-0 w-10 h-10 bg-purple-500/20 rounded-full flex items-center justify-center">
-                  <svg className="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                  </svg>
-                </div>
+                <span className="text-purple-400 text-xl">🖼️</span>
                 <div>
-                  <h3 className="text-lg font-medium text-white">Screengrab Attachments</h3>
-                  <p className="text-sm text-gray-400 mt-1">
-                    Screengrabs are now attached contextually from the job detail page. When a completed job has matching screengrabs available, you'll see an "Attach Screengrabs" button in the job header.
+                  <h3 className="text-sm font-medium text-white">Screengrab Attachments</h3>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Screengrabs are attached from the job detail page. Completed jobs with matching
+                    screengrabs show an "Attach Screengrabs" button in the job header.
                   </p>
                 </div>
               </div>
@@ -1179,12 +1185,6 @@ export default function Settings() {
             </div>
           </div>
         )}
-      </div>
-
-      {/* Model Usage Stats (from Langfuse) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ModelStatsWidget />
-        <PhaseStatsWidget />
       </div>
     </div>
   )
