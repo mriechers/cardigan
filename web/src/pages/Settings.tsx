@@ -527,7 +527,7 @@ export default function Settings() {
                           id={`model-${agent.id}`}
                           value={currentModel}
                           onChange={(e) => handlePhaseModelChange(agent.id, e.target.value)}
-                          className={`px-3 py-2 rounded-md border text-sm font-medium ${styles.bg} ${styles.border} ${styles.text}`}
+                          className={`pl-3 pr-8 py-2 rounded-md border text-sm font-medium ${styles.bg} ${styles.border} ${styles.text}`}
                           aria-label={`Select model for ${agent.name} agent`}
                         >
                           {[0, 1, 2].map(tier => {
