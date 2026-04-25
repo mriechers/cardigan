@@ -70,9 +70,7 @@ async def fetch_openrouter_models() -> Optional[List[dict]]:
         return None
 
 
-def _classify_models(
-    raw_models: List[dict], families: List[dict]
-) -> List[dict]:
+def _classify_models(raw_models: List[dict], families: List[dict]) -> List[dict]:
     """Filter and classify raw OpenRouter models using family patterns.
 
     Returns a list of dicts matching the AvailableModel schema:
@@ -91,12 +89,14 @@ def _classify_models(
             continue
 
         seen_ids.add(model_id)
-        results.append({
-            "id": model_id,
-            "name": model.get("name", model_id),
-            "provider": family["provider"],
-            "tier": family["tier"],
-        })
+        results.append(
+            {
+                "id": model_id,
+                "name": model.get("name", model_id),
+                "provider": family["provider"],
+                "tier": family["tier"],
+            }
+        )
 
     # Sort by tier, then name
     results.sort(key=lambda m: (m["tier"], m["name"]))
