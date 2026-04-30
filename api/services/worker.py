@@ -2641,7 +2641,7 @@ The editor reviewed the previous timestamp output and provided the following fee
         }
 
         manifest_file = project_path / "manifest.json"
-        manifest_file.write_text(json.dumps(manifest, indent=2))
+        manifest_file.write_text(json.dumps(manifest, indent=2, default=str))
 
 
 # CLI entry point
