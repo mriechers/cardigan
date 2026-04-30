@@ -59,11 +59,4 @@ export const AGENT_INFO: AgentInfo[] = [
     description:
       'Reviews and refines formatted content for clarity, grammar and PBS style guidelines. Ensures broadcast-quality prose while preserving speaker voice.',
   },
-  {
-    id: 'chat',
-    name: 'Chat Editor',
-    icon: '💬',
-    description:
-      'Interactive chat assistant for copy editing with project context. Provides conversational guidance for metadata refinement and content questions.',
-  },
 ]

@@ -6,7 +6,6 @@ import { useFocusTrap } from '../hooks/useFocusTrap'
 import { useToast } from '../components/ui/Toast'
 import { Skeleton } from '../components/ui/Skeleton'
 import { formatRelativeTime, formatTimestamp, formatDuration } from '../utils/formatTime'
-import ChatPanel from '../components/chat/ChatPanel'
 import ScreengrabSlideout from '../components/ScreengrabSlideout'
 import ScreengrabsBox from '../components/ScreengrabsBox'
 
@@ -108,7 +107,6 @@ export default function JobDetail() {
   const [retryModal, setRetryModal] = useState<{ outputKey: string; label: string } | null>(null)
   const [retryFeedback, setRetryFeedback] = useState('')
   const [retryTier, setRetryTier] = useState<string>('')
-  const [showChat, setShowChat] = useState(false)
   const [showScreengrabs, setShowScreengrabs] = useState(false)
   const [hasScreengrabs, setHasScreengrabs] = useState(false)
   const [keywordReports, setKeywordReports] = useState<Array<{ filename: string; version: number; uploaded_at?: string }>>([])
@@ -513,14 +511,6 @@ export default function JobDetail() {
               className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-md text-sm"
             >
               Cancel
-            </button>
-          )}
-          {job.status === 'completed' && (
-            <button
-              onClick={() => setShowChat(!showChat)}
-              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md text-sm"
-            >
-              {showChat ? 'Close Chat' : 'Open Chat'}
             </button>
           )}
           {hasScreengrabs && (
@@ -1087,16 +1077,6 @@ export default function JobDetail() {
               )}
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Chat Panel */}
-      {showChat && job && (
-        <div className="fixed right-0 top-0 h-full w-1/2 min-w-[400px] bg-gray-900 border-l border-gray-700 z-40 shadow-xl">
-          <ChatPanel
-            projectName={job.project_name}
-            onClose={() => setShowChat(false)}
-          />
         </div>
       )}
 
