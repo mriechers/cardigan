@@ -1,6 +1,5 @@
 """Pydantic Models - Sprint 2.1 + Sprint 11.1"""
 
-from api.models.chat import ChatMessage, ChatRequest, ChatResponse
 from api.models.config import ConfigCreate, ConfigItem, ConfigUpdate, ConfigValueType
 from api.models.events import EventCreate, EventData, EventType, SessionEvent
 from api.models.ingest import (
@@ -44,10 +43,6 @@ __all__ = [
     "ConfigCreate",
     "ConfigUpdate",
     "ConfigValueType",
-    # Chat models (Sprint 12.1)
-    "ChatMessage",
-    "ChatRequest",
-    "ChatResponse",
     # Ingest models (Sprint 11.1)
     "FileType",
     "FileStatus",

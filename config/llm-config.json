@@ -1,11 +1,6 @@
 {
   "primary_backend": "openrouter",
   "fallback_backend": "openrouter",
-  "chat": {
-    "backend": "openrouter",
-    "max_tokens": 4096,
-    "temperature": 0.7
-  },
   "backends": {
     "local-ollama": {
       "type": "ollama",
@@ -131,8 +126,7 @@
     "seo": "openrouter-cheapskate",
     "manager": "openrouter-big-brain",
     "timestamp": "openrouter",
-    "copy_editor": "openrouter-big-brain",
-    "chat": "openrouter"
+    "copy_editor": "openrouter-big-brain"
   },
   "routing": {
     "tiers": [
@@ -165,8 +159,7 @@
       "seo": 0,
       "manager": 2,
       "timestamp": 1,
-      "copy_editor": 2,
-      "chat": 1
+      "copy_editor": 2
     },
     "escalation": {
       "enabled": true,
@@ -260,8 +253,7 @@
     "seo": "anthropic/claude-haiku-4.5",
     "manager": "anthropic/claude-opus-4.6",
     "timestamp": "anthropic/claude-sonnet-4.6",
-    "copy_editor": "anthropic/claude-opus-4.6",
-    "chat": "anthropic/claude-sonnet-4.6"
+    "copy_editor": "anthropic/claude-opus-4.6"
   },
   "openrouter_presets": {
     "ai-editorial-assistant": {
