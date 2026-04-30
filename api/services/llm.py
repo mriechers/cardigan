@@ -563,7 +563,6 @@ class LLMClient:
         messages: List[Dict[str, str]],
         backend: Optional[str] = None,
         model: Optional[str] = None,
-        preset: Optional[str] = None,
         job_id: Optional[int] = None,
         phase: Optional[str] = None,
         tier: Optional[int] = None,
@@ -575,8 +574,7 @@ class LLMClient:
         Args:
             messages: List of message dicts with 'role' and 'content'
             backend: Backend to use (default: primary)
-            model: Model override (default: backend's configured model)
-            preset: OpenRouter preset override (default: backend's configured preset)
+            model: Model override (default: phase_models config, then backend model)
             job_id: Job ID for event logging
             phase: Agent phase name for observability (analyst, formatter, etc.)
             tier: Tier index for observability (0=cheapskate, 1=default, 2=big-brain)
@@ -589,14 +587,22 @@ class LLMClient:
         backend_name = backend or self.config.get("primary_backend", "openrouter")
         backend_config = self.get_backend_config(backend_name)
 
-        # Determine model - for OpenRouter with preset, use @preset/name syntax
-        preset_name = preset or backend_config.get("preset")
-        if preset_name and backend_config.get("type") == "openrouter":
-            model_id = f"@preset/{preset_name}"
-            self.active_preset = preset_name
+        # Determine model — priority order:
+        # 1. Explicit model param
+        # 2. phase_models config (per-phase model assignment from Settings UI)
+        # 3. Backend's configured model / fallback_model
+        if model:
+            model_id = model
+        elif phase:
+            phase_models = self.config.get("phase_models", {})
+            model_id = phase_models.get(phase)
         else:
-            model_id = model or backend_config.get("model") or backend_config.get("fallback_model")
-            self.active_preset = None
+            model_id = None
+
+        if not model_id:
+            model_id = backend_config.get("model") or backend_config.get("fallback_model")
+
+        self.active_preset = None
 
         self.active_backend = backend_name
         self.active_model = model_id
