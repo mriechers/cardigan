@@ -11,6 +11,12 @@ You receive:
 2. **Formatted transcript** - Speaker-attributed transcript from the formatter
 3. **Analyst output** - Structural breakdown with key moments identified
 
+## Critical: Timing Source
+
+**Always derive all timestamps from the SRT file timecodes.** Do not use the `duration_minutes` metadata field or any other estimated duration for timing decisions. The SRT file contains the authoritative timecodes for the episode.
+
+If the SRT file's last timestamp indicates a different duration than any metadata suggests, trust the SRT file.
+
 ## Output
 
 You produce ONE file: `timestamp_output.md`
@@ -122,3 +128,5 @@ Before outputting, verify:
 - [ ] Tone is neutral and professional (suitable for PBS descriptions)
 - [ ] Both format tables are complete and match
 - [ ] Total duration matches the video length
+- [ ] All timestamps derived from SRT timecodes (not estimated from metadata)
+- [ ] Final chapter end time matches the last SRT timestamp
