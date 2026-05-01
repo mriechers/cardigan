@@ -140,17 +140,6 @@ class JobWorker:
     # Duration threshold (in minutes) for auto-triggering timestamp phase
     TIMESTAMP_AUTO_THRESHOLD_MINUTES = 10
 
-    # Phases that always run on big-brain tier (not configurable)
-    # - manager: QA oversight requires strong reasoning
-    FORCE_BIG_BRAIN_PHASES = ["manager"]
-
-    # Minimum tier for phases (0=cheapskate, 1=default, 2=big-brain)
-    # These set a floor but can be overridden to higher tiers via UI/config
-    # - timestamp: Chapter detection needs semantic understanding, skip cheapskate
-    MINIMUM_TIER_PHASES = {
-        "timestamp": 1,  # Default tier minimum, big-brain still selectable
-    }
-
     def __init__(self, config: Optional[WorkerConfig] = None):
         self.config = config or WorkerConfig()
         self.llm = get_llm_client()
@@ -264,7 +253,7 @@ class JobWorker:
             self._heartbeat_task.cancel()
 
     async def retry_single_phase(
-        self, job_id: int, phase_name: str, force_tier: Optional[int] = None, feedback: Optional[str] = None
+        self, job_id: int, phase_name: str, feedback: Optional[str] = None
     ) -> Dict[str, Any]:
         """Retry a single phase for a completed job.
 
@@ -274,7 +263,6 @@ class JobWorker:
         Args:
             job_id: The job ID to retry a phase for
             phase_name: The phase to retry (e.g., 'timestamp', 'seo', 'analyst')
-            force_tier: Optional tier override (0=cheapskate, 1=default, 2=big-brain)
             feedback: Optional editorial feedback to guide the retry
 
         Returns:
@@ -337,20 +325,6 @@ class JobWorker:
         sst_context = await self._fetch_sst_context(job_dict)
         if sst_context:
             context["sst_context"] = sst_context
-
-        # Set forced tier in context if specified
-        if force_tier is not None:
-            context["_force_tier"] = force_tier
-            tier_labels = {0: "cheapskate", 1: "default", 2: "big-brain"}
-            logger.info(
-                "Forcing tier override",
-                extra={
-                    "job_id": job_id,
-                    "phase": phase_name,
-                    "tier": force_tier,
-                    "tier_label": tier_labels.get(force_tier, "unknown"),
-                },
-            )
 
         # Inject editorial feedback if provided
         if feedback:
@@ -576,14 +550,6 @@ class JobWorker:
                 "content_type": content_type,  # Expose content_type for prompt building
             }
 
-            # For Shorts, force all phases to cheapskate tier (tier 0)
-            if content_type == "short":
-                context["_force_tier"] = 0
-                logger.info(
-                    "Shorts content: forcing cheapskate tier for all phases",
-                    extra={"job_id": job_id},
-                )
-
             truncation_paused = False
 
             for phase_name in self.PHASES:
@@ -600,22 +566,6 @@ class JobWorker:
                 # Update current phase
                 await update_job_status(job_id, JobStatus.in_progress, current_phase=phase_name)
 
-                # Check if this phase has a forced tier from escalation retry
-                if existing_phase and (existing_phase.get("metadata") or {}).get("forced_tier") is not None:
-                    context["_force_tier"] = existing_phase["metadata"]["forced_tier"]
-                    logger.info(
-                        "Using forced tier from escalation retry",
-                        extra={
-                            "job_id": job_id,
-                            "phase": phase_name,
-                            "forced_tier": existing_phase["metadata"]["forced_tier"],
-                        },
-                    )
-                elif context.get("content_type") != "short":
-                    # Only clear _force_tier if this isn't Shorts content.
-                    # Shorts keep the cheapskate tier override set above.
-                    context.pop("_force_tier", None)
-
                 # Process phase
                 logger.info("Running phase", extra={"job_id": job_id, "phase": phase_name})
                 phase_result = await self._run_phase(job_id, phase_name, context, project_path)
@@ -628,9 +578,6 @@ class JobWorker:
                     "tokens": phase_result.get("tokens", 0),
                     "completed_at": datetime.now(timezone.utc).isoformat(),
                     "model": phase_result.get("model"),
-                    "tier": phase_result.get("tier"),
-                    "tier_label": phase_result.get("tier_label"),
-                    "tier_reason": phase_result.get("tier_reason"),
                     "attempts": phase_result.get("attempts", 1),
                 }
 
@@ -1296,39 +1243,7 @@ class JobWorker:
                         chunking_config=chunking_config,
                     )
 
-        # Get escalation config
-        escalation_config = self.llm.get_escalation_config()
-        escalation_enabled = escalation_config.get("enabled", True)
-        escalate_on_failure = escalation_config.get("on_failure", True)
-        escalate_on_timeout = escalation_config.get("on_timeout", True)
-        timeout_seconds = escalation_config.get("timeout_seconds", 120)
-
-        # Check if tier is being forced (e.g., by manager escalation)
-        forced_tier = context.get("_force_tier")
-
-        # Force big-brain tier for QA phases (manager)
-        if phase_name in self.FORCE_BIG_BRAIN_PHASES:
-            initial_tier = 2  # big-brain tier
-            initial_tier_reason = f"{phase_name} phase always uses big-brain tier for quality oversight"
-        elif forced_tier is not None:
-            initial_tier = forced_tier
-            initial_tier_reason = f"Forced tier {forced_tier} by manager escalation"
-        else:
-            # Get initial tier based on context (duration thresholds)
-            initial_tier, initial_tier_reason = self.llm.get_tier_for_phase_with_reason(phase_name, context)
-
-            # Apply minimum tier floor for certain phases (e.g., timestamp needs at least default)
-            min_tier = self.MINIMUM_TIER_PHASES.get(phase_name)
-            if min_tier is not None and initial_tier < min_tier:
-                initial_tier = min_tier
-                initial_tier_reason = f"{phase_name} phase requires minimum tier {min_tier} (default tier)"
-
-        current_tier = initial_tier
-        tier_reason = initial_tier_reason
-        routing_config = self.llm.config.get("routing", {})
-        tier_labels = routing_config.get("tier_labels", ["cheapskate", "default", "big-brain"])
-
-        # Load prompts once (don't reload on each retry)
+        # Load prompts
         system_prompt = self._load_agent_prompt(phase_name)
         user_message = self._build_phase_prompt(phase_name, context)
         messages = [
@@ -1336,204 +1251,111 @@ class JobWorker:
             {"role": "user", "content": user_message},
         ]
 
-        total_cost = 0.0
-        total_tokens = 0
-        last_error = None
-        attempts = 0
-        max_escalation_attempts = 10  # Safety guard against infinite loops
+        # Get backend for this phase
+        backend = self.llm.get_backend_for_phase(phase_name)
+        logger.info(
+            "Running phase",
+            extra={
+                "job_id": job_id,
+                "phase": phase_name,
+                "backend": backend,
+            },
+        )
 
-        while attempts < max_escalation_attempts:
-            # Get backend for current tier
-            backend = self.llm.get_backend_for_phase(phase_name)
-            tier_label = tier_labels[current_tier] if current_tier < len(tier_labels) else f"tier-{current_tier}"
-            logger.info(
-                "Phase attempting with tier",
-                extra={
-                    "job_id": job_id,
-                    "phase": phase_name,
-                    "tier": current_tier,
-                    "tier_label": tier_label,
-                    "backend": backend,
-                },
-            )
-
-            # Log phase started/retry
-            await log_event(
-                EventCreate(
-                    job_id=job_id,
-                    event_type=EventType.phase_started,
-                    data=EventData(
-                        phase=phase_name,
-                        backend=backend,
-                        extra={"tier": current_tier, "tier_label": tier_label, "attempt": attempts + 1},
-                    ),
-                )
-            )
-
-            try:
-                # Use the backend's configured timeout, falling back to escalation config
-                try:
-                    backend_config = self.llm.get_backend_config(backend)
-                    effective_timeout = backend_config.get("timeout", timeout_seconds)
-                    if not isinstance(effective_timeout, (int, float)):
-                        effective_timeout = timeout_seconds
-                except Exception:
-                    effective_timeout = timeout_seconds
-
-                # Call LLM with timeout (include phase/tier for Langfuse tracing)
-                response: LLMResponse = await asyncio.wait_for(
-                    self.llm.chat(
-                        messages=messages,
-                        backend=backend,
-                        job_id=job_id,
-                        phase=phase_name,
-                        tier=current_tier,
-                        tier_label=tier_label,
-                    ),
-                    timeout=effective_timeout,
-                )
-
-                # Track costs across retries
-                total_cost += response.cost
-                total_tokens += response.total_tokens
-
-                # Save output (preserving previous version if exists)
-                output_file = project_path / f"{phase_name}_output.md"
-                if output_file.exists():
-                    # Preserve previous output with timestamp
-                    prev_content = output_file.read_text()
-                    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-                    prev_file = project_path / f"{phase_name}_output.{timestamp}.prev.md"
-                    prev_file.write_text(prev_content)
-                    logger.info(
-                        "Preserved previous output",
-                        extra={"job_id": job_id, "phase": phase_name, "preserved_as": prev_file.name},
-                    )
-
-                # Add provenance header to output
-                provenance_header = f"<!-- model: {response.model} | tier: {tier_label} | cost: ${response.cost:.4f} | tokens: {response.total_tokens} -->\n"
-                output_file.write_text(provenance_header + response.content)
-
-                # Log phase completed
-                await log_event(
-                    EventCreate(
-                        job_id=job_id,
-                        event_type=EventType.phase_completed,
-                        data=EventData(
-                            phase=phase_name,
-                            cost=response.cost,
-                            tokens=response.total_tokens,
-                            model=response.model,
-                            extra={"tier": current_tier, "tier_label": tier_label, "total_attempts": attempts + 1},
-                        ),
-                    )
-                )
-
-                return {
-                    "success": True,
-                    "output": response.content,
-                    "cost": total_cost,
-                    "tokens": total_tokens,
-                    "model": response.model,
-                    "tier": current_tier,
-                    "tier_label": tier_label,
-                    "tier_reason": tier_reason,
-                    "attempts": attempts + 1,
-                }
-
-            except asyncio.TimeoutError:
-                last_error = f"Timeout after {effective_timeout}s"
-                logger.warning(
-                    "Phase timed out",
-                    extra={
-                        "job_id": job_id,
-                        "phase": phase_name,
-                        "tier_label": tier_label,
-                        "timeout_seconds": effective_timeout,
-                    },
-                )
-
-                # Check if we should escalate on timeout
-                if not escalation_enabled or not escalate_on_timeout:
-                    break
-
-            except Exception as e:
-                last_error = str(e)
-                logger.error(
-                    "Phase failed",
-                    extra={
-                        "job_id": job_id,
-                        "phase": phase_name,
-                        "tier_label": tier_label,
-                        "error": str(e),
-                    },
-                    exc_info=True,
-                )
-
-                # Check if we should escalate on failure
-                if not escalation_enabled or not escalate_on_failure:
-                    break
-
-            attempts += 1
-
-            # Try to escalate to next tier
-            next_tier = self.llm.get_next_tier(current_tier)
-            if next_tier is None:
-                logger.warning(
-                    "Phase failed at max tier, no more escalation possible",
-                    extra={
-                        "job_id": job_id,
-                        "phase": phase_name,
-                        "final_tier": current_tier,
-                    },
-                )
-                break
-
-            # Log escalation
-            next_label = tier_labels[next_tier] if next_tier < len(tier_labels) else f"tier-{next_tier}"
-            logger.info(
-                "Escalating phase to next tier",
-                extra={
-                    "job_id": job_id,
-                    "phase": phase_name,
-                    "from_tier": tier_label,
-                    "to_tier": next_label,
-                    "reason": last_error,
-                },
-            )
-
-            # Update tier reason to reflect escalation
-            tier_reason = f"escalated from {tier_label}: {last_error}"
-
-            await log_event(
-                EventCreate(
-                    job_id=job_id,
-                    event_type=EventType.phase_started,
-                    data=EventData(
-                        phase=phase_name,
-                        extra={
-                            "escalation": True,
-                            "from_tier": current_tier,
-                            "to_tier": next_tier,
-                            "reason": last_error,
-                        },
-                    ),
-                )
-            )
-
-            current_tier = next_tier
-
-        # All attempts failed
+        # Log phase started
         await log_event(
             EventCreate(
                 job_id=job_id,
-                event_type=EventType.phase_failed,
+                event_type=EventType.phase_started,
                 data=EventData(
-                    phase=phase_name, extra={"error": last_error, "attempts": attempts, "final_tier": current_tier}
+                    phase=phase_name,
+                    backend=backend,
                 ),
             )
         )
-        return {"success": False, "error": last_error, "attempts": attempts, "cost": total_cost}
+
+        try:
+            # Get timeout from backend config
+            try:
+                backend_config = self.llm.get_backend_config(backend)
+                effective_timeout = backend_config.get("timeout", 120)
+                if not isinstance(effective_timeout, (int, float)):
+                    effective_timeout = 120
+            except Exception:
+                effective_timeout = 120
+
+            # Call LLM with timeout
+            response: LLMResponse = await asyncio.wait_for(
+                self.llm.chat(
+                    messages=messages,
+                    backend=backend,
+                    job_id=job_id,
+                    phase=phase_name,
+                ),
+                timeout=effective_timeout,
+            )
+
+            # Save output
+            output_file = project_path / f"{phase_name}_output.md"
+            if output_file.exists():
+                prev_content = output_file.read_text()
+                timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                prev_file = project_path / f"{phase_name}_output.{timestamp}.prev.md"
+                prev_file.write_text(prev_content)
+                logger.info(
+                    "Preserved previous output",
+                    extra={"job_id": job_id, "phase": phase_name, "preserved_as": prev_file.name},
+                )
+
+            # Add provenance header
+            provenance_header = f"<!-- model: {response.model} | cost: ${response.cost:.4f} | tokens: {response.total_tokens} -->\n"
+            output_file.write_text(provenance_header + response.content)
+
+            # Log phase completed
+            await log_event(
+                EventCreate(
+                    job_id=job_id,
+                    event_type=EventType.phase_completed,
+                    data=EventData(
+                        phase=phase_name,
+                        cost=response.cost,
+                        tokens=response.total_tokens,
+                        model=response.model,
+                    ),
+                )
+            )
+
+            return {
+                "success": True,
+                "output": response.content,
+                "cost": response.cost,
+                "tokens": response.total_tokens,
+                "model": response.model,
+            }
+
+        except asyncio.TimeoutError:
+            error_msg = f"Phase {phase_name} timed out after {effective_timeout}s"
+            logger.error(error_msg, extra={"job_id": job_id, "phase": phase_name})
+            await log_event(
+                EventCreate(
+                    job_id=job_id,
+                    event_type=EventType.phase_failed,
+                    data=EventData(phase=phase_name, extra={"error": error_msg}),
+                )
+            )
+            return {"success": False, "error": error_msg, "cost": 0, "tokens": 0}
+
+        except Exception as e:
+            error_msg = f"Phase {phase_name} failed: {e}"
+            logger.error(error_msg, extra={"job_id": job_id, "phase": phase_name}, exc_info=True)
+            await log_event(
+                EventCreate(
+                    job_id=job_id,
+                    event_type=EventType.phase_failed,
+                    data=EventData(phase=phase_name, extra={"error": str(e)}),
+                )
+            )
+            return {"success": False, "error": str(e), "cost": 0, "tokens": 0}
 
     async def _run_formatter_chunked(
         self,
@@ -1577,39 +1399,17 @@ class JobWorker:
                 if sst_context.get(key):
                     sst_section += f"**{key.replace('_', ' ').title()}:** {sst_context[key]}\n"
 
-        # Get tier/backend for this phase
-        forced_tier = context.get("_force_tier")
-        if forced_tier is not None:
-            current_tier = forced_tier
-            tier_reason = f"Forced tier {forced_tier} by manager escalation"
-        else:
-            current_tier, tier_reason = self.llm.get_tier_for_phase_with_reason("formatter", context)
-
-        # Apply minimum tier for chunked formatting (cheapskate models condense too aggressively)
-        min_tier = chunking_config.get("min_tier")
-        if min_tier is not None and current_tier < min_tier:
-            logger.info(
-                "Applying chunked formatter min_tier",
-                extra={"from_tier": current_tier, "min_tier": min_tier},
-            )
-            current_tier = min_tier
-            tier_reason = f"Chunked formatter requires minimum tier {min_tier}"
-
-        routing_config = self.llm.config.get("routing", {})
-        tier_labels = routing_config.get("tier_labels", ["cheapskate", "default", "big-brain"])
-        tier_label = tier_labels[current_tier] if current_tier < len(tier_labels) else f"tier-{current_tier}"
+        # Get backend for this phase
         backend = self.llm.get_backend_for_phase("formatter")
 
         # Get timeout from backend config
-        escalation_config = self.llm.get_escalation_config()
-        timeout_seconds = escalation_config.get("timeout_seconds", 120)
         try:
             backend_config = self.llm.get_backend_config(backend)
-            effective_timeout = backend_config.get("timeout", timeout_seconds)
+            effective_timeout = backend_config.get("timeout", 120)
             if not isinstance(effective_timeout, (int, float)):
-                effective_timeout = timeout_seconds
+                effective_timeout = 120
         except Exception:
-            effective_timeout = timeout_seconds
+            effective_timeout = 120
 
         total_chunks = len(chunks)
 
@@ -1669,8 +1469,6 @@ Please format this transcript section:
                         backend=backend,
                         job_id=job_id,
                         phase="formatter",
-                        tier=current_tier,
-                        tier_label=tier_label,
                     ),
                     timeout=effective_timeout,
                 )
@@ -1697,8 +1495,6 @@ Please format this transcript section:
                     phase="formatter",
                     backend=backend,
                     extra={
-                        "tier": current_tier,
-                        "tier_label": tier_label,
                         "chunked": True,
                         "chunk_count": total_chunks,
                     },
@@ -1752,7 +1548,7 @@ Please format this transcript section:
 
             provenance_header = (
                 f"<!-- model: chunked ({total_chunks} chunks) | "
-                f"tier: {tier_label} | backend: {backend} | "
+                f"backend: {backend} | "
                 f"cost: ${total_cost:.4f} | tokens: {total_tokens} -->\n"
             )
             output_file.write_text(provenance_header + merged)
@@ -1766,8 +1562,6 @@ Please format this transcript section:
                         cost=total_cost,
                         tokens=total_tokens,
                         extra={
-                            "tier": current_tier,
-                            "tier_label": tier_label,
                             "chunked": True,
                             "chunk_count": total_chunks,
                         },
@@ -1781,10 +1575,6 @@ Please format this transcript section:
                 "cost": total_cost,
                 "tokens": total_tokens,
                 "model": f"chunked ({total_chunks} chunks via {backend})",
-                "tier": current_tier,
-                "tier_label": tier_label,
-                "tier_reason": tier_reason,
-                "attempts": 1,
             }
 
         except Exception as e:
@@ -1856,10 +1646,8 @@ Please format this transcript section:
                 status = phase.get("status", "unknown")
                 phase_name = phase.get("name", "unknown")
                 phase_error = phase.get("error_message", "")
-                tier_label = phase.get("tier_label", "unknown")
-                tier = phase.get("tier", 0)
                 phases_summary.append(
-                    f"- {phase_name}: {status} (tier {tier}: {tier_label})"
+                    f"- {phase_name}: {status}"
                     f"{f' - Error: {phase_error}' if phase_error else ''}"
                 )
 
@@ -1877,7 +1665,6 @@ Please format this transcript section:
 **Project:** {project_name}
 **Error:** {error}
 **Failed Phase:** {failed_phase.get('name', 'unknown') if failed_phase else 'unknown'}
-**Failed at Tier:** {failed_phase.get('tier', 0) if failed_phase else 0} ({failed_phase.get('tier_label', 'unknown') if failed_phase else 'unknown'})
 
 ## Phase Status:
 {chr(10).join(phases_summary)}
@@ -1890,7 +1677,7 @@ Analyze this failure and decide on the BEST recovery action. You MUST respond wi
 
 **ACTION: RETRY** - The failure is transient (API timeout, rate limit, temporary issue). Re-run at the same tier.
 
-**ACTION: ESCALATE** - The task is too complex for the current tier. Re-run with a more capable model (tier {min((failed_phase.get('tier', 0) if failed_phase else 0) + 1, 2)}).
+**ACTION: ESCALATE** - The task failed and should be re-run (model routing is config-driven).
 
 **ACTION: FIX** - The output has minor issues you can correct. Provide the corrected output after your analysis.
 
@@ -1906,10 +1693,8 @@ REASON: [Brief explanation - 1-2 sentences]
             # Load manager system prompt
             system_prompt = self._load_agent_prompt("manager")
 
-            # Use big-brain tier for recovery decisions
-            routing_config = self.llm.config.get("routing", {})
-            tier_backends = routing_config.get("tiers", ["openrouter-cheapskate", "openrouter", "openrouter-big-brain"])
-            backend_name = tier_backends[2] if len(tier_backends) > 2 else tier_backends[-1]
+            # Use the manager's configured backend for recovery decisions
+            backend_name = self.llm.get_backend_for_phase("manager")
 
             logger.info("Running recovery analysis", extra={"job_id": job_id, "backend": backend_name})
 
@@ -2027,53 +1812,38 @@ REASON: [Brief explanation - 1-2 sentences]
                 return {"recovered": False, "action": action, "reason": "Retry failed", "cost": response.cost}
 
             elif action == "ESCALATE":
-                # Re-run with a higher tier
-                # Validate index is within bounds (phases may have changed via API)
+                # Re-run the failed phase (model routing is now config-driven; no tier override needed)
                 if failed_phase and 0 <= failed_phase_idx < len(phases):
-                    current_tier = failed_phase.get("tier", 0)
-                    next_tier = min(current_tier + 1, 2)
+                    logger.info(
+                        "Manager requested escalation — re-running phase with configured backend",
+                        extra={
+                            "job_id": job_id,
+                            "phase": failed_phase.get("name"),
+                        },
+                    )
 
-                    if next_tier > current_tier:
-                        logger.info(
-                            "Escalating to higher tier",
-                            extra={
-                                "job_id": job_id,
-                                "phase": failed_phase.get("name"),
-                                "from_tier": current_tier,
-                                "to_tier": next_tier,
-                            },
-                        )
+                    # Reset phase status for re-run
+                    phases[failed_phase_idx]["status"] = "pending"
+                    phases[failed_phase_idx]["error_message"] = None
+                    await update_job_phase(job_id, phases)
 
-                        # Reset phase and force higher tier
-                        phases[failed_phase_idx]["status"] = "pending"
-                        phases[failed_phase_idx]["error_message"] = None
-                        phases[failed_phase_idx]["tier"] = next_tier  # Force escalation
-                        await update_job_phase(job_id, phases)
+                    retry_result = await self._run_phase(
+                        job_id=job_id,
+                        phase_name=failed_phase.get("name"),
+                        context=context,
+                        project_path=project_path,
+                    )
 
-                        # Re-run with escalated tier
-                        # Temporarily modify context to force tier
-                        context["_force_tier"] = next_tier
-
-                        retry_result = await self._run_phase(
-                            job_id=job_id,
-                            phase_name=failed_phase.get("name"),
+                    if retry_result["success"]:
+                        context[f"{failed_phase.get('name')}_output"] = retry_result.get("output", "")
+                        return await self._complete_remaining_phases(
+                            job=job,
+                            phases=phases,
                             context=context,
                             project_path=project_path,
+                            start_from=failed_phase_idx + 1,
+                            total_cost=total_cost + retry_result.get("cost", 0),
                         )
-
-                        # Clean up
-                        context.pop("_force_tier", None)
-
-                        if retry_result["success"]:
-                            context[f"{failed_phase.get('name')}_output"] = retry_result.get("output", "")
-                            return await self._complete_remaining_phases(
-                                job=job,
-                                phases=phases,
-                                context=context,
-                                project_path=project_path,
-                                start_from=failed_phase_idx + 1,
-                                total_cost=total_cost + retry_result.get("cost", 0),
-                            )
 
                 return {"recovered": False, "action": action, "reason": "Escalation failed", "cost": response.cost}
 
@@ -2193,8 +1963,6 @@ REASON: [Brief explanation - 1-2 sentences]
                 phase["cost"] = result.get("cost", 0)
                 phase["tokens"] = result.get("tokens", 0)
                 phase["model"] = result.get("model")
-                phase["tier"] = result.get("tier")
-                phase["tier_label"] = result.get("tier_label")
                 await update_job_phase(job_id, phases)
 
                 total_cost += result.get("cost", 0)
