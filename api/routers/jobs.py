@@ -940,7 +940,7 @@ async def retry_phase(
         from api.services.worker import JobWorker
 
         worker = JobWorker()
-        result = await worker.retry_single_phase(job_id, phase_name, force_tier=effective_tier, feedback=feedback)
+        result = await worker.retry_single_phase(job_id, phase_name, feedback=feedback)
         if not result.get("success"):
             logger.error(
                 "Phase retry failed",
