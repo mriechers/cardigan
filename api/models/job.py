@@ -45,16 +45,11 @@ class JobPhase(BaseModel):
     error_message: Optional[str] = None
     output_path: Optional[str] = Field(None, description="Path to phase output file if applicable")
     metadata: Optional[Dict[str, Any]] = Field(default=None, description="Phase-specific metadata")
-    # Tier tracking fields
     model: Optional[str] = Field(None, description="Model used for this phase")
-    tier: Optional[int] = Field(None, description="Tier index (0=cheapskate, 1=default, 2=big-brain)")
-    tier_label: Optional[str] = Field(None, description="Human-readable tier name")
-    tier_reason: Optional[str] = Field(None, description="Why this tier was selected")
-    attempts: Optional[int] = Field(None, description="Number of attempts (>1 indicates escalation)")
     # Retry tracking fields
     retry_count: int = Field(default=0, description="Times this phase has been manually retried")
     previous_runs: Optional[List[Dict[str, Any]]] = Field(
-        default=None, description="History of previous runs [{tier, tier_label, model, cost, tokens, completed_at}]"
+        default=None, description="History of previous runs [{model, cost, tokens, completed_at}]"
     )
 
     def is_complete(self) -> bool:
