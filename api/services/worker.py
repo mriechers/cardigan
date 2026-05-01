@@ -815,10 +815,6 @@ class JobWorker:
                         "tokens": phase_result.get("tokens", 0),
                         "completed_at": datetime.now(timezone.utc).isoformat(),
                         "model": phase_result.get("model"),
-                        "tier": phase_result.get("tier"),
-                        "tier_label": phase_result.get("tier_label"),
-                        "tier_reason": phase_result.get("tier_reason"),
-                        "attempts": phase_result.get("attempts", 1),
                         "optional": True,  # Mark as optional phase
                     }
 
