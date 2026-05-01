@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useToast } from './ui/Toast'
 
 interface UploadStatus {
@@ -28,7 +28,35 @@ export default function TranscriptUploader({ onUploadComplete }: TranscriptUploa
   const [uploadStatuses, setUploadStatuses] = useState<UploadStatus[]>([])
   const [isUploading, setIsUploading] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
+  const [estimatedCost, setEstimatedCost] = useState<number | null>(null)
   const { toast } = useToast()
+
+  useEffect(() => {
+    if (files.length === 0) {
+      setEstimatedCost(null)
+      return
+    }
+
+    // Estimate word count from total file size (~5 bytes per word for English text)
+    const totalBytes = files.reduce((sum, f) => sum + f.size, 0)
+    const estimatedWords = Math.round(totalBytes / 5)
+
+    if (estimatedWords === 0) {
+      setEstimatedCost(null)
+      return
+    }
+
+    fetch('/api/config/estimate-cost', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ word_count: estimatedWords }),
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data) setEstimatedCost(data.total_estimated_cost)
+      })
+      .catch(() => setEstimatedCost(null))
+  }, [files])
 
   const validateFile = (file: File): string | null => {
     const ext = '.' + file.name.split('.').pop()?.toLowerCase()
@@ -278,19 +306,27 @@ export default function TranscriptUploader({ onUploadComplete }: TranscriptUploa
 
       {/* Upload Button */}
       {files.length > 0 && (
-        <button
-          onClick={uploadFiles}
-          disabled={isUploading}
-          className={`
-            w-full py-2 px-4 rounded-lg font-medium transition-colors
-            ${isUploading
-              ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
-              : 'bg-green-600 hover:bg-green-500 text-white'
-            }
-          `}
-        >
-          {isUploading ? 'Uploading...' : `Upload ${files.length} file${files.length !== 1 ? 's' : ''}`}
-        </button>
+        <>
+          {estimatedCost !== null && (
+            <p className="text-sm text-gray-400 text-center">
+              Estimated cost: <span className="text-green-400 font-mono">~${estimatedCost.toFixed(2)}</span>
+              <span className="text-gray-500 ml-1">(based on file size)</span>
+            </p>
+          )}
+          <button
+            onClick={uploadFiles}
+            disabled={isUploading}
+            className={`
+              w-full py-2 px-4 rounded-lg font-medium transition-colors
+              ${isUploading
+                ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                : 'bg-green-600 hover:bg-green-500 text-white'
+              }
+            `}
+          >
+            {isUploading ? 'Uploading...' : `Upload ${files.length} file${files.length !== 1 ? 's' : ''}`}
+          </button>
+        </>
       )}
     </div>
   )
