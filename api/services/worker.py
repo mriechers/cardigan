@@ -1568,7 +1568,13 @@ Please format this transcript section:
                     },
                 )
 
-                return {"content": response.content, "cost": response.cost, "tokens": response.total_tokens}
+                return {
+                    "content": response.content,
+                    "cost": response.cost,
+                    "tokens": response.total_tokens,
+                    "input_tokens": response.input_tokens,
+                    "output_tokens": response.output_tokens,
+                }
 
         # Log phase start
         await log_event(
@@ -1618,6 +1624,8 @@ Please format this transcript section:
             # Aggregate cost/tokens from all chunks
             total_cost = sum(r["cost"] for r in chunk_results)
             total_tokens = sum(r["tokens"] for r in chunk_results)
+            total_input_tokens = sum(r.get("input_tokens", 0) for r in chunk_results)
+            total_output_tokens = sum(r.get("output_tokens", 0) for r in chunk_results)
 
             # Merge text outputs
             merged = merge_formatter_chunks([r["content"] for r in chunk_results])
@@ -1658,6 +1666,8 @@ Please format this transcript section:
                 "output": merged,
                 "cost": total_cost,
                 "tokens": total_tokens,
+                "input_tokens": total_input_tokens,
+                "output_tokens": total_output_tokens,
                 "model": f"chunked ({total_chunks} chunks via {backend})",
             }
 

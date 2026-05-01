@@ -103,7 +103,7 @@ function CostBreakdownTable({ phases }: { phases: JobPhase[] }) {
   const phasesWithCost = phases.filter(p => p.cost !== undefined && p.cost > 0)
   if (phasesWithCost.length === 0) return null
 
-  const totalCost = phases.reduce((sum, p) => {
+  const totalCost = phasesWithCost.reduce((sum, p) => {
     let phaseCost = p.cost || 0
     if (p.previous_runs) {
       phaseCost += p.previous_runs.reduce((s, r) => s + (r.cost || 0), 0)
@@ -125,7 +125,7 @@ function CostBreakdownTable({ phases }: { phases: JobPhase[] }) {
           </tr>
         </thead>
         <tbody className="text-gray-300">
-          {phases.map(phase => (
+          {phasesWithCost.map(phase => (
             <Fragment key={phase.name}>
               {phase.previous_runs?.map((run, i) => (
                 <tr key={`${phase.name}-prev-${i}`} className="text-gray-500 text-xs">
