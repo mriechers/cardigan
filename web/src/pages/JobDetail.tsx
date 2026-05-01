@@ -88,6 +88,13 @@ const OUTPUT_FILES: Record<string, { label: string; filename: string }> = {
   recovery_analysis: { label: 'Recovery Analysis', filename: 'recovery_analysis.md' },
 }
 
+const OUTPUT_TO_PHASE: Record<string, string> = {
+  analysis: 'analyst',
+  formatted_transcript: 'formatter',
+  seo_metadata: 'seo',
+  timestamp_report: 'timestamp',
+}
+
 export default function JobDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -105,6 +112,8 @@ export default function JobDetail() {
   const [retryingPhase, setRetryingPhase] = useState<string | null>(null)
   const [retryModal, setRetryModal] = useState<{ outputKey: string; label: string } | null>(null)
   const [retryFeedback, setRetryFeedback] = useState('')
+  const [retryModel, setRetryModel] = useState<string>('')
+  const [availableModels, setAvailableModels] = useState<{id: string, name: string}[]>([])
   const [showScreengrabs, setShowScreengrabs] = useState(false)
   const [hasScreengrabs, setHasScreengrabs] = useState(false)
   const [keywordReports, setKeywordReports] = useState<Array<{ filename: string; version: number; uploaded_at?: string }>>([])
@@ -205,6 +214,15 @@ export default function JobDetail() {
     checkScreengrabs()
   }, [job?.media_id])
 
+  useEffect(() => {
+    fetch('/api/config/models')
+      .then(res => res.json())
+      .then(data => {
+        setAvailableModels(data.available_models || [])
+      })
+      .catch(() => {})
+  }, [])
+
   const handleAction = async (action: string) => {
     const actionLabels: Record<string, { success: string; error: string }> = {
       pause: { success: 'Job paused successfully', error: 'Failed to pause job' },
@@ -262,8 +280,9 @@ export default function JobDetail() {
     setRetryModal(null)
     setRetryFeedback('')
     try {
-      const body: { feedback?: string } = {}
+      const body: { feedback?: string; model?: string } = {}
       if (feedback && feedback.trim()) body.feedback = feedback.trim()
+      if (retryModel) body.model = retryModel
 
       const response = await fetch(`/api/jobs/${id}/phases/${outputKey}/retry`, {
         method: 'POST',
@@ -292,8 +311,12 @@ export default function JobDetail() {
   }
 
   const openRetryModal = (outputKey: string, label: string) => {
-    setRetryModal({ outputKey, label })
+    // Pre-populate model with current phase model
+    const phaseName = OUTPUT_TO_PHASE[outputKey] || outputKey
+    const phase = job?.phases?.find((p: JobPhase) => p.name === phaseName)
+    setRetryModel(phase?.model || '')
     setRetryFeedback('')
+    setRetryModal({ outputKey, label })
   }
 
   const submitRetryModal = () => {
@@ -953,6 +976,35 @@ export default function JobDetail() {
               </button>
             </div>
             <div className="p-4 space-y-4">
+              <div>
+                <label htmlFor="retry-model" className="block text-sm text-gray-300 mb-1">
+                  Model
+                </label>
+                <select
+                  id="retry-model"
+                  value={retryModel}
+                  onChange={(e) => setRetryModel(e.target.value)}
+                  className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 pr-8 text-sm text-white focus:outline-none focus:border-blue-500"
+                >
+                  <option value="">Phase default</option>
+                  {availableModels.map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              </div>
+              {(() => {
+                const phaseName = OUTPUT_TO_PHASE[retryModal.outputKey] || retryModal.outputKey
+                const flags = job?.validation_result?.phase_results?.[phaseName]?.flags || []
+                if (flags.length === 0) return null
+                return (
+                  <div className="bg-red-900/20 border border-red-800/50 rounded p-3">
+                    <div className="text-xs text-red-400 font-medium mb-1">Validation Issues:</div>
+                    {flags.map((flag: string, i: number) => (
+                      <div key={i} className="text-xs text-red-300 ml-2">• {flag}</div>
+                    ))}
+                  </div>
+                )
+              })()}
               <div>
                 <label htmlFor="retry-feedback" className="block text-sm text-gray-300 mb-1">
                   Editorial feedback <span className="text-gray-500">(optional)</span>
