@@ -5,11 +5,12 @@ Provides endpoints for viewing and updating LLM routing configuration.
 
 import json
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from api.services.cost_estimator import estimate_job_cost
 from api.services.llm import get_llm_client
 from api.services.model_roster import get_available_models, invalidate_cache
 
@@ -291,3 +292,55 @@ async def update_worker_config(update: WorkerConfigUpdate):
     _save_config(config)
 
     return await get_worker_config()
+
+
+class CostEstimateRequest(BaseModel):
+    """Request body for cost estimation."""
+
+    word_count: int = Field(..., ge=0, description="Transcript word count")
+    phase_models: Optional[Dict[str, str]] = Field(
+        None, description="Override phase-model assignments (defaults to current config)"
+    )
+
+
+class CostEstimateResponse(BaseModel):
+    """Cost estimate for a job."""
+
+    total_estimated_cost: float
+    estimated_input_tokens: int
+    phase_estimates: List[Dict[str, Any]]
+
+
+@router.post("/estimate-cost", response_model=CostEstimateResponse)
+async def get_cost_estimate(body: CostEstimateRequest):
+    """Estimate the cost of processing a transcript.
+
+    Uses current phase-model assignments (or overrides) and model pricing
+    to estimate total cost. Useful for showing users expected costs
+    before submitting a job.
+    """
+    config = _load_config()
+
+    # Use provided phase_models or fall back to current config
+    phase_models = body.phase_models or config.get("phase_models", DEFAULT_PHASE_MODELS)
+
+    # Build pricing overrides from the model roster (has live OpenRouter pricing)
+    pricing_overrides = {}
+    try:
+        models_data = await get_available_models()
+        for m in models_data:
+            if m.get("pricing_input") is not None and m.get("pricing_output") is not None:
+                pricing_overrides[m["id"]] = {
+                    "input": m["pricing_input"],
+                    "output": m["pricing_output"],
+                }
+    except Exception:
+        pass  # Fall through to MODEL_PRICING static fallback
+
+    result = estimate_job_cost(
+        word_count=body.word_count,
+        phase_models=phase_models,
+        pricing_overrides=pricing_overrides,
+    )
+
+    return CostEstimateResponse(**result)

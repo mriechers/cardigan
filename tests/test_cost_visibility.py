@@ -1,5 +1,7 @@
 """Tests for cost visibility: token granularity and pricing."""
 
+import pytest
+
 
 def test_job_phase_has_token_breakdown():
     """JobPhase should support input_tokens and output_tokens fields."""
@@ -83,3 +85,17 @@ def test_available_model_pricing_defaults_to_none():
     )
     assert model.pricing_input is None
     assert model.pricing_output is None
+
+
+def test_estimate_cost_endpoint():
+    """The /config/estimate-cost endpoint should return a cost estimate."""
+    from starlette.testclient import TestClient
+    from api.main import app
+
+    client = TestClient(app)
+    resp = client.post("/api/config/estimate-cost", json={"word_count": 5000})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "total_estimated_cost" in data
+    assert data["total_estimated_cost"] > 0
+    assert "phase_estimates" in data
