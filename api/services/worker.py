@@ -349,6 +349,27 @@ class JobWorker:
         if sst_context:
             context["sst_context"] = sst_context
 
+        # Load validation flags for context enrichment
+        validation_flags = []
+        if job_dict.get("validation_result"):
+            vr = job_dict["validation_result"]
+            if isinstance(vr, str):
+                vr = json.loads(vr)
+            phase_validation = vr.get("phase_results", {}).get(phase_name, {})
+            validation_flags = phase_validation.get("flags", [])
+
+        if validation_flags:
+            context["_validation_flags"] = validation_flags
+            logger.info(
+                "Including validation flags in retry context",
+                extra={"job_id": job_id, "phase": phase_name, "flag_count": len(validation_flags)},
+            )
+
+        # Load previous output for context feed-forward
+        prev_output_file = project_path / f"{phase_name}_output.md"
+        if prev_output_file.exists():
+            context["_previous_output"] = prev_output_file.read_text()
+
         # Inject editorial feedback if provided
         if feedback:
             context["_editorial_feedback"] = feedback
@@ -2124,7 +2145,31 @@ Output a structured JSON checklist with:
         )
 
     def _build_phase_prompt(self, phase_name: str, context: Dict[str, Any]) -> str:
-        """Build the user prompt for a phase with relevant context."""
+        """Build the user prompt for a phase with relevant context.
+
+        On retries, appends validation flags and previous output to help
+        the model fix identified issues.
+        """
+        prompt = self._build_phase_prompt_base(phase_name, context)
+
+        # Append retry context (validation flags + previous output) if present
+        validation_flags = context.get("_validation_flags")
+        if validation_flags:
+            prompt += "\n\n## Validation Issues from Previous Attempt\n\n"
+            prompt += "The previous output was flagged for these issues. Address each one:\n\n"
+            for flag in validation_flags:
+                prompt += f"- {flag}\n"
+
+        previous_output = context.get("_previous_output")
+        if previous_output:
+            prompt += "\n\n## Previous Output (for reference)\n\n"
+            prompt += "Use this as a starting point. Fix the flagged issues while preserving what worked:\n\n"
+            prompt += f"---\n{previous_output}\n---"
+
+        return prompt
+
+    def _build_phase_prompt_base(self, phase_name: str, context: Dict[str, Any]) -> str:
+        """Build the base user prompt for a phase (without retry context)."""
         transcript = context.get("transcript", "")
         sst_context = context.get("sst_context")
 
