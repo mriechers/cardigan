@@ -80,7 +80,7 @@ export default function ModelStatsWidget({ className = '' }: ModelStatsWidgetPro
     return Math.max(2, (model.total_cost / stats.total_cost) * 100)
   }
 
-  // Determine color based on model tier (heuristic based on name)
+  // Determine color based on model name heuristic
   const getModelColor = (name: string) => {
     const lowerName = name.toLowerCase()
     // Premium models

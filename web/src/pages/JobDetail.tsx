@@ -10,8 +10,6 @@ import ScreengrabSlideout from '../components/ScreengrabSlideout'
 import ScreengrabsBox from '../components/ScreengrabsBox'
 
 interface PreviousRun {
-  tier?: number
-  tier_label?: string
   model?: string
   cost?: number
   tokens?: number
@@ -27,9 +25,6 @@ interface JobPhase {
   started_at?: string
   completed_at?: string
   model?: string
-  tier?: number
-  tier_label?: string
-  tier_reason?: string
   attempts?: number
   retry_count: number
   previous_runs?: PreviousRun[]
@@ -106,7 +101,6 @@ export default function JobDetail() {
   const [retryingPhase, setRetryingPhase] = useState<string | null>(null)
   const [retryModal, setRetryModal] = useState<{ outputKey: string; label: string } | null>(null)
   const [retryFeedback, setRetryFeedback] = useState('')
-  const [retryTier, setRetryTier] = useState<string>('')
   const [showScreengrabs, setShowScreengrabs] = useState(false)
   const [hasScreengrabs, setHasScreengrabs] = useState(false)
   const [keywordReports, setKeywordReports] = useState<Array<{ filename: string; version: number; uploaded_at?: string }>>([])
@@ -259,14 +253,12 @@ export default function JobDetail() {
     }
   }
 
-  const handleRetryPhase = async (outputKey: string, tier?: number, feedback?: string) => {
+  const handleRetryPhase = async (outputKey: string, feedback?: string) => {
     setRetryingPhase(outputKey)
     setRetryModal(null)
     setRetryFeedback('')
-    setRetryTier('')
     try {
-      const body: { tier?: number; feedback?: string } = {}
-      if (tier !== undefined) body.tier = tier
+      const body: { feedback?: string } = {}
       if (feedback && feedback.trim()) body.feedback = feedback.trim()
 
       const response = await fetch(`/api/jobs/${id}/phases/${outputKey}/retry`, {
@@ -298,13 +290,11 @@ export default function JobDetail() {
   const openRetryModal = (outputKey: string, label: string) => {
     setRetryModal({ outputKey, label })
     setRetryFeedback('')
-    setRetryTier('')
   }
 
   const submitRetryModal = () => {
     if (!retryModal) return
-    const tier = retryTier !== '' ? parseInt(retryTier, 10) : undefined
-    handleRetryPhase(retryModal.outputKey, tier, retryFeedback)
+    handleRetryPhase(retryModal.outputKey, retryFeedback)
   }
 
   const handleKeywordUpload = async (file: File) => {
@@ -461,9 +451,9 @@ export default function JobDetail() {
             <button
               onClick={() => handleAction('retry')}
               className="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white rounded-md text-sm"
-              title="Retries with a more capable model tier"
+              title="Retry this job"
             >
-              Retry &amp; Escalate
+              Retry
             </button>
           )}
           {['pending', 'paused'].includes(job.status) && (
@@ -659,15 +649,6 @@ export default function JobDetail() {
                         {phase.model}
                       </span>
                     )}
-                    {phase.tier_label && (
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-                        phase.tier === 2 ? 'bg-purple-900/30 text-purple-400' :
-                        phase.tier === 1 ? 'bg-blue-900/30 text-blue-400' :
-                        'bg-green-900/30 text-green-400'
-                      }`}>
-                        {phase.tier_label}
-                      </span>
-                    )}
                     {phase.attempts && phase.attempts > 1 && (
                       <span className="text-xs px-2 py-0.5 rounded-full bg-orange-900/50 text-orange-300">
                         {phase.attempts} attempts
@@ -691,11 +672,6 @@ export default function JobDetail() {
                     )}
                   </div>
                 </div>
-                {phase.tier_reason && (
-                  <div className="mt-1 ml-8 text-xs text-gray-500">
-                    <span className="text-gray-400">{phase.tier_reason}</span>
-                  </div>
-                )}
                 {phase.previous_runs && phase.previous_runs.length > 0 && (
                   <div className="mt-1.5 ml-8 text-xs text-gray-500">
                     <div className="text-gray-600 mb-1">Previous runs:</div>
@@ -758,7 +734,7 @@ export default function JobDetail() {
                     disabled={isRetrying || retryingPhase !== null}
                     className="px-2 py-2 bg-gray-600 hover:bg-orange-600 rounded-r-md text-sm text-gray-300 hover:text-white transition-colors disabled:opacity-50"
                     aria-label={`Retry ${label}`}
-                    title={`Regenerate ${label}`}
+                    title={`Retry this phase`}
                   >
                     {isRetrying ? (
                       <span className="animate-spin">&#8635;</span>
@@ -840,9 +816,9 @@ export default function JobDetail() {
               <button
                 onClick={() => handleAction('retry')}
                 className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-md text-sm font-medium transition-colors"
-                title="Retries with a more capable model tier"
+                title="Retry this job"
               >
-                Retry &amp; Escalate
+                Retry
               </button>
             </div>
           </div>
@@ -944,22 +920,6 @@ export default function JobDetail() {
               </button>
             </div>
             <div className="p-4 space-y-4">
-              <div>
-                <label htmlFor="retry-tier" className="block text-sm text-gray-300 mb-1">
-                  Model tier
-                </label>
-                <select
-                  id="retry-tier"
-                  value={retryTier}
-                  onChange={(e) => setRetryTier(e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                >
-                  <option value="">Auto-escalate (recommended)</option>
-                  <option value="0">Cheapskate (tier 0)</option>
-                  <option value="1">Default (tier 1)</option>
-                  <option value="2">Big Brain (tier 2)</option>
-                </select>
-              </div>
               <div>
                 <label htmlFor="retry-feedback" className="block text-sm text-gray-300 mb-1">
                   Editorial feedback <span className="text-gray-500">(optional)</span>
