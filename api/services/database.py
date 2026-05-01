@@ -89,6 +89,7 @@ jobs_table = Table(
     Column("duration_minutes", Float, nullable=True),
     Column("word_count", Integer, nullable=True),
     Column("content_type", Text, nullable=True),  # 'full', 'short', or 'clip'
+    Column("validation_result", Text, nullable=True),  # JSON validation result
 )
 
 # Define session_stats table
@@ -584,6 +585,9 @@ async def update_job(job_id: int, job_update: JobUpdate) -> Optional[Job]:
 
         if job_update.content_type is not None:
             update_values["content_type"] = job_update.content_type
+
+        if job_update.validation_result is not None:
+            update_values["validation_result"] = json.dumps(job_update.validation_result)
 
         # Handle phases update (replaces all phases)
         if job_update.phases is not None:
@@ -1258,6 +1262,7 @@ def _row_to_job(row) -> Job:
         duration_minutes=getattr(row, "duration_minutes", None),
         word_count=getattr(row, "word_count", None),
         content_type=getattr(row, "content_type", None),
+        validation_result=json.loads(row.validation_result) if getattr(row, "validation_result", None) else None,
         outputs=outputs,
     )
 
