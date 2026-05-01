@@ -132,6 +132,8 @@ class AvailableModel(BaseModel):
     name: str = Field(..., description="Human-readable model name")
     provider: str = Field(..., description="Model provider (e.g., 'Anthropic', 'Google')")
     tier: int = Field(..., ge=0, le=2, description="Cost tier (0=economy, 1=standard, 2=premium)")
+    pricing_input: Optional[float] = Field(None, description="Cost per 1M input tokens (USD)")
+    pricing_output: Optional[float] = Field(None, description="Cost per 1M output tokens (USD)")
 
 
 class PhaseModelsResponse(BaseModel):

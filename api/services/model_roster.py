@@ -88,6 +88,20 @@ def _classify_models(raw_models: List[dict], families: List[dict]) -> List[dict]
         if family is None:
             continue
 
+        # Extract pricing (OpenRouter reports cost per token as strings)
+        pricing_input = None
+        pricing_output = None
+        raw_pricing = model.get("pricing", {})
+        if raw_pricing:
+            try:
+                prompt_per_token = float(raw_pricing.get("prompt", 0))
+                completion_per_token = float(raw_pricing.get("completion", 0))
+                # Convert per-token to per-1M-tokens
+                pricing_input = round(prompt_per_token * 1_000_000, 4)
+                pricing_output = round(completion_per_token * 1_000_000, 4)
+            except (ValueError, TypeError):
+                pass
+
         seen_ids.add(model_id)
         results.append(
             {
@@ -95,6 +109,8 @@ def _classify_models(raw_models: List[dict], families: List[dict]) -> List[dict]
                 "name": model.get("name", model_id),
                 "provider": family["provider"],
                 "tier": family["tier"],
+                "pricing_input": pricing_input,
+                "pricing_output": pricing_output,
             }
         )
 

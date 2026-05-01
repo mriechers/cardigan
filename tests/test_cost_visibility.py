@@ -53,3 +53,33 @@ def test_run_phase_return_includes_token_breakdown():
 
     assert phase.input_tokens == 12000
     assert phase.output_tokens == 3000
+
+
+def test_available_model_includes_pricing():
+    """AvailableModel should include input/output pricing fields."""
+    from api.routers.config import AvailableModel
+
+    model = AvailableModel(
+        id="anthropic/claude-haiku-4.5",
+        name="Claude Haiku 4.5",
+        provider="Anthropic",
+        tier=0,
+        pricing_input=0.80,
+        pricing_output=4.00,
+    )
+    assert model.pricing_input == 0.80
+    assert model.pricing_output == 4.00
+
+
+def test_available_model_pricing_defaults_to_none():
+    """Pricing fields should default to None when not available."""
+    from api.routers.config import AvailableModel
+
+    model = AvailableModel(
+        id="test/model",
+        name="Test",
+        provider="Test",
+        tier=0,
+    )
+    assert model.pricing_input is None
+    assert model.pricing_output is None
