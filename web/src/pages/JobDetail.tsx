@@ -175,6 +175,8 @@ export default function JobDetail() {
   const [availableModels, setAvailableModels] = useState<{id: string, name: string}[]>([])
   const [showScreengrabs, setShowScreengrabs] = useState(false)
   const [hasScreengrabs, setHasScreengrabs] = useState(false)
+  const [driveConfigured, setDriveConfigured] = useState(false)
+  const [uploadingToDrive, setUploadingToDrive] = useState<string | null>(null)
   const [keywordReports, setKeywordReports] = useState<Array<{ filename: string; version: number; uploaded_at?: string }>>([])
   const [keywordUploading, setKeywordUploading] = useState(false)
   const keywordInputRef = useRef<HTMLInputElement | null>(null)
@@ -278,6 +280,15 @@ export default function JobDetail() {
       .then(res => res.json())
       .then(data => {
         setAvailableModels(data.available_models || [])
+      })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    fetch('/api/export/status')
+      .then(res => res.json())
+      .then(data => {
+        setDriveConfigured(data.google_drive?.configured || false)
       })
       .catch(() => {})
   }, [])
@@ -406,6 +417,30 @@ export default function JobDetail() {
     } finally {
       setKeywordUploading(false)
       if (keywordInputRef.current) keywordInputRef.current.value = ''
+    }
+  }
+
+  const handleDriveUpload = async (key: string, filename: string) => {
+    setUploadingToDrive(key)
+    try {
+      const folderId = localStorage.getItem('cardigan_drive_folder_id') || ''
+      const params = folderId ? `?folder_id=${encodeURIComponent(folderId)}` : ''
+      const response = await fetch(`/api/export/google-drive/${id}/${filename}${params}`, {
+        method: 'POST',
+      })
+      if (response.ok) {
+        const data = await response.json()
+        toast('Uploaded to Google Drive', 'success')
+        window.open(data.drive_url, '_blank')
+      } else {
+        const data = await response.json()
+        toast(data.detail || 'Failed to upload to Google Drive', 'error')
+      }
+    } catch (err) {
+      console.error('Failed to upload to Drive:', err)
+      toast('Failed to upload to Google Drive', 'error')
+    } finally {
+      setUploadingToDrive(null)
     }
   }
 
@@ -852,7 +887,7 @@ export default function JobDetail() {
                   <button
                     onClick={() => openRetryModal(key, label)}
                     disabled={isRetrying || retryingPhase !== null}
-                    className="px-2 py-2 bg-gray-600 hover:bg-orange-600 rounded-r-md text-sm text-gray-300 hover:text-white transition-colors disabled:opacity-50"
+                    className={`px-2 py-2 bg-gray-600 hover:bg-orange-600 ${driveConfigured ? '' : 'rounded-r-md'} text-sm text-gray-300 hover:text-white transition-colors disabled:opacity-50`}
                     aria-label={`Retry ${label}`}
                     title={`Retry this phase`}
                   >
@@ -862,6 +897,23 @@ export default function JobDetail() {
                       <span>&#8635;</span>
                     )}
                   </button>
+                  {driveConfigured && (
+                    <button
+                      onClick={() => handleDriveUpload(key, actualFilename)}
+                      disabled={uploadingToDrive !== null}
+                      className="px-2 py-2 bg-gray-600 hover:bg-green-700 rounded-r-md text-sm text-gray-300 hover:text-white transition-colors disabled:opacity-50"
+                      aria-label={`Upload ${label} to Google Drive`}
+                      title="Upload to Google Drive"
+                    >
+                      {uploadingToDrive === key ? (
+                        <span className="animate-spin">&#8635;</span>
+                      ) : (
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                      )}
+                    </button>
+                  )}
                 </div>
               )
             })}
