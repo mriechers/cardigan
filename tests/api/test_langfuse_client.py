@@ -193,8 +193,6 @@ class TestTraceGeneration:
             duration_ms=500,
             job_id=42,
             phase="analyst",
-            tier=0,
-            tier_label="economy",
             backend="openrouter",
         )
 

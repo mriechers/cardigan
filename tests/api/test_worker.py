@@ -1,7 +1,7 @@
 """Tests for the JobWorker class.
 
 Tests job claiming, phase processing, heartbeat updates, error handling,
-tier escalation, and manager phase analysis/recovery.
+and manager phase analysis/recovery.
 """
 
 import asyncio
@@ -436,7 +436,7 @@ class TestAnalyzeAndRecover:
         result = await worker._analyze_and_recover(
             job={"id": 1, "project_name": "Test"},
             project_path=tmp_path,
-            phases=[{"name": "analyst", "status": "failed", "tier": 0, "tier_label": "economy"}],
+            phases=[{"name": "analyst", "status": "failed"}],
             context={"transcript": "test"},
             error="Test error",
             current_cost=0.001,

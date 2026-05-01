@@ -460,8 +460,6 @@ class LLMClient:
         model: Optional[str] = None,
         job_id: Optional[int] = None,
         phase: Optional[str] = None,
-        tier: Optional[int] = None,
-        tier_label: Optional[str] = None,
         **kwargs,
     ) -> LLMResponse:
         """Make a chat completion request.
@@ -472,8 +470,6 @@ class LLMClient:
             model: Model override (default: phase_models config, then backend model)
             job_id: Job ID for event logging
             phase: Agent phase name for observability (analyst, formatter, etc.)
-            tier: Tier index for observability (0=cheapskate, 1=default, 2=big-brain)
-            tier_label: Human-readable tier name
             **kwargs: Additional parameters passed to the API
 
         Returns:
@@ -563,8 +559,6 @@ class LLMClient:
                 duration_ms=duration_ms,
                 job_id=job_id,
                 phase=phase,
-                tier=tier,
-                tier_label=tier_label,
                 backend=backend_name,
             )
 

@@ -43,7 +43,7 @@ export const AGENT_INFO: AgentInfo[] = [
     name: 'QA Manager',
     icon: '✅',
     description:
-      'Reviews all automated outputs for quality before completion. Audits cheaper model work and flags issues. Always runs on big-brain tier for oversight.',
+      'Reviews all automated outputs for quality before completion. Audits pipeline output and flags issues requiring human review.',
   },
   {
     id: 'timestamp',
