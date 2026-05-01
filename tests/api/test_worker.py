@@ -1,7 +1,7 @@
 """Tests for the JobWorker class.
 
 Tests job claiming, phase processing, heartbeat updates, error handling,
-and manager phase analysis/recovery.
+and recovery analysis.
 """
 
 import asyncio
