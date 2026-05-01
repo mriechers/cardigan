@@ -127,7 +127,7 @@ function CostBreakdownTable({ phases }: { phases: JobPhase[] }) {
           {phasesWithCost.map(phase => (
             <Fragment key={phase.name}>
               {phase.previous_runs?.map((run, i) => (
-                <tr key={`${phase.name}-prev-${i}`} className="text-gray-500 text-xs">
+                <tr key={`${phase.name}-prev-${i}`} className="text-gray-400 text-xs">
                   <td className="py-1 pl-4">{phase.name} (attempt {i + 1})</td>
                   <td className="py-1 font-mono">{run.model?.split('/').pop() || '-'}</td>
                   <td className="py-1 text-right font-mono">{run.input_tokens?.toLocaleString() || '-'}</td>
@@ -545,7 +545,7 @@ export default function JobDetail() {
                   ? 'bg-green-900/50 text-green-400 border border-green-800'
                   : 'bg-red-900/50 text-red-400 border border-red-800'
               }`}>
-                {job.validation_result.overall === 'pass' ? '✓ Validated' : '✗ Validation Failed'}
+                {job.validation_result.overall === 'pass' ? '\u2713 Validated' : '\u2717 Validation Failed'}
               </span>
             )}
           </div>
@@ -780,7 +780,7 @@ export default function JobDetail() {
                           ? 'bg-green-900/30 text-green-400'
                           : 'bg-red-900/30 text-red-400'
                       }`}>
-                        {job.validation_result.phase_results[phase.name].status === 'pass' ? '✓ Pass' : '✗ Fail'}
+                        {job.validation_result.phase_results[phase.name].status === 'pass' ? '\u2713 Pass' : '\u2717 Fail'}
                       </span>
                     )}
                     {phase.model && (
@@ -851,7 +851,7 @@ export default function JobDetail() {
           <h2 className="text-lg font-medium text-white mb-4">
             Output Files
           </h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {Object.entries(job.outputs).map(([key, filename]) => {
               const fileInfo = OUTPUT_FILES[key]
               if (!fileInfo || !filename) return null
