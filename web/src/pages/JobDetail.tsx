@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useRef } from 'react'
+import { useCallback, useEffect, useState, useRef, Fragment } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -13,6 +13,8 @@ interface PreviousRun {
   model?: string
   cost?: number
   tokens?: number
+  input_tokens?: number
+  output_tokens?: number
   completed_at?: string
   feedback?: string
 }
@@ -22,6 +24,8 @@ interface JobPhase {
   status: string
   cost?: number
   tokens?: number
+  input_tokens?: number
+  output_tokens?: number
   started_at?: string
   completed_at?: string
   model?: string
@@ -93,6 +97,62 @@ const OUTPUT_TO_PHASE: Record<string, string> = {
   formatted_transcript: 'formatter',
   seo_metadata: 'seo',
   timestamp_report: 'timestamp',
+}
+
+function CostBreakdownTable({ phases }: { phases: JobPhase[] }) {
+  const phasesWithCost = phases.filter(p => p.cost !== undefined && p.cost > 0)
+  if (phasesWithCost.length === 0) return null
+
+  const totalCost = phases.reduce((sum, p) => {
+    let phaseCost = p.cost || 0
+    if (p.previous_runs) {
+      phaseCost += p.previous_runs.reduce((s, r) => s + (r.cost || 0), 0)
+    }
+    return sum + phaseCost
+  }, 0)
+
+  return (
+    <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
+      <h2 className="text-lg font-medium text-white mb-3">Cost Breakdown</h2>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-gray-500 text-left">
+            <th className="pb-2">Phase</th>
+            <th className="pb-2">Model</th>
+            <th className="pb-2 text-right">In Tokens</th>
+            <th className="pb-2 text-right">Out Tokens</th>
+            <th className="pb-2 text-right">Cost</th>
+          </tr>
+        </thead>
+        <tbody className="text-gray-300">
+          {phases.map(phase => (
+            <Fragment key={phase.name}>
+              {phase.previous_runs?.map((run, i) => (
+                <tr key={`${phase.name}-prev-${i}`} className="text-gray-500 text-xs">
+                  <td className="py-1 pl-4">{phase.name} (attempt {i + 1})</td>
+                  <td className="py-1 font-mono">{run.model?.split('/').pop() || '-'}</td>
+                  <td className="py-1 text-right font-mono">{run.input_tokens?.toLocaleString() || '-'}</td>
+                  <td className="py-1 text-right font-mono">{run.output_tokens?.toLocaleString() || '-'}</td>
+                  <td className="py-1 text-right font-mono">${(run.cost || 0).toFixed(4)}</td>
+                </tr>
+              ))}
+              <tr>
+                <td className="py-1">{phase.name}</td>
+                <td className="py-1 font-mono">{phase.model?.split('/').pop() || '-'}</td>
+                <td className="py-1 text-right font-mono">{phase.input_tokens?.toLocaleString() || '-'}</td>
+                <td className="py-1 text-right font-mono">{phase.output_tokens?.toLocaleString() || '-'}</td>
+                <td className="py-1 text-right font-mono">${(phase.cost || 0).toFixed(4)}</td>
+              </tr>
+            </Fragment>
+          ))}
+          <tr className="border-t border-gray-700 font-medium text-white">
+            <td className="pt-2" colSpan={4}>Total</td>
+            <td className="pt-2 text-right font-mono">${totalCost.toFixed(4)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  )
 }
 
 export default function JobDetail() {
@@ -744,6 +804,11 @@ export default function JobDetail() {
             ))}
           </div>
         </div>
+      )}
+
+      {/* Cost Breakdown */}
+      {job.phases && job.phases.length > 0 && (
+        <CostBreakdownTable phases={job.phases} />
       )}
 
       {/* Outputs */}
