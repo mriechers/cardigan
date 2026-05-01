@@ -138,27 +138,15 @@ async def health():
     llm_client = get_llm_client()
     llm_status = llm_client.get_status()
 
-    # Get routing config for tier display
-    routing_config = llm_client.config.get("routing", {})
-
     return {
         "status": "ok",
         "queue": queue_stats,
         "llm": {
             "active_backend": llm_status.get("active_backend"),
             "active_model": llm_status.get("active_model"),
-            "active_preset": llm_status.get("active_preset"),
             "primary_backend": llm_status.get("primary_backend"),
-            "configured_preset": llm_status.get("configured_preset"),
             "fallback_model": llm_status.get("fallback_model"),
             "phase_backends": llm_status.get("phase_backends"),
-            "openrouter_presets": llm_status.get("openrouter_presets"),
-            "routing": {
-                "tiers": routing_config.get("tiers", []),
-                "tier_labels": routing_config.get("tier_labels", []),
-                "phase_base_tiers": routing_config.get("phase_base_tiers", {}),
-                "duration_thresholds": routing_config.get("duration_thresholds", []),
-            },
         },
         "last_run": llm_status.get("last_run_totals"),
     }

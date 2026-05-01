@@ -1344,7 +1344,7 @@ class JobWorker:
 
         while attempts < max_escalation_attempts:
             # Get backend for current tier
-            backend = self.llm.get_backend_for_phase(phase_name, context, tier_override=current_tier)
+            backend = self.llm.get_backend_for_phase(phase_name)
             tier_label = tier_labels[current_tier] if current_tier < len(tier_labels) else f"tier-{current_tier}"
             logger.info(
                 "Phase attempting with tier",
@@ -1598,7 +1598,7 @@ class JobWorker:
         routing_config = self.llm.config.get("routing", {})
         tier_labels = routing_config.get("tier_labels", ["cheapskate", "default", "big-brain"])
         tier_label = tier_labels[current_tier] if current_tier < len(tier_labels) else f"tier-{current_tier}"
-        backend = self.llm.get_backend_for_phase("formatter", context, tier_override=current_tier)
+        backend = self.llm.get_backend_for_phase("formatter")
 
         # Get timeout from backend config
         escalation_config = self.llm.get_escalation_config()
