@@ -63,6 +63,14 @@ class LangfuseClient:
         self._init_error: Optional[str] = None
         self._host: Optional[str] = None
 
+    async def initialize(self) -> bool:
+        """Eagerly initialize the Langfuse client.
+
+        Call this at app startup to avoid lazy-init delays during job processing.
+        Returns True if client is ready, False if credentials are missing.
+        """
+        return self._ensure_initialized()
+
     def _ensure_initialized(self) -> bool:
         """Lazily initialize credentials and HTTP client."""
         if self._initialized:
