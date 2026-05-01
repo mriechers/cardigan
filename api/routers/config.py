@@ -36,51 +36,12 @@ class PhaseBackendsUpdate(BaseModel):
     )
 
 
-class DurationThreshold(BaseModel):
-    """A single duration threshold for tier selection."""
-
-    max_minutes: Optional[int] = Field(None, description="Max minutes for this tier (null = unlimited)")
-    tier: int = Field(..., ge=0, le=2, description="Tier index (0=cheapskate, 1=default, 2=big-brain)")
-
-
-class EscalationConfig(BaseModel):
-    """Configuration for failure-based escalation."""
-
-    enabled: bool = Field(True, description="Whether escalation is enabled")
-    on_failure: bool = Field(True, description="Escalate on LLM failure")
-    on_timeout: bool = Field(True, description="Escalate on timeout")
-    timeout_seconds: int = Field(120, ge=30, le=600, description="Timeout before escalation")
-    max_retries_per_tier: int = Field(1, ge=1, le=3, description="Max retries before escalating")
-
-
-class RoutingConfigUpdate(BaseModel):
-    """Request body for updating routing configuration."""
-
-    duration_thresholds: Optional[List[DurationThreshold]] = Field(
-        None, description="Duration thresholds for tier selection"
-    )
-    phase_base_tiers: Optional[Dict[str, int]] = Field(
-        None, description="Base tier for each phase (0=cheapskate, 1=default, 2=big-brain)"
-    )
-    escalation: Optional[EscalationConfig] = Field(None, description="Escalation settings")
-
-
 class PhaseBackendsResponse(BaseModel):
     """Response with current phase-to-backend mappings."""
 
     phase_backends: Dict[str, str]
     available_backends: List[str]
     available_phases: List[str]
-
-
-class RoutingConfigResponse(BaseModel):
-    """Response with current routing configuration."""
-
-    tiers: List[str]
-    tier_labels: List[str]
-    duration_thresholds: List[DurationThreshold]
-    phase_base_tiers: Dict[str, int]
-    escalation: EscalationConfig
 
 
 def _load_config() -> dict:
@@ -162,93 +123,6 @@ async def update_phase_backends(update: PhaseBackendsUpdate):
         available_backends=available_backends,
         available_phases=list(valid_phases),
     )
-
-
-@router.get("/routing", response_model=RoutingConfigResponse)
-async def get_routing_config():
-    """Get current tiered routing configuration.
-
-    Returns settings for duration-based tier selection and failure escalation.
-    """
-    config = _load_config()
-    routing = config.get("routing", {})
-
-    # Default values
-    default_tiers = ["openrouter-cheapskate", "openrouter", "openrouter-big-brain"]
-    default_labels = ["economy", "standard", "premium"]
-    default_thresholds = [
-        {"max_minutes": 30, "tier": 0},
-        {"max_minutes": 45, "tier": 1},
-        {"max_minutes": None, "tier": 2},
-    ]
-    default_phase_tiers = {
-        "analyst": 0,
-        "formatter": 1,
-        "seo": 0,
-        "manager": 2,
-        "timestamp": 1,
-        "copy_editor": 2,
-        "chat": 1,
-    }
-    default_escalation = {
-        "enabled": True,
-        "on_failure": True,
-        "on_timeout": True,
-        "timeout_seconds": 120,
-        "max_retries_per_tier": 1,
-    }
-
-    return RoutingConfigResponse(
-        tiers=routing.get("tiers", default_tiers),
-        tier_labels=routing.get("tier_labels", default_labels),
-        duration_thresholds=[DurationThreshold(**t) for t in routing.get("duration_thresholds", default_thresholds)],
-        phase_base_tiers=routing.get("phase_base_tiers", default_phase_tiers),
-        escalation=EscalationConfig(**routing.get("escalation", default_escalation)),
-    )
-
-
-@router.patch("/routing", response_model=RoutingConfigResponse)
-async def update_routing_config(update: RoutingConfigUpdate):
-    """Update tiered routing configuration.
-
-    Allows reconfiguring duration thresholds, phase base tiers, and escalation settings.
-    Changes are persisted to the config file and take effect immediately.
-    """
-    config = _load_config()
-    routing = config.get("routing", {})
-    valid_phases = {"analyst", "formatter", "seo", "manager", "timestamp", "copy_editor", "chat"}
-
-    # Apply updates (only non-None values)
-    if update.duration_thresholds is not None:
-        routing["duration_thresholds"] = [
-            {"max_minutes": t.max_minutes, "tier": t.tier} for t in update.duration_thresholds
-        ]
-
-    if update.phase_base_tiers is not None:
-        # Validate phases
-        for phase, tier in update.phase_base_tiers.items():
-            if phase not in valid_phases:
-                raise HTTPException(
-                    status_code=400, detail=f"Invalid phase: {phase}. Valid phases: {', '.join(valid_phases)}"
-                )
-            if tier < 0 or tier > 2:
-                raise HTTPException(status_code=400, detail=f"Invalid tier {tier} for {phase}. Must be 0, 1, or 2.")
-        routing["phase_base_tiers"] = update.phase_base_tiers
-
-    if update.escalation is not None:
-        routing["escalation"] = update.escalation.model_dump()
-
-    # Save config
-    config["routing"] = routing
-    _save_config(config)
-
-    # Reload the live LLM client so changes take effect immediately
-    from api.services.llm import get_llm_client
-
-    get_llm_client().reload_config()
-
-    # Return updated config
-    return await get_routing_config()
 
 
 class AvailableModel(BaseModel):
