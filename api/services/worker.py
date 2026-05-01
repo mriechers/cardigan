@@ -1163,6 +1163,39 @@ class JobWorker:
 
         return None
 
+    # Media file extensions for diarization, in preference order
+    MEDIA_EXTENSIONS = [".mp4", ".mkv", ".mov", ".webm", ".wav", ".mp3", ".m4a", ".flac"]
+
+    def _find_media_file(
+        self, job: Dict[str, Any], search_dirs: Optional[List[Path]] = None
+    ) -> Optional[Path]:
+        """Find an audio/video file matching the job's media ID.
+
+        Searches the transcripts directory (and any extra search_dirs) for files
+        whose name starts with the media ID and has a recognized media extension.
+        Returns the first match in MEDIA_EXTENSIONS preference order (video first).
+
+        Args:
+            job: Job dict with media_id and transcript_file fields.
+            search_dirs: Override search directories (for testing). Defaults to TRANSCRIPTS_DIR.
+
+        Returns:
+            Path to the media file, or None if not found.
+        """
+        media_id = job.get("media_id")
+        if not media_id:
+            return None
+
+        dirs_to_search = search_dirs or [Path(os.environ.get("TRANSCRIPTS_DIR", "transcripts"))]
+
+        for ext in self.MEDIA_EXTENSIONS:
+            for search_dir in dirs_to_search:
+                candidate = search_dir / f"{media_id}{ext}"
+                if candidate.exists():
+                    return candidate
+
+        return None
+
     def _get_content_duration_minutes(
         self, transcript_metrics: Dict[str, Any], srt_path: Optional[Path] = None
     ) -> float:
