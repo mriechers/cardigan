@@ -826,14 +826,14 @@ class JobWorker:
             run_summary = await end_run_tracking(job_id)
             current_cost = run_summary["total_cost"] if run_summary else 0
 
-            # Set status to investigating while manager analyzes the failure
+            # Set status to investigating while validator analyzes the failure
             await update_job_status(
                 job_id,
                 JobStatus.investigating,
                 error_message=str(e),
             )
 
-            # Run manager to analyze and decide on recovery action
+            # Run recovery analysis to analyze and decide on recovery action
             recovery_result = await self._analyze_and_recover(
                 job=job,
                 project_path=project_path,
@@ -846,7 +846,7 @@ class JobWorker:
             # If recovery was successful, job status already updated
             if recovery_result.get("recovered"):
                 logger.info(
-                    "Job recovered by manager",
+                    "Job recovered by recovery analysis",
                     extra={
                         "job_id": job_id,
                         "action": recovery_result.get("action"),
@@ -1773,7 +1773,7 @@ REASON: [Brief explanation - 1-2 sentences]
                 if line_upper.startswith("REASON:"):
                     reason = line[line.find(":") + 1 :].strip()
                     break
-                # Check for "### Rationale" section (manager prompt format)
+                # Check for "### Rationale" section (recovery prompt format)
                 elif "RATIONALE" in line_upper and line_upper.startswith("#"):
                     # Get the next non-empty line as the reason
                     for j in range(i + 1, min(i + 5, len(lines))):
@@ -1912,7 +1912,7 @@ REASON: [Brief explanation - 1-2 sentences]
 
                     if fix_content:
                         logger.info(
-                            "Applying manager fix",
+                            "Applying recovery fix",
                             extra={"job_id": job_id, "phase": phase_name, "fix_length": len(fix_content)},
                         )
 
@@ -2099,18 +2099,18 @@ Focus on:
 - Preserving speaker voice while improving prose
 
 Output the polished transcript with any notes on changes made.""",
-            "manager": """You are the QA Manager for Cardigan. Review all pipeline outputs for quality.
+            "validator": """You are a quality validation agent for Cardigan. Review all pipeline outputs for quality.
 
 Check:
 1. Formatter: Speaker labels use first+last name only (no titles like Dr./Mr./Ms.), review notes only at top
 2. SEO: Title <60 chars, descriptions are engaging, tags relevant
 3. Analyst: Speakers identified, topics captured
 
-Output a QA report with:
-- Overall Status: APPROVED or NEEDS_REVISION
-- Checklist of passes/fails
-- Issues found (CRITICAL/MAJOR/MINOR)
-- Recommendation""",
+Output a structured JSON checklist with:
+- overall_status: "approved" or "needs_revision"
+- checks: array of {phase, criterion, passed, note}
+- issues: array of {severity, phase, description}
+- recommendation: string""",
         }
 
         return fallback_prompts.get(
@@ -2403,7 +2403,7 @@ The editor reviewed the previous timestamp output and provided the following fee
                 "analysis": "analyst_output.md",
                 "formatted_transcript": "formatter_output.md",
                 "seo_metadata": "seo_output.md",
-                "qa_review": "manager_output.md",
+                "qa_review": "validator_output.md",
                 "copy_edited": "copy_editor_output.md",
             },
             # Airtable SST linking - enables MCP server to fetch live metadata

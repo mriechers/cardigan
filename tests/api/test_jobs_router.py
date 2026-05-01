@@ -419,7 +419,7 @@ class TestJobOutputs:
             "analyst_output.md",
             "formatter_output.md",
             "seo_output.md",
-            "manager_output.md",
+            "validator_output.md",
             "copy_editor_output.md",
             "recovery_analysis.md",
             "manifest.json",

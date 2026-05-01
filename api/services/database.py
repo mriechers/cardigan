@@ -299,8 +299,8 @@ async def create_job(job: JobCreate) -> Job:
         Complete Job record with generated ID and defaults
     """
     async with get_session() as session:
-        # Initialize phases - automated pipeline phases (manager is QA, copy_editor is interactive)
-        default_phases = ["analyst", "formatter", "seo", "manager"]
+        # Initialize phases - automated pipeline phases (validator is QA, copy_editor is interactive)
+        default_phases = ["analyst", "formatter", "seo", "validator"]
         initial_phases = [JobPhase(name=name, status=PhaseStatus.pending).model_dump() for name in default_phases]
 
         # Derive project_path from project_name if not provided

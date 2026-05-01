@@ -524,7 +524,7 @@ async def get_job_output(job_id: int, filename: str, download: bool = Query(defa
         "analyst_output.md",
         "formatter_output.md",
         "seo_output.md",
-        "manager_output.md",
+        "validator_output.md",
         "timestamp_output.md",
         "copy_editor_output.md",
         "recovery_analysis.md",

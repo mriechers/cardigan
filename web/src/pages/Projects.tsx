@@ -190,7 +190,7 @@ export default function Projects() {
     analyst: 'analysis',
     formatter: 'formatted_transcript',
     seo: 'seo_metadata',
-    manager: 'qa_review',
+    validator: 'qa_review',
     copy_editor: 'copy_edited',
     investigation: 'investigation',
   }
