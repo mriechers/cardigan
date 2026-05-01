@@ -68,3 +68,51 @@ class TestFindMediaFile:
         assert result is not None
         # mp4 is preferred (first in MEDIA_EXTENSIONS list)
         assert result.suffix == ".mp4"
+
+
+class TestFormatterDiarizationPrompt:
+    """Tests for diarization data injection into the formatter prompt."""
+
+    def _make_worker(self):
+        """Create a JobWorker with mocked dependencies."""
+        from api.services.worker import JobWorker
+        worker = JobWorker.__new__(JobWorker)
+        worker.llm = MagicMock()
+        worker.llm.config = {}
+        return worker
+
+    def test_formatter_prompt_includes_diarization_when_present(self):
+        """Formatter prompt includes diarization section when data is in context."""
+        worker = self._make_worker()
+        context = {
+            "transcript": "Hello world",
+            "analyst_output": "Analysis here",
+            "transcript_metrics": {"estimated_duration_minutes": 30},
+            "content_type": "full",
+            "diarization_result": {
+                "duration_seconds": 1800,
+                "speakers": ["Speaker 1", "Speaker 2"],
+                "segments": [
+                    {"start": 0.0, "end": 10.0, "speaker": "Speaker 1", "confidence": 0.95},
+                    {"start": 10.0, "end": 20.0, "speaker": "Speaker 2", "confidence": 0.88},
+                ],
+            },
+        }
+
+        prompt = worker._build_phase_prompt("formatter", context)
+        assert "Speaker Diarization" in prompt
+        assert "Speaker 1" in prompt
+        assert "Speaker 2" in prompt
+
+    def test_formatter_prompt_omits_diarization_when_absent(self):
+        """Formatter prompt has no diarization section when data is not in context."""
+        worker = self._make_worker()
+        context = {
+            "transcript": "Hello world",
+            "analyst_output": "Analysis here",
+            "transcript_metrics": {"estimated_duration_minutes": 30},
+            "content_type": "full",
+        }
+
+        prompt = worker._build_phase_prompt("formatter", context)
+        assert "Speaker Diarization" not in prompt
