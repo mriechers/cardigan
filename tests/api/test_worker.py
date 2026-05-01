@@ -31,7 +31,6 @@ def mock_llm_client():
         "timeout_seconds": 120,
         "max_retries_per_tier": 1,
     }
-    client.get_tier_for_phase_with_reason.return_value = (0, "short transcript")
     client.get_backend_for_phase.return_value = "openrouter-cheapskate"
     client.get_next_tier.return_value = 1
     return client

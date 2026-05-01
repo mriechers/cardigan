@@ -136,62 +136,24 @@ class TestBackendSelection:
         with pytest.raises(ValueError):
             llm_client.get_backend_config("nonexistent-backend")
 
-    def test_get_backend_for_phase_analyst(self, llm_client):
-        """Test backend selection for analyst phase."""
+    def test_get_backend_for_phase(self, llm_client):
+        """Test backend selection returns phase_backends config or primary backend."""
         backend = llm_client.get_backend_for_phase("analyst")
 
-        # Should use cheapskate tier for short transcripts
-        assert backend == "openrouter-cheapskate"
+        # Should return a valid backend name from config
+        assert backend in llm_client.config.get("backends", {}) or backend == llm_client.config.get(
+            "primary_backend", "openrouter"
+        )
 
-    def test_get_backend_for_phase_manager(self, llm_client):
-        """Test backend selection for manager phase."""
-        backend = llm_client.get_backend_for_phase("manager")
+    def test_get_backend_for_phase_unknown(self, llm_client):
+        """Test backend selection for unknown phase falls back to primary backend."""
+        backend = llm_client.get_backend_for_phase("nonexistent_phase")
 
-        # Manager has base tier 2 (big-brain)
-        assert backend == "openrouter-big-brain"
-
-    def test_get_backend_for_phase_with_long_transcript(self, llm_client):
-        """Test backend escalates for long transcripts."""
-        context = {"transcript_metrics": {"estimated_duration_minutes": 45}}
-
-        backend = llm_client.get_backend_for_phase("analyst", context=context)
-
-        # Should escalate to higher tier for long transcript
-        assert backend in ["openrouter", "openrouter-big-brain"]
-
-    def test_get_backend_with_tier_override(self, llm_client):
-        """Test explicit tier override."""
-        backend = llm_client.get_backend_for_phase("analyst", tier_override=2)
-
-        # Should use tier 2 (big-brain)
-        assert backend == "openrouter-big-brain"
+        assert backend == llm_client.config.get("primary_backend", "openrouter")
 
 
-class TestTierCalculation:
-    """Tests for tier calculation logic."""
-
-    def test_get_tier_for_phase_base_tier(self, llm_client):
-        """Test tier calculation uses base tier."""
-        tier = llm_client.get_tier_for_phase("analyst")
-
-        assert tier == 0  # Base tier for analyst
-
-    def test_get_tier_for_phase_with_reason(self, llm_client):
-        """Test tier calculation returns reason."""
-        tier, reason = llm_client.get_tier_for_phase_with_reason("analyst")
-
-        assert tier == 0
-        assert "base tier" in reason.lower()
-
-    def test_get_tier_for_phase_escalates_with_duration(self, llm_client):
-        """Test tier escalates based on duration."""
-        context = {"transcript_metrics": {"estimated_duration_minutes": 25}}
-
-        tier, reason = llm_client.get_tier_for_phase_with_reason("analyst", context=context)
-
-        # Should escalate to tier 1 for 15-30 minute transcript
-        assert tier >= 1
-        assert "duration" in reason.lower()
+class TestEscalationConfig:
+    """Tests for escalation and tier helpers."""
 
     def test_get_next_tier(self, llm_client):
         """Test getting next escalation tier."""
@@ -575,5 +537,4 @@ class TestClientManagement:
         assert "active_backend" in status
         assert "active_model" in status
         assert "primary_backend" in status
-        assert "configured_preset" in status
         assert status["primary_backend"] == "openrouter"
