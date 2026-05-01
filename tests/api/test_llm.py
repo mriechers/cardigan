@@ -35,38 +35,21 @@ def mock_config(tmp_path):
                 "endpoint": "https://openrouter.ai/api/v1/chat/completions",
                 "api_key_env": "OPENROUTER_API_KEY",
                 "model": "google/gemini-2.0-flash-exp",
-                "preset": "cheapskate",
                 "fallback_model": "google/gemini-2.5-flash",
             },
             "openrouter-cheapskate": {
                 "type": "openrouter",
                 "endpoint": "https://openrouter.ai/api/v1/chat/completions",
                 "api_key_env": "OPENROUTER_API_KEY",
-                "preset": "cheapskate",
             },
             "openrouter-big-brain": {
                 "type": "openrouter",
                 "endpoint": "https://openrouter.ai/api/v1/chat/completions",
                 "api_key_env": "OPENROUTER_API_KEY",
-                "preset": "big-brain",
             },
         },
         "routing": {
-            "tiers": ["openrouter-cheapskate", "openrouter", "openrouter-big-brain"],
-            "tier_labels": ["economy", "standard", "premium"],
-            "phase_base_tiers": {"analyst": 0, "formatter": 0, "seo": 0, "manager": 2},
-            "duration_thresholds": [
-                {"max_minutes": 15, "tier": 0},
-                {"max_minutes": 30, "tier": 1},
-                {"max_minutes": None, "tier": 2},
-            ],
-            "escalation": {
-                "enabled": True,
-                "on_failure": True,
-                "on_timeout": True,
-                "timeout_seconds": 120,
-                "max_retries_per_tier": 1,
-            },
+            "phase_base_backends": {"analyst": "openrouter-cheapskate", "formatter": "openrouter-cheapskate", "seo": "openrouter-cheapskate", "manager": "openrouter-big-brain"},
         },
         "safety": {"run_cost_cap": 1.0, "max_cost_per_1k_tokens": 0.05, "model_allowlist": []},
     }
@@ -151,30 +134,6 @@ class TestBackendSelection:
 
         assert backend == llm_client.config.get("primary_backend", "openrouter")
 
-
-class TestEscalationConfig:
-    """Tests for escalation and tier helpers."""
-
-    def test_get_next_tier(self, llm_client):
-        """Test getting next escalation tier."""
-        next_tier = llm_client.get_next_tier(0)
-        assert next_tier == 1
-
-        next_tier = llm_client.get_next_tier(1)
-        assert next_tier == 2
-
-        # No tier beyond max
-        next_tier = llm_client.get_next_tier(2)
-        assert next_tier is None
-
-    def test_get_escalation_config(self, llm_client):
-        """Test retrieving escalation configuration."""
-        config = llm_client.get_escalation_config()
-
-        assert config["enabled"] is True
-        assert config["on_failure"] is True
-        assert config["on_timeout"] is True
-        assert "timeout_seconds" in config
 
 
 class TestCostCalculation:
@@ -431,34 +390,6 @@ class TestAPIInteractions:
         assert response.content == "Test response"
         assert response.model == "google/gemini-2.0-flash-exp"
         assert response.total_tokens == 150
-
-    @pytest.mark.xfail(
-        reason="Mock targets httpx.AsyncClient.post but chat() delegates to _call_openrouter — payload not captured correctly"
-    )
-    @pytest.mark.asyncio
-    async def test_chat_with_preset(self, llm_client, monkeypatch):
-        """Test chat with OpenRouter preset."""
-        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-
-        # Reset global tracker
-        start_run_tracking(job_id=2)
-
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "choices": [{"message": {"content": "Test"}}],
-            "model": "google/gemini-2.0-flash-exp",
-            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-        }
-
-        with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
-            with patch("api.services.llm.log_event"):
-                await llm_client.chat(messages=[{"role": "user", "content": "Hello"}], backend="openrouter-cheapskate")
-
-        # Verify preset was used in request
-        call_args = mock_post.call_args
-        payload = call_args[1]["json"]
-        assert payload["model"] == "@preset/cheapskate"
 
     @pytest.mark.asyncio
     async def test_chat_enforces_safety_guards(self, llm_client):

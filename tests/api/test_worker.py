@@ -19,20 +19,10 @@ def mock_llm_client():
     client = MagicMock()
     client.config = {
         "routing": {
-            "tier_labels": ["economy", "standard", "premium"],
-            "tiers": ["openrouter-cheapskate", "openrouter", "openrouter-big-brain"],
             "long_form_threshold_minutes": 15,
         }
     }
-    client.get_escalation_config.return_value = {
-        "enabled": True,
-        "on_failure": True,
-        "on_timeout": True,
-        "timeout_seconds": 120,
-        "max_retries_per_tier": 1,
-    }
     client.get_backend_for_phase.return_value = "openrouter-cheapskate"
-    client.get_next_tier.return_value = 1
     return client
 
 
@@ -380,69 +370,6 @@ class TestRunPhase:
         assert result["cost"] == 0.001
         assert result["tokens"] == 500
         assert (tmp_path / "analyst_output.md").exists()
-
-    @pytest.mark.asyncio
-    @patch("api.services.worker.get_llm_client")
-    @patch("api.services.worker.log_event")
-    @patch("api.services.worker.AGENTS_DIR")
-    async def test_phase_timeout_with_escalation(
-        self, mock_agents_dir, mock_log_event, mock_get_llm, mock_llm_client, mock_llm_response, tmp_path
-    ):
-        """Should escalate to next tier on timeout."""
-        mock_get_llm.return_value = mock_llm_client
-        mock_log_event.return_value = None
-        mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
-
-        # First call times out, second succeeds
-        mock_llm_client.chat = AsyncMock(side_effect=[asyncio.TimeoutError(), mock_llm_response])
-        mock_llm_client.get_escalation_config.return_value = {
-            "enabled": True,
-            "on_timeout": True,
-            "on_failure": True,
-            "timeout_seconds": 1,
-            "max_retries_per_tier": 1,
-        }
-
-        worker = JobWorker()
-        context = {"transcript": "Test transcript"}
-
-        result = await worker._run_phase(
-            job_id=1,
-            phase_name="analyst",
-            context=context,
-            project_path=tmp_path,
-        )
-
-        assert result["success"] is True
-        assert result["attempts"] >= 1
-
-    @pytest.mark.asyncio
-    @patch("api.services.worker.get_llm_client")
-    @patch("api.services.worker.log_event")
-    @patch("api.services.worker.AGENTS_DIR")
-    async def test_phase_failure_at_max_tier(
-        self, mock_agents_dir, mock_log_event, mock_get_llm, mock_llm_client, tmp_path
-    ):
-        """Should fail when at max tier with no more escalation."""
-        mock_get_llm.return_value = mock_llm_client
-        mock_log_event.return_value = None
-        mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
-
-        mock_llm_client.chat = AsyncMock(side_effect=Exception("LLM Error"))
-        mock_llm_client.get_next_tier.return_value = None  # No next tier
-
-        worker = JobWorker()
-        context = {"transcript": "Test transcript"}
-
-        result = await worker._run_phase(
-            job_id=1,
-            phase_name="analyst",
-            context=context,
-            project_path=tmp_path,
-        )
-
-        assert result["success"] is False
-        assert "LLM Error" in result["error"]
 
 
 class TestHeartbeatLoop:
