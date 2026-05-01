@@ -156,7 +156,7 @@ async def health():
 
 
 # Register routers
-from api.routers import config, ingest, jobs, langfuse, queue, system, upload, websocket
+from api.routers import config, export, ingest, jobs, langfuse, queue, system, upload, websocket
 
 app.include_router(queue.router, prefix="/api/queue", tags=["queue"])
 app.include_router(jobs.router, prefix="/api/jobs", tags=["jobs"])
@@ -166,3 +166,4 @@ app.include_router(upload.router, prefix="/api/upload", tags=["upload"])
 app.include_router(system.router, prefix="/api/system", tags=["system"])
 app.include_router(ingest.router, prefix="/api/ingest", tags=["ingest"])
 app.include_router(langfuse.router, prefix="/api/langfuse", tags=["langfuse"])
+app.include_router(export.router, prefix="/api", tags=["export"])
