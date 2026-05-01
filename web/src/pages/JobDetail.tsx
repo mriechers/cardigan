@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState, useRef, Fragment } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { useFocusTrap } from '../hooks/useFocusTrap'
+import ProseContainer from '../components/ProseContainer'
 import { useToast } from '../components/ui/Toast'
 import { Skeleton } from '../components/ui/Skeleton'
 import { formatRelativeTime, formatTimestamp, formatDuration } from '../utils/formatTime'
@@ -1136,9 +1135,7 @@ export default function JobDetail() {
                   {viewingOutput.content}
                 </pre>
               ) : (
-                <div className="prose prose-invert prose-sm max-w-none prose-table:border-collapse prose-th:border prose-th:border-gray-600 prose-th:p-2 prose-th:bg-gray-800 prose-td:border prose-td:border-gray-700 prose-td:p-2">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{viewingOutput.content}</ReactMarkdown>
-                </div>
+                <ProseContainer content={viewingOutput.content} />
               )}
             </div>
           </div>
