@@ -274,7 +274,8 @@ class JobWorker:
             self._heartbeat_task.cancel()
 
     async def retry_single_phase(
-        self, job_id: int, phase_name: str, feedback: Optional[str] = None
+        self, job_id: int, phase_name: str, feedback: Optional[str] = None,
+        model_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Retry a single phase for a completed job.
 
@@ -285,6 +286,7 @@ class JobWorker:
             job_id: The job ID to retry a phase for
             phase_name: The phase to retry (e.g., 'timestamp', 'seo', 'analyst')
             feedback: Optional editorial feedback to guide the retry
+            model_override: Optional model ID to use instead of the phase default
 
         Returns:
             Dict with status, phase result, and any errors
@@ -357,13 +359,17 @@ class JobWorker:
 
         # Run the phase
         try:
-            logger.info("Retrying single phase", extra={"job_id": job_id, "phase": phase_name})
+            logger.info(
+                "Retrying single phase",
+                extra={"job_id": job_id, "phase": phase_name, "model_override": model_override},
+            )
 
             phase_result = await self._run_phase(
                 job_id=job_id,
                 phase_name=phase_name,
                 context=context,
                 project_path=project_path,
+                model_override=model_override,
             )
 
             # Update phase status in job record
@@ -1248,11 +1254,16 @@ class JobWorker:
         phase_name: str,
         context: Dict[str, Any],
         project_path: Path,
+        model_override: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Run a single agent phase with tiered escalation on failure.
+        """Run a single agent phase.
 
-        Attempts to run with the initial tier based on transcript duration.
-        On failure or timeout, escalates to the next tier and retries.
+        Args:
+            job_id: Job ID for tracking
+            phase_name: Phase to run
+            context: Context dict with transcript, outputs, etc.
+            project_path: Path to project output directory
+            model_override: Optional model ID to override the phase default
         """
         # Check for chunked formatter processing
         if phase_name == "formatter":
@@ -1329,6 +1340,7 @@ class JobWorker:
                 self.llm.chat(
                     messages=messages,
                     backend=backend,
+                    model=model_override,
                     job_id=job_id,
                     phase=phase_name,
                 ),
