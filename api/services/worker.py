@@ -451,6 +451,44 @@ class JobWorker:
 
             await update_job(job_id, JobUpdate(phases=phases))
 
+            # Re-run validator after successful retry (unless we just retried the validator)
+            if phase_name != "validator" and phase_result.get("success"):
+                try:
+                    logger.info("Re-running validator after retry", extra={"job_id": job_id})
+                    # Update context with the new output
+                    context[f"{phase_name}_output"] = phase_result.get("output", "")
+                    validator_result = await self._run_phase(
+                        job_id=job_id,
+                        phase_name="validator",
+                        context=context,
+                        project_path=project_path,
+                    )
+                    if validator_result.get("output"):
+                        try:
+                            validation_data = self._parse_validation_result(
+                                validator_result["output"]
+                            )
+                            await update_job(
+                                job_id, JobUpdate(validation_result=validation_data)
+                            )
+                            logger.info(
+                                "Post-retry validation complete",
+                                extra={
+                                    "job_id": job_id,
+                                    "overall": validation_data.get("overall"),
+                                },
+                            )
+                        except json.JSONDecodeError:
+                            logger.warning(
+                                "Post-retry validator returned invalid JSON",
+                                extra={"job_id": job_id},
+                            )
+                except Exception as e:
+                    logger.warning(
+                        f"Post-retry validation failed (non-fatal): {e}",
+                        extra={"job_id": job_id},
+                    )
+
             return {
                 "success": True,
                 "phase": phase_name,
