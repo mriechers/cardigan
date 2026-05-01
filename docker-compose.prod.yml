@@ -22,6 +22,7 @@ services:
       - airtable_api_key
       - langfuse_public_key
       - langfuse_secret_key
+      - google_drive_credentials
     volumes:
       - db-data:/data/db
       - output-data:/data/output
@@ -159,6 +160,8 @@ secrets:
     file: ./secrets/langfuse_secret_key
   hf_token:
     file: ./secrets/hf_token
+  google_drive_credentials:
+    file: ./secrets/google_drive_credentials
 
 volumes:
   db-data:
