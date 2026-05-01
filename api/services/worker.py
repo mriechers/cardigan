@@ -383,10 +383,8 @@ class JobWorker:
             for p in phases:
                 if p.get("name") == phase_name:
                     # Archive the current run before overwriting
-                    if p.get("model") or p.get("tier") is not None:
+                    if p.get("model"):
                         prev_run = {
-                            "tier": p.get("tier"),
-                            "tier_label": p.get("tier_label"),
                             "model": p.get("model"),
                             "cost": p.get("cost", 0),
                             "tokens": p.get("tokens", 0),
@@ -404,10 +402,6 @@ class JobWorker:
                     p["cost"] = phase_result.get("cost", 0)
                     p["tokens"] = phase_result.get("tokens", 0)
                     p["model"] = phase_result.get("model")
-                    p["tier"] = phase_result.get("tier")
-                    p["tier_label"] = phase_result.get("tier_label")
-                    p["tier_reason"] = phase_result.get("tier_reason")
-                    p["attempts"] = phase_result.get("attempts", 1)
                     p["completed_at"] = datetime.now(timezone.utc).isoformat()
                     phase_updated = True
                     break
