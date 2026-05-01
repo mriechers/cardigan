@@ -13,6 +13,7 @@ Langfuse credentials are loaded from:
 2. macOS Keychain via keychain_secrets (fallback)
 """
 
+import asyncio
 import json
 import uuid
 from dataclasses import dataclass
@@ -200,9 +201,12 @@ class LangfuseClient:
                 },
             ]
 
-            resp = await self._http_client.post(
-                "/api/public/ingestion",
-                json={"batch": batch},
+            resp = await asyncio.wait_for(
+                self._http_client.post(
+                    "/api/public/ingestion",
+                    json={"batch": batch},
+                ),
+                timeout=5.0,
             )
             resp.raise_for_status()
 
