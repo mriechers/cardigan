@@ -495,6 +495,17 @@ async def get_job_events(job_id: int):
     return events
 
 
+def _make_download_filename(project_name: str, filename: str) -> str:
+    """Create a download filename prefixed with sanitized project name.
+
+    Example: "Wisconsin Life / 2WLI1209HD" + "analyst_output.md"
+             → "Wisconsin-Life-2WLI1209HD-analyst_output.md"
+    """
+    sanitized = re.sub(r"[^a-zA-Z0-9._-]+", "-", project_name)
+    sanitized = re.sub(r"-{2,}", "-", sanitized).strip("-")
+    return f"{sanitized}-{filename}"
+
+
 @router.get("/{job_id}/outputs/{filename}")
 async def get_job_output(job_id: int, filename: str, download: bool = Query(default=False)):
     """Retrieve an output file for a specific job.
@@ -562,7 +573,8 @@ async def get_job_output(job_id: int, filename: str, download: bool = Query(defa
     media_type = "application/json" if filename.endswith(".json") else "text/markdown"
     headers = {}
     if download:
-        headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+        download_name = _make_download_filename(job.project_name or "", filename)
+        headers["Content-Disposition"] = f'attachment; filename="{download_name}"'
     return PlainTextResponse(content, media_type=media_type, headers=headers)
 
 
