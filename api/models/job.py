@@ -172,6 +172,7 @@ class Job(BaseModel):
     word_count: Optional[int] = Field(None, description="Transcript word count")
     content_type: Optional[str] = Field(None, description="Detected content type: 'full', 'short', or 'clip'")
     outputs: Optional[JobOutputs] = Field(None, description="Output files from manifest")
+    app_version: Optional[str] = None
 
     class Config:
         from_attributes = True
