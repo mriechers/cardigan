@@ -90,6 +90,7 @@ jobs_table = Table(
     Column("duration_minutes", Float, nullable=True),
     Column("word_count", Integer, nullable=True),
     Column("content_type", Text, nullable=True),  # 'full', 'short', or 'clip'
+    Column("app_version", Text, nullable=True),
 )
 
 # Define session_stats table
@@ -101,6 +102,7 @@ session_stats_table = Table(
     Column("timestamp", DateTime, server_default=func.current_timestamp()),
     Column("event_type", Text, nullable=False),
     Column("data", Text, nullable=True),
+    Column("app_version", Text, nullable=True),
 )
 
 # Define config table
@@ -128,6 +130,7 @@ chat_sessions_table = Table(
     Column("message_count", Integer, server_default="0"),
     Column("status", Text, server_default="active"),  # active, archived, cleared
     Column("model", Text, nullable=True),  # Primary model used in session
+    Column("app_version", Text, nullable=True),
 )
 
 # Define chat_messages table for message history
