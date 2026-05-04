@@ -30,6 +30,35 @@ epoch instead of averaging across regimes.
 The env var also accepts non-default values without code edits — handy
 for short-lived experiments: `CARDIGAN_VERSION=v4.2-rc1 docker compose up -d`.
 
+## Schema-change ordering (any new column on jobs / session_stats / chat_sessions)
+
+If a release adds a column the running code writes to, the deploy
+sequence must be **migrate before restart**. The hazard: between
+`docker compose up -d` (new code, new env, new INSERT shape) and
+`alembic upgrade head` (new column exists), every write fails because
+the column doesn't exist yet.
+
+Correct order for any schema-touching deploy:
+
+1. `scripts/snapshot_db.sh` — fall-back snapshot before touching prod data.
+2. `docker exec cardigan-v4-api-1 alembic upgrade head` — apply pending
+   migrations against the running stack. Adding a nullable column is
+   metadata-only; the existing code keeps working because it doesn't
+   yet write the new field.
+3. Verify the new column landed:
+   ```bash
+   docker exec cardigan-v4-api-1 python3 -c "
+   import sqlite3
+   c = sqlite3.connect('/data/db/dashboard.db').cursor()
+   print([r[1] for r in c.execute('PRAGMA table_info(jobs)')])
+   "
+   ```
+4. **Now** restart with the new code: `docker compose up -d`.
+5. Spot-check that fresh writes populate the new column.
+
+Migrations that drop columns or rewrite data need additional care
+(usually a two-step deploy). This doc covers the additive case.
+
 ## Daily snapshots
 
 `scripts/snapshot_db.sh` runs from cron at 03:00 daily. Output:
