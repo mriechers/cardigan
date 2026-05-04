@@ -53,6 +53,25 @@ def _parse_dt(value: Optional[str]) -> Optional[datetime]:
     return None
 
 
+def _norm_queued_at(val) -> str:
+    """Normalize a datetime-or-string to 'YYYY-MM-DD HH:MM:SS' for dedup keys.
+
+    Handles three observed formats:
+      - sqlite raw string with microseconds: '2025-12-30 02:16:47.617491'
+      - sqlite raw string, date only: '2026-01-01'
+      - aiosqlite-returned datetime: datetime(2025, 12, 30, 2, 16, 47, 617491)
+      - ISO 8601 with T separator (future archives): '2027-05-01T14:00:00'
+    """
+    if val is None:
+        return ""
+    if isinstance(val, datetime):
+        return val.strftime("%Y-%m-%d %H:%M:%S")
+    s = str(val).replace("T", " ")
+    if len(s) == 10:
+        return f"{s} 00:00:00"
+    return s[:19]
+
+
 async def backfill(
     source_db: str,
     app_version: str,
@@ -72,127 +91,116 @@ async def backfill(
     src = sqlite3.connect(source_db)
     src.row_factory = sqlite3.Row
 
-    await db_mod.init_db()
+    try:
+        await db_mod.init_db()
 
-    async with db_mod.get_session() as live:
-        # Build set of (project_path, transcript_file, queued_at) keys already in live DB.
-        # Normalize queued_at to date string (YYYY-MM-DD) for comparison, since the source
-        # DB stores bare dates and the live DB stores full datetimes.
-        existing_result = await live.execute(text(
-            "SELECT project_path, transcript_file, queued_at FROM jobs WHERE app_version = :v"
-        ), {"v": app_version})
+        async with db_mod.get_session() as live:
+            # Build set of (project_path, transcript_file, queued_at) keys already in live DB.
+            # _norm_queued_at handles both raw sqlite strings and aiosqlite datetimes.
+            existing_result = await live.execute(text(
+                "SELECT project_path, transcript_file, queued_at FROM jobs WHERE app_version = :v"
+            ), {"v": app_version})
+            seen = {(r[0], r[1], _norm_queued_at(r[2])) for r in existing_result.fetchall()}
 
-        def _norm_queued_at(val) -> str:
-            """Normalize queued_at to a consistent string for dedup comparison."""
-            if val is None:
-                return ""
-            if isinstance(val, datetime):
-                return val.strftime("%Y-%m-%d %H:%M:%S")
-            s = str(val)
-            # If the string has only a date part, expand to datetime
-            if len(s) == 10:
-                return s + " 00:00:00"
-            return s[:19]  # truncate to seconds
+            id_map: Dict[int, int] = {}
 
-        seen = {(r[0], r[1], _norm_queued_at(r[2])) for r in existing_result.fetchall()}
-
-        id_map: Dict[int, int] = {}
-
-        # Phase 1: jobs
-        for row in src.execute("SELECT * FROM jobs").fetchall():
-            key = (row["project_path"], row["transcript_file"], _norm_queued_at(row["queued_at"]))
-            if key in seen:
-                summary["skipped_duplicate_jobs"] += 1
-                continue
-
-            # Build values dict from source row, overriding app_version and dropping id
-            # Parse datetime strings into Python datetime objects for SQLAlchemy
-            values = {}
-            for k in row.keys():
-                if k == "id":
+            # Phase 1: jobs
+            for row in src.execute("SELECT * FROM jobs").fetchall():
+                key = (row["project_path"], row["transcript_file"], _norm_queued_at(row["queued_at"]))
+                if key in seen:
+                    summary["skipped_duplicate_jobs"] += 1
                     continue
-                val = row[k]
-                if k in _DATETIME_COLS_JOBS:
-                    val = _parse_dt(val)
-                values[k] = val
-            values["app_version"] = app_version
 
-            # Some columns may not exist in source DB (newer columns) — fill defaults
-            for col_name, default in [
-                ("retry_count", 0), ("max_retries", 3), ("estimated_cost", 0.0),
-                ("phases", None), ("agent_phases", '["analyst","formatter"]'),
-                ("manifest_path", None), ("logs_path", None),
-            ]:
-                values.setdefault(col_name, default)
+                # Build values dict from source row, overriding app_version and dropping id
+                # Parse datetime strings into Python datetime objects for SQLAlchemy
+                values = {}
+                for k in row.keys():
+                    if k == "id":
+                        continue
+                    val = row[k]
+                    if k in _DATETIME_COLS_JOBS:
+                        val = _parse_dt(val)
+                    values[k] = val
+                values["app_version"] = app_version
 
-            summary["jobs_inserted"] += 1
+                # Some columns may not exist in source DB (newer columns) — fill defaults.
+                # Note: content_type and app_version are nullable, so they are intentionally
+                # absent from this defaults block.
+                for col_name, default in [
+                    ("retry_count", 0), ("max_retries", 3), ("estimated_cost", 0.0),
+                    ("phases", None), ("agent_phases", '["analyst","formatter"]'),
+                    ("manifest_path", None), ("logs_path", None),
+                ]:
+                    values.setdefault(col_name, default)
+
+                summary["jobs_inserted"] += 1
+                if dry_run:
+                    # Map old id to a sentinel so phase-2 dry-run counts are honest
+                    id_map[row["id"]] = -row["id"]
+                    continue
+
+                stmt = db_mod.jobs_table.insert().values(**values)
+                result = await live.execute(stmt)
+                new_id = result.inserted_primary_key[0]
+                id_map[row["id"]] = new_id
+
             if dry_run:
-                # Map old id to a sentinel so phase-2 dry-run counts are honest
-                id_map[row["id"]] = -row["id"]
-                continue
+                # Phase-2 dry-run: count events that would map to a job we'd insert
+                for row in src.execute("SELECT job_id FROM session_stats").fetchall():
+                    if row["job_id"] is None or row["job_id"] in id_map:
+                        summary["session_stats_inserted"] += 1
+                try:
+                    for row in src.execute("SELECT job_id FROM chat_sessions").fetchall():
+                        if row["job_id"] in id_map:
+                            summary["chat_sessions_inserted"] += 1
+                except sqlite3.OperationalError:
+                    pass
+                return summary
 
-            stmt = db_mod.jobs_table.insert().values(**values)
-            result = await live.execute(stmt)
-            new_id = result.inserted_primary_key[0]
-            id_map[row["id"]] = new_id
-
-        if dry_run:
-            # Phase-2 dry-run: count events that would map to a job we'd insert
-            for row in src.execute("SELECT job_id FROM session_stats").fetchall():
-                if row["job_id"] is None or row["job_id"] in id_map:
-                    summary["session_stats_inserted"] += 1
-            try:
-                for row in src.execute("SELECT job_id FROM chat_sessions").fetchall():
-                    if row["job_id"] in id_map:
-                        summary["chat_sessions_inserted"] += 1
-            except sqlite3.OperationalError:
-                pass
-            src.close()
-            return summary
-
-        # Phase 2: session_stats — translate job_id
-        for row in src.execute("SELECT * FROM session_stats").fetchall():
-            old_job_id = row["job_id"]
-            new_job_id = id_map.get(old_job_id) if old_job_id is not None else None
-            if old_job_id is not None and new_job_id is None:
-                # Source row referred to a job we skipped (duplicate) — skip event too
-                continue
-
-            values = {
-                "job_id": new_job_id,
-                "timestamp": _parse_dt(row["timestamp"]),
-                "event_type": row["event_type"],
-                "data": row["data"],
-                "app_version": app_version,
-            }
-            await live.execute(db_mod.session_stats_table.insert().values(**values))
-            summary["session_stats_inserted"] += 1
-
-        # Phase 3: chat_sessions — translate job_id
-        try:
-            chat_rows = src.execute("SELECT * FROM chat_sessions").fetchall()
-        except sqlite3.OperationalError:
-            chat_rows = []  # Source DB pre-dates chat_sessions table
-
-        for row in chat_rows:
-            new_job_id = id_map.get(row["job_id"])
-            if new_job_id is None:
-                continue
-            values = {}
-            for k in row.keys():
-                if k == "job_id":
+            # Phase 2: session_stats — translate job_id
+            for row in src.execute("SELECT * FROM session_stats").fetchall():
+                old_job_id = row["job_id"]
+                new_job_id = id_map.get(old_job_id) if old_job_id is not None else None
+                if old_job_id is not None and new_job_id is None:
+                    # Source row referred to a job we skipped (duplicate) — skip event too
                     continue
-                val = row[k]
-                if k in _DATETIME_COLS_CHAT_SESSIONS:
-                    val = _parse_dt(val)
-                values[k] = val
-            values["job_id"] = new_job_id
-            values["app_version"] = app_version
-            await live.execute(db_mod.chat_sessions_table.insert().values(**values))
-            summary["chat_sessions_inserted"] += 1
 
-    src.close()
-    return summary
+                values = {
+                    "job_id": new_job_id,
+                    "timestamp": _parse_dt(row["timestamp"]),
+                    "event_type": row["event_type"],
+                    "data": row["data"],
+                    "app_version": app_version,
+                }
+                await live.execute(db_mod.session_stats_table.insert().values(**values))
+                summary["session_stats_inserted"] += 1
+
+            # Phase 3: chat_sessions — translate job_id
+            try:
+                chat_rows = src.execute("SELECT * FROM chat_sessions").fetchall()
+            except sqlite3.OperationalError:
+                chat_rows = []  # Source DB pre-dates chat_sessions table
+
+            for row in chat_rows:
+                new_job_id = id_map.get(row["job_id"])
+                if new_job_id is None:
+                    continue
+                values = {}
+                for k in row.keys():
+                    if k == "job_id":
+                        continue
+                    val = row[k]
+                    if k in _DATETIME_COLS_CHAT_SESSIONS:
+                        val = _parse_dt(val)
+                    values[k] = val
+                values["job_id"] = new_job_id
+                values["app_version"] = app_version
+                await live.execute(db_mod.chat_sessions_table.insert().values(**values))
+                summary["chat_sessions_inserted"] += 1
+
+        return summary
+    finally:
+        src.close()
 
 
 def _cli() -> None:
