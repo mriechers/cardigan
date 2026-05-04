@@ -14,6 +14,11 @@ SNAP_DIR="${CARDIGAN_SNAP_DIR:-$HOME/Developer/pbswi/cardigan-v4/.snapshots}"
 DATE_TAG="$(date +%Y%m%d-%H%M%S)"
 DEST="$SNAP_DIR/dashboard-$DATE_TAG.db"
 
+# Clean up the uncompressed .db on any error (e.g. disk full mid-gzip).
+# rm -f is a no-op once gzip has succeeded (it removes the source on success),
+# so the resulting .db.gz is preserved through normal exit.
+trap 'rm -f "$DEST"' EXIT
+
 mkdir -p "$SNAP_DIR"
 
 docker exec "$CONTAINER" python3 -c "
