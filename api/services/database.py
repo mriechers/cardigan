@@ -40,7 +40,7 @@ from sqlalchemy.ext.asyncio import (
 # Override via CARDIGAN_VERSION env var (set in docker-compose.yml).
 # Bump the default literal each time the codebase changes meaningfully
 # enough that cost/quality should not be averaged with the prior epoch.
-APP_VERSION = os.getenv("CARDIGAN_VERSION", "v4.1")
+APP_VERSION = os.getenv("CARDIGAN_VERSION") or "v4.1"
 
 from api.models.chat import ChatMessage, ChatSession, ChatSessionStatus
 from api.models.config import ConfigItem, ConfigValueType
