@@ -43,11 +43,11 @@ def _make_v21_fixture(path: str) -> None:
             status TEXT DEFAULT 'active'
         );
         INSERT INTO jobs (id, project_path, transcript_file, status, queued_at, actual_cost)
-            VALUES (1, '/p/legacy-1', '/t/1.txt', 'completed', '2026-01-01', 0.05),
+            VALUES (1, '/p/legacy-1', '/t/1.txt', 'completed', '2026-01-01 02:16:47.617491', 0.05),
                    (2, '/p/legacy-2', '/t/2.txt', 'completed', '2026-01-02', 0.07);
         INSERT INTO session_stats (id, job_id, timestamp, event_type, data)
-            VALUES (10, 1, '2026-01-01', 'phase_completed', '{"cost":0.05}'),
-                   (11, 2, '2026-01-02', 'phase_completed', '{"cost":0.07}');
+            VALUES (10, 1, '2026-01-01 02:23:10.298219', 'phase_completed', '{"cost":0.05}'),
+                   (11, 2, '2026-01-02 03:00:00', 'phase_completed', '{"cost":0.07}');
     """)
     c.commit()
     c.close()
@@ -124,3 +124,22 @@ async def test_backfill_is_idempotent(live_and_source_dbs):
     assert s1["jobs_inserted"] == 2
     assert s2["jobs_inserted"] == 0  # second run sees nothing new
     assert s2["skipped_duplicate_jobs"] == 2
+    assert s2["session_stats_inserted"] == 0  # second run skips events too
+
+
+@pytest.mark.asyncio
+async def test_backfill_dry_run_writes_nothing(live_and_source_dbs):
+    """--dry-run reports counts without modifying the live DB."""
+    paths = live_and_source_dbs
+    summary = await backfill(source_db=paths["source"], app_version="v2.1", dry_run=True)
+
+    # Counts reported as if real
+    assert summary["jobs_inserted"] == 2
+    assert summary["session_stats_inserted"] == 2
+
+    # But nothing actually written
+    c = sqlite3.connect(paths["live"]).cursor()
+    rows = list(c.execute("SELECT COUNT(*) FROM jobs WHERE app_version = 'v2.1'"))
+    assert rows[0][0] == 0
+    rows = list(c.execute("SELECT COUNT(*) FROM session_stats WHERE app_version = 'v2.1'"))
+    assert rows[0][0] == 0
