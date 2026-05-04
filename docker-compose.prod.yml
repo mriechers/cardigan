@@ -17,6 +17,7 @@ services:
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000}
       - TRANSCRIPTS_DIR=/data/transcripts
       - LANGFUSE_BASE_URL=https://us.cloud.langfuse.com
+      - CARDIGAN_VERSION=${CARDIGAN_VERSION:-v4.1}
     secrets:
       - openrouter_api_key
       - airtable_api_key
@@ -43,6 +44,7 @@ services:
       - OUTPUT_DIR=/data/output
       - TRANSCRIPTS_DIR=/data/transcripts
       - LANGFUSE_BASE_URL=https://us.cloud.langfuse.com
+      - CARDIGAN_VERSION=${CARDIGAN_VERSION:-v4.1}
     secrets:
       - openrouter_api_key
       - airtable_api_key
