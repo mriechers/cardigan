@@ -36,6 +36,12 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+# App version tag stamped on all rows produced by this process.
+# Override via CARDIGAN_VERSION env var (set in docker-compose.yml).
+# Bump the default literal each time the codebase changes meaningfully
+# enough that cost/quality should not be averaged with the prior epoch.
+APP_VERSION = os.getenv("CARDIGAN_VERSION", "v4.1")
+
 from api.models.chat import ChatMessage, ChatSession, ChatSessionStatus
 from api.models.config import ConfigItem, ConfigValueType
 from api.models.events import EventCreate, EventData, EventType, SessionEvent
@@ -323,7 +329,7 @@ def sanitize_path_component(name: str) -> str:
 # ============================================================================
 
 
-async def create_job(job: JobCreate) -> Job:
+async def create_job(job: JobCreate, app_version: Optional[str] = None) -> Job:
     """Create a new job in the database.
 
     Args:
@@ -359,6 +365,7 @@ async def create_job(job: JobCreate) -> Job:
             "phases": json.dumps(initial_phases),
             "retry_count": 0,
             "max_retries": 3,
+            "app_version": app_version if app_version is not None else APP_VERSION,
         }
 
         # Insert job
@@ -1054,7 +1061,7 @@ async def run_stuck_job_cleanup(threshold_minutes: int = 10) -> dict:
 # ============================================================================
 
 
-async def log_event(event: EventCreate) -> SessionEvent:
+async def log_event(event: EventCreate, app_version: Optional[str] = None) -> SessionEvent:
     """Log a session event to the database.
 
     Args:
@@ -1074,6 +1081,7 @@ async def log_event(event: EventCreate) -> SessionEvent:
             "timestamp": datetime.now(timezone.utc),
             "event_type": event.event_type.value,
             "data": data_json,
+            "app_version": app_version if app_version is not None else APP_VERSION,
         }
 
         stmt = session_stats_table.insert().values(**values)
@@ -1294,6 +1302,7 @@ def _row_to_job(row) -> Job:
         word_count=getattr(row, "word_count", None),
         content_type=getattr(row, "content_type", None),
         outputs=outputs,
+        app_version=getattr(row, "app_version", None),
     )
 
 
@@ -1336,6 +1345,7 @@ async def create_chat_session(
     session_id: str,
     job_id: int,
     project_name: str,
+    app_version: Optional[str] = None,
 ) -> ChatSession:
     """Create a new chat session for a job.
 
@@ -1358,6 +1368,7 @@ async def create_chat_session(
             "total_cost": 0.0,
             "message_count": 0,
             "status": ChatSessionStatus.active.value,
+            "app_version": app_version if app_version is not None else APP_VERSION,
         }
 
         stmt = chat_sessions_table.insert().values(**values)
@@ -1641,6 +1652,7 @@ def _row_to_chat_session(row) -> ChatSession:
         message_count=row.message_count,
         status=ChatSessionStatus(row.status),
         model=row.model,
+        app_version=getattr(row, "app_version", None),
     )
 
 
