@@ -111,11 +111,15 @@ async def backfill(
                     summary["skipped_duplicate_jobs"] += 1
                     continue
 
-                # Build values dict from source row, overriding app_version and dropping id
-                # Parse datetime strings into Python datetime objects for SQLAlchemy
+                # Build values dict from source row, overriding app_version and dropping id.
+                # Filter by live schema so a source DB with extra columns (e.g. from a
+                # later migration that the live DB has since dropped) doesn't crash the
+                # insert with "Unconsumed column names".
+                # Parse datetime strings into Python datetime objects for SQLAlchemy.
+                allowed = set(db_mod.jobs_table.c.keys())
                 values = {}
                 for k in row.keys():
-                    if k == "id":
+                    if k == "id" or k not in allowed:
                         continue
                     val = row[k]
                     if k in _DATETIME_COLS_JOBS:
