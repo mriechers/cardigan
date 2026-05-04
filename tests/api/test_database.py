@@ -805,3 +805,33 @@ async def test_create_job_accepts_app_version_override(test_db):
         app_version="v2.1",
     )
     assert job.app_version == "v2.1"
+
+
+@pytest.mark.asyncio
+async def test_create_chat_session_app_version_default_and_override(test_db):
+    """create_chat_session stamps APP_VERSION by default; accepts explicit override."""
+    from api.services.database import create_chat_session
+
+    job = await create_job(
+        JobCreate(project_name="cs", project_path="/p/cs", transcript_file="/t/cs.txt")
+    )
+
+    # Default path
+    default_session = await create_chat_session(
+        session_id="00000000-0000-0000-0000-000000000001",
+        job_id=job.id,
+        project_name="cs",
+    )
+    # Default APP_VERSION at module import is whatever CARDIGAN_VERSION resolved to —
+    # in test env that's "v4.1" (the literal fallback). Re-import the constant to be safe.
+    from api.services.database import APP_VERSION
+    assert default_session.app_version == APP_VERSION
+
+    # Override path
+    override_session = await create_chat_session(
+        session_id="00000000-0000-0000-0000-000000000002",
+        job_id=job.id,
+        project_name="cs",
+        app_version="v2.1",
+    )
+    assert override_session.app_version == "v2.1"
