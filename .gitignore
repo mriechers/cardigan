@@ -34,3 +34,8 @@ logs/
 # Non-Claude agent worktrees (created per CLAUDE.md isolation rules)
 .worktrees/
 .claude/worktrees/
+
+# Database snapshots — keep directory, ignore contents except gitkeep and the v2.1 archive
+.snapshots/*
+!.snapshots/.gitkeep
+!.snapshots/dashboard-v2.1-archive.db
