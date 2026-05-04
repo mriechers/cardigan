@@ -17,6 +17,7 @@ COPY .claude/ .claude/
 COPY knowledge/ knowledge/
 COPY alembic.ini* ./
 COPY alembic/ alembic/
+COPY scripts/ scripts/
 COPY pyproject.toml* ./
 COPY run_worker.py .
 COPY entrypoint.sh .
