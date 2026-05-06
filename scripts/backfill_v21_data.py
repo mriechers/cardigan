@@ -27,7 +27,6 @@ from sqlalchemy import text
 
 from api.services import database as db_mod
 
-
 _DATETIME_COLS_JOBS = {"queued_at", "started_at", "completed_at", "error_timestamp", "last_heartbeat"}
 _DATETIME_COLS_SESSION_STATS = {"timestamp"}
 _DATETIME_COLS_CHAT_SESSIONS = {"created_at", "updated_at"}
