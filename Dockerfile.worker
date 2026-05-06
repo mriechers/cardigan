@@ -21,6 +21,11 @@ COPY run_worker.py .
 COPY entrypoint.sh .
 RUN chmod +x entrypoint.sh
 
+# Resolve __version__ at build time. See Dockerfile.api / docs/VERSIONING.md.
+ARG SETUPTOOLS_SCM_PRETEND_VERSION_FOR_EDITORIAL_ASSISTANT=0.0.0+unknown
+ENV SETUPTOOLS_SCM_PRETEND_VERSION_FOR_EDITORIAL_ASSISTANT=${SETUPTOOLS_SCM_PRETEND_VERSION_FOR_EDITORIAL_ASSISTANT}
+RUN pip install -e . --no-deps
+
 # Create writable directories before switching to non-root user
 RUN mkdir -p logs /data/db /data/output /data/transcripts
 

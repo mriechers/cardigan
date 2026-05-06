@@ -21,6 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
+from api import __version__
 from api.middleware.auth import APIKeyMiddleware
 from api.middleware.rate_limit import limiter, rate_limit_exceeded_handler
 from api.services import database
@@ -65,7 +66,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Cardigan API",
     description="API for Cardigan - PBS Wisconsin transcript processing and metadata generation",
-    version="4.0.0",
+    version=__version__,
     lifespan=lifespan,
 )
 
@@ -109,7 +110,7 @@ async def global_exception_handler(request, exc):
 @app.get("/")
 async def root():
     """Health check endpoint."""
-    return {"status": "ok", "version": "4.0.0"}
+    return {"status": "ok", "version": __version__}
 
 
 @app.get("/api/system/health")

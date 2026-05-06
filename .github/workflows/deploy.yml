@@ -21,7 +21,18 @@ jobs:
       packages: write
 
     steps:
+      # fetch-depth: 0 pulls full history + tags so setuptools_scm can compute version
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version from git tags
+        id: version
+        run: |
+          python3 -m pip install --quiet setuptools_scm
+          VERSION=$(python3 -m setuptools_scm)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -43,6 +54,8 @@ jobs:
           file: Dockerfile.api
           push: true
           platforms: linux/amd64,linux/arm64
+          build-args: |
+            SETUPTOOLS_SCM_PRETEND_VERSION_FOR_EDITORIAL_ASSISTANT=${{ steps.version.outputs.version }}
           tags: |
             ${{ env.IMAGE_PREFIX }}-api:latest
             ${{ env.IMAGE_PREFIX }}-api:${{ github.sha }}
@@ -56,6 +69,8 @@ jobs:
           file: Dockerfile.worker
           push: true
           platforms: linux/amd64,linux/arm64
+          build-args: |
+            SETUPTOOLS_SCM_PRETEND_VERSION_FOR_EDITORIAL_ASSISTANT=${{ steps.version.outputs.version }}
           tags: |
             ${{ env.IMAGE_PREFIX }}-worker:latest
             ${{ env.IMAGE_PREFIX }}-worker:${{ github.sha }}
