@@ -739,6 +739,7 @@ async def test_create_job_sets_default_app_version(test_db, monkeypatch):
     monkeypatch.setenv("CARDIGAN_VERSION", "v4.2-test")
     # APP_VERSION is read at module import, so we re-read from os.environ via a helper
     import importlib
+
     import api.services.database as db_mod
 
     # Save current engine state (set up by test_db fixture)
@@ -765,6 +766,7 @@ async def test_create_job_sets_default_app_version(test_db, monkeypatch):
 async def test_log_event_sets_default_app_version(test_db, monkeypatch):
     monkeypatch.setenv("CARDIGAN_VERSION", "v4.2-test")
     import importlib
+
     import api.services.database as db_mod
 
     # Save current engine state (set up by test_db fixture)
