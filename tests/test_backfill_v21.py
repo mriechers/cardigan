@@ -1,4 +1,5 @@
 """Backfill correctness: v2.1 rows land in live DB tagged 'v2.1' with new IDs."""
+
 import os
 import sqlite3
 import tempfile
@@ -67,9 +68,10 @@ async def live_and_source_dbs():
         await db_mod.init_db()
         # Insert one collision-id v4 job so we can prove translation works
         from api.models.job import JobCreate
-        existing = await db_mod.create_job(JobCreate(
-            project_name="current", project_path="/p/current",
-            transcript_file="/t/current.txt"))
+
+        existing = await db_mod.create_job(
+            JobCreate(project_name="current", project_path="/p/current", transcript_file="/t/current.txt")
+        )
         assert existing.id == 1  # collision target
 
         _make_v21_fixture(src)
@@ -89,9 +91,7 @@ async def test_backfill_inserts_v21_jobs_with_new_ids(live_and_source_dbs):
     assert summary["session_stats_inserted"] == 2
 
     c = sqlite3.connect(paths["live"]).cursor()
-    rows = list(c.execute(
-        "SELECT app_version, COUNT(*) FROM jobs GROUP BY app_version ORDER BY 1"
-    ))
+    rows = list(c.execute("SELECT app_version, COUNT(*) FROM jobs GROUP BY app_version ORDER BY 1"))
     # One v4.1 row (existing), two v2.1 rows (backfilled)
     assert ("v2.1", 2) in rows
     assert ("v4.1", 1) in rows

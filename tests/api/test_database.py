@@ -787,11 +787,14 @@ async def test_log_event_sets_default_app_version(test_db, monkeypatch):
     )
     # Read raw row to inspect column
     from sqlalchemy import text
+
     async with db_mod.get_session() as s:
-        row = (await s.execute(
-            text("SELECT app_version FROM session_stats WHERE id = :id"),
-            {"id": event.id},
-        )).fetchone()
+        row = (
+            await s.execute(
+                text("SELECT app_version FROM session_stats WHERE id = :id"),
+                {"id": event.id},
+            )
+        ).fetchone()
     assert row[0] == "v4.2-test"
 
 
@@ -814,9 +817,7 @@ async def test_create_chat_session_app_version_default_and_override(test_db):
     """create_chat_session stamps APP_VERSION by default; accepts explicit override."""
     from api.services.database import create_chat_session
 
-    job = await create_job(
-        JobCreate(project_name="cs", project_path="/p/cs", transcript_file="/t/cs.txt")
-    )
+    job = await create_job(JobCreate(project_name="cs", project_path="/p/cs", transcript_file="/t/cs.txt"))
 
     # Default path
     default_session = await create_chat_session(
@@ -827,6 +828,7 @@ async def test_create_chat_session_app_version_default_and_override(test_db):
     # Default APP_VERSION at module import is whatever CARDIGAN_VERSION resolved to —
     # in test env that's "v4.1" (the literal fallback). Re-import the constant to be safe.
     from api.services.database import APP_VERSION
+
     assert default_session.app_version == APP_VERSION
 
     # Override path
