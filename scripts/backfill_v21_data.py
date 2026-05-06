@@ -14,6 +14,7 @@ Usage:
         --app-version v2.1 \\
         [--dry-run]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -96,9 +97,10 @@ async def backfill(
         async with db_mod.get_session() as live:
             # Build set of (project_path, transcript_file, queued_at) keys already in live DB.
             # _norm_queued_at handles both raw sqlite strings and aiosqlite datetimes.
-            existing_result = await live.execute(text(
-                "SELECT project_path, transcript_file, queued_at FROM jobs WHERE app_version = :v"
-            ), {"v": app_version})
+            existing_result = await live.execute(
+                text("SELECT project_path, transcript_file, queued_at FROM jobs WHERE app_version = :v"),
+                {"v": app_version},
+            )
             seen = {(r[0], r[1], _norm_queued_at(r[2])) for r in existing_result.fetchall()}
 
             id_map: Dict[int, int] = {}
@@ -130,9 +132,13 @@ async def backfill(
                 # Note: content_type and app_version are nullable, so they are intentionally
                 # absent from this defaults block.
                 for col_name, default in [
-                    ("retry_count", 0), ("max_retries", 3), ("estimated_cost", 0.0),
-                    ("phases", None), ("agent_phases", '["analyst","formatter"]'),
-                    ("manifest_path", None), ("logs_path", None),
+                    ("retry_count", 0),
+                    ("max_retries", 3),
+                    ("estimated_cost", 0.0),
+                    ("phases", None),
+                    ("agent_phases", '["analyst","formatter"]'),
+                    ("manifest_path", None),
+                    ("logs_path", None),
                 ]:
                     values.setdefault(col_name, default)
 
@@ -213,11 +219,13 @@ def _cli() -> None:
     p.add_argument("--dry-run", action="store_true", help="Report counts without inserting")
     args = p.parse_args()
 
-    summary = asyncio.run(backfill(
-        source_db=args.source,
-        app_version=args.app_version,
-        dry_run=args.dry_run,
-    ))
+    summary = asyncio.run(
+        backfill(
+            source_db=args.source,
+            app_version=args.app_version,
+            dry_run=args.dry_run,
+        )
+    )
     print(json.dumps(summary, indent=2))
 
 

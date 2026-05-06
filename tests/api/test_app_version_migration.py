@@ -1,4 +1,5 @@
 """Migration 011: app_version column exists on jobs, session_stats, chat_sessions."""
+
 import os
 import tempfile
 
