@@ -1,7 +1,22 @@
+[build-system]
+requires = ["setuptools>=64", "setuptools_scm>=8"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "editorial-assistant"
-version = "3.5.0"
+dynamic = ["version"]
 requires-python = ">=3.13"
+
+[tool.setuptools_scm]
+# Source of truth: git tags (e.g., v4.1.0). See docs/VERSIONING.md.
+# At build time, setuptools_scm writes api/_version.py with the resolved version.
+# api/_version.py is gitignored — never commit it; it's regenerated on each build.
+version_file = "api/_version.py"
+fallback_version = "0.0.0+unknown"
+
+[tool.setuptools.packages.find]
+include = ["api*", "scripts*", "mcp_server*"]
+exclude = ["tests*", "web*", "alembic*", "claude-desktop-project*", "knowledge*", "config*", "docs*", "planning*", ".claude*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

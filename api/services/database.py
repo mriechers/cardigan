@@ -36,11 +36,32 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+
+def _default_app_version() -> str:
+    """Derive the cost-epoch tag from the package version's major.minor.
+
+    Examples:
+        "4.1.0"               → "v4.1"
+        "4.1.1.dev3+g8a1b2c3" → "v4.1"
+        "0.0.0+unknown"       → "v0.0"  (build without git access; sentinel)
+
+    The CARDIGAN_VERSION env var (set in docker-compose.yml) overrides
+    this for short-lived experiments — useful when testing a model
+    routing change without wanting the rows tagged with the next epoch.
+    """
+    from api import __version__  # local import to avoid circular at module load
+
+    parts = __version__.split(".")[:2]
+    if len(parts) < 2:
+        parts = ["0", "0"]
+    return f"v{'.'.join(parts)}"
+
+
 # App version tag stamped on all rows produced by this process.
-# Override via CARDIGAN_VERSION env var (set in docker-compose.yml).
-# Bump the default literal each time the codebase changes meaningfully
-# enough that cost/quality should not be averaged with the prior epoch.
-APP_VERSION = os.getenv("CARDIGAN_VERSION") or "v4.1"
+# Source of truth: git tag → setuptools_scm → api/__version__ → here.
+# Override at runtime via CARDIGAN_VERSION env var (set in docker-compose.yml).
+# See docs/VERSIONING.md for release/bump policy.
+APP_VERSION = os.getenv("CARDIGAN_VERSION") or _default_app_version()
 
 from api.models.chat import ChatMessage, ChatSession, ChatSessionStatus
 from api.models.config import ConfigItem, ConfigValueType

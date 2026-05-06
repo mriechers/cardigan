@@ -135,6 +135,15 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Resolve version from git tags
+        id: version
+        run: |
+          python3 -m pip install --quiet setuptools_scm
+          VERSION=$(python3 -m setuptools_scm)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION"
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Build API image
@@ -143,6 +152,8 @@ jobs:
           context: .
           file: Dockerfile.api
           push: false
+          build-args: |
+            SETUPTOOLS_SCM_PRETEND_VERSION_FOR_EDITORIAL_ASSISTANT=${{ steps.version.outputs.version }}
           cache-from: type=gha,scope=api
           cache-to: type=gha,mode=max,scope=api
       - name: Build Worker image
@@ -151,6 +162,8 @@ jobs:
           context: .
           file: Dockerfile.worker
           push: false
+          build-args: |
+            SETUPTOOLS_SCM_PRETEND_VERSION_FOR_EDITORIAL_ASSISTANT=${{ steps.version.outputs.version }}
           cache-from: type=gha,scope=worker
           cache-to: type=gha,mode=max,scope=worker
       - name: Build Web image
@@ -161,3 +174,16 @@ jobs:
           push: false
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web
+
+  version-consistency:
+    name: Version Consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Check pyproject / package.json / git tag agree on release line
+        run: python3 scripts/check_versions.py
