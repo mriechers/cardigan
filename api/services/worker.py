@@ -252,9 +252,7 @@ class JobWorker:
         if self._heartbeat_task:
             self._heartbeat_task.cancel()
 
-    async def retry_single_phase(
-        self, job_id: int, phase_name: str, feedback: Optional[str] = None
-    ) -> Dict[str, Any]:
+    async def retry_single_phase(self, job_id: int, phase_name: str, feedback: Optional[str] = None) -> Dict[str, Any]:
         """Retry a single phase for a completed job.
 
         This allows regenerating one output (e.g., timestamp) without
@@ -1308,7 +1306,9 @@ class JobWorker:
                 )
 
             # Add provenance header
-            provenance_header = f"<!-- model: {response.model} | cost: ${response.cost:.4f} | tokens: {response.total_tokens} -->\n"
+            provenance_header = (
+                f"<!-- model: {response.model} | cost: ${response.cost:.4f} | tokens: {response.total_tokens} -->\n"
+            )
             output_file.write_text(provenance_header + response.content)
 
             # Log phase completed
@@ -1647,8 +1647,7 @@ Please format this transcript section:
                 phase_name = phase.get("name", "unknown")
                 phase_error = phase.get("error_message", "")
                 phases_summary.append(
-                    f"- {phase_name}: {status}"
-                    f"{f' - Error: {phase_error}' if phase_error else ''}"
+                    f"- {phase_name}: {status}" f"{f' - Error: {phase_error}' if phase_error else ''}"
                 )
 
             # Get partial outputs for context

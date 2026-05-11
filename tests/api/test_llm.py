@@ -49,7 +49,12 @@ def mock_config(tmp_path):
             },
         },
         "routing": {
-            "phase_base_backends": {"analyst": "openrouter-cheapskate", "formatter": "openrouter-cheapskate", "seo": "openrouter-cheapskate", "manager": "openrouter-big-brain"},
+            "phase_base_backends": {
+                "analyst": "openrouter-cheapskate",
+                "formatter": "openrouter-cheapskate",
+                "seo": "openrouter-cheapskate",
+                "manager": "openrouter-big-brain",
+            },
         },
         "safety": {"run_cost_cap": 1.0, "max_cost_per_1k_tokens": 0.05, "model_allowlist": []},
     }
@@ -133,7 +138,6 @@ class TestBackendSelection:
         backend = llm_client.get_backend_for_phase("nonexistent_phase")
 
         assert backend == llm_client.config.get("primary_backend", "openrouter")
-
 
 
 class TestCostCalculation:
