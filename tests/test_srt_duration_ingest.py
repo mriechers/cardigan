@@ -4,7 +4,6 @@ import pytest
 
 from api.services.utils import get_srt_duration, parse_srt
 
-
 SAMPLE_SRT = """1
 00:00:00,000 --> 00:00:04,200
 Welcome to the show.
