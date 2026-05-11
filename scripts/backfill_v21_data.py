@@ -1,9 +1,9 @@
 """One-shot backfill of v2.1-era data into the live DB.
 
 Reads from a source SQLite DB (typically .snapshots/dashboard-v2.1-archive.db),
-inserts its jobs/session_stats/chat_sessions rows into the live DB tagged
-with the given app_version, and rewrites session_stats.job_id +
-chat_sessions.job_id to the new IDs assigned by the live DB.
+inserts its jobs/session_stats rows into the live DB tagged
+with the given app_version, and rewrites session_stats.job_id
+to the new IDs assigned by the live DB.
 
 Idempotent: refuses to insert a job whose (app_version, project_path,
 transcript_file, queued_at) tuple already exists in the live DB.
@@ -30,7 +30,6 @@ from api.services import database as db_mod
 
 _DATETIME_COLS_JOBS = {"queued_at", "started_at", "completed_at", "error_timestamp", "last_heartbeat"}
 _DATETIME_COLS_SESSION_STATS = {"timestamp"}
-_DATETIME_COLS_CHAT_SESSIONS = {"created_at", "updated_at"}
 
 
 def _parse_dt(value: Optional[str]) -> Optional[datetime]:
@@ -77,14 +76,13 @@ async def backfill(
     app_version: str,
     dry_run: bool = False,
 ) -> Dict[str, int]:
-    """Copy jobs/session_stats/chat_sessions from source DB to live DB.
+    """Copy jobs/session_stats from source DB to live DB.
 
     Returns a summary dict with insert counts.
     """
     summary = {
         "jobs_inserted": 0,
         "session_stats_inserted": 0,
-        "chat_sessions_inserted": 0,
         "skipped_duplicate_jobs": 0,
     }
 
@@ -158,12 +156,6 @@ async def backfill(
                 for row in src.execute("SELECT job_id FROM session_stats").fetchall():
                     if row["job_id"] is None or row["job_id"] in id_map:
                         summary["session_stats_inserted"] += 1
-                try:
-                    for row in src.execute("SELECT job_id FROM chat_sessions").fetchall():
-                        if row["job_id"] in id_map:
-                            summary["chat_sessions_inserted"] += 1
-                except sqlite3.OperationalError:
-                    pass
                 return summary
 
             # Phase 2: session_stats — translate job_id
@@ -183,29 +175,6 @@ async def backfill(
                 }
                 await live.execute(db_mod.session_stats_table.insert().values(**values))
                 summary["session_stats_inserted"] += 1
-
-            # Phase 3: chat_sessions — translate job_id
-            try:
-                chat_rows = src.execute("SELECT * FROM chat_sessions").fetchall()
-            except sqlite3.OperationalError:
-                chat_rows = []  # Source DB pre-dates chat_sessions table
-
-            for row in chat_rows:
-                new_job_id = id_map.get(row["job_id"])
-                if new_job_id is None:
-                    continue
-                values = {}
-                for k in row.keys():
-                    if k == "job_id":
-                        continue
-                    val = row[k]
-                    if k in _DATETIME_COLS_CHAT_SESSIONS:
-                        val = _parse_dt(val)
-                    values[k] = val
-                values["job_id"] = new_job_id
-                values["app_version"] = app_version
-                await live.execute(db_mod.chat_sessions_table.insert().values(**values))
-                summary["chat_sessions_inserted"] += 1
 
         return summary
     finally:
