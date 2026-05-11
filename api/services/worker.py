@@ -2564,7 +2564,22 @@ The editor reviewed the QA report and requests these changes:
             formatted = context.get("formatter_output", "")
             analysis = context.get("analyst_output", "")
             transcript_metrics = context.get("transcript_metrics", {})
+
+            # Prefer SRT-derived duration over the word-count estimate. The estimate
+            # has been observed to overshoot real runtime by ~2x for short-form
+            # talk-show content, which causes the agent to believe the SRT is
+            # truncated even when it isn't. Parse the SRT directly when available.
             duration = transcript_metrics.get("estimated_duration_minutes", 0)
+            if srt_content:
+                try:
+                    from api.services.utils import get_srt_duration, parse_srt
+
+                    captions = parse_srt(srt_content)
+                    if captions:
+                        duration = get_srt_duration(captions) / 60000
+                except Exception as e:
+                    logger.debug("SRT duration parse failed, falling back to estimate", extra={"error": str(e)})
+
             project_name = context.get("project_name", "Unknown")
 
             prompt = f"""Create a timestamp report with chapter markers for this video content.
@@ -2578,7 +2593,7 @@ The editor reviewed the QA report and requests these changes:
 
 ## Original SRT Content (use these timecodes):
 ---
-{srt_content[:15000]}{"..." if len(srt_content) > 15000 else ""}
+{srt_content[:500000]}{"..." if len(srt_content) > 500000 else ""}
 ---
 
 ## Analyst Output (use this to identify chapter boundaries):
