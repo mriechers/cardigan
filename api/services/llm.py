@@ -70,8 +70,11 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
     "claude-3-5-sonnet-latest": {"input": 3.00, "output": 15.00},
     # Claude via OpenRouter — tier 0/1/2 (pricing per 1M tokens)
     "anthropic/claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.00},
+    "anthropic/claude-haiku-4.5": {"input": 0.80, "output": 4.00},
     "anthropic/claude-sonnet-4-5-20250514": {"input": 3.00, "output": 15.00},
     "anthropic/claude-opus-4-5-20250514": {"input": 15.00, "output": 75.00},
+    "anthropic/claude-sonnet-4.6": {"input": 3.00, "output": 15.00},
+    "anthropic/claude-opus-4.6": {"input": 5.00, "output": 25.00},
     "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
     "gemini-1.5-flash-8b": {"input": 0.0375, "output": 0.15},
     "gemini-1.5-pro": {"input": 1.25, "output": 5.00},
@@ -560,7 +563,6 @@ class LLMClient:
         messages: List[Dict[str, str]],
         backend: Optional[str] = None,
         model: Optional[str] = None,
-        preset: Optional[str] = None,
         job_id: Optional[int] = None,
         phase: Optional[str] = None,
         tier: Optional[int] = None,
@@ -572,8 +574,7 @@ class LLMClient:
         Args:
             messages: List of message dicts with 'role' and 'content'
             backend: Backend to use (default: primary)
-            model: Model override (default: backend's configured model)
-            preset: OpenRouter preset override (default: backend's configured preset)
+            model: Model override (default: phase_models config, then backend model)
             job_id: Job ID for event logging
             phase: Agent phase name for observability (analyst, formatter, etc.)
             tier: Tier index for observability (0=cheapskate, 1=default, 2=big-brain)
@@ -586,14 +587,22 @@ class LLMClient:
         backend_name = backend or self.config.get("primary_backend", "openrouter")
         backend_config = self.get_backend_config(backend_name)
 
-        # Determine model - for OpenRouter with preset, use @preset/name syntax
-        preset_name = preset or backend_config.get("preset")
-        if preset_name and backend_config.get("type") == "openrouter":
-            model_id = f"@preset/{preset_name}"
-            self.active_preset = preset_name
+        # Determine model — priority order:
+        # 1. Explicit model param
+        # 2. phase_models config (per-phase model assignment from Settings UI)
+        # 3. Backend's configured model / fallback_model
+        if model:
+            model_id = model
+        elif phase:
+            phase_models = self.config.get("phase_models", {})
+            model_id = phase_models.get(phase)
         else:
-            model_id = model or backend_config.get("model") or backend_config.get("fallback_model")
-            self.active_preset = None
+            model_id = None
+
+        if not model_id:
+            model_id = backend_config.get("model") or backend_config.get("fallback_model")
+
+        self.active_preset = None
 
         self.active_backend = backend_name
         self.active_model = model_id

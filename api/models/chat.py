@@ -48,6 +48,7 @@ class ChatSession(BaseModel):
     message_count: int = Field(default=0, description="Number of messages in session")
     status: ChatSessionStatus = Field(default=ChatSessionStatus.active, description="Session status")
     model: Optional[str] = Field(None, description="Primary model used in session")
+    app_version: Optional[str] = None
 
 
 class ChatSessionCreate(BaseModel):

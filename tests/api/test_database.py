@@ -731,3 +731,111 @@ async def test_create_job_with_explicit_path_no_sanitization(test_db):
 
     # Explicit path is preserved as-is
     assert job.project_path == "/custom/path/with/slashes"
+
+
+@pytest.mark.asyncio
+async def test_create_job_sets_default_app_version(test_db, monkeypatch):
+    """Newly created jobs are tagged with CARDIGAN_VERSION env (default v4.1)."""
+    monkeypatch.setenv("CARDIGAN_VERSION", "v4.2-test")
+    # APP_VERSION is read at module import, so we re-read from os.environ via a helper
+    import importlib
+
+    import api.services.database as db_mod
+
+    # Save current engine state (set up by test_db fixture)
+    saved_engine = db_mod._engine
+    saved_factory = db_mod._async_session_factory
+
+    importlib.reload(db_mod)  # picks up the patched env var; resets engine globals
+
+    # Restore engine state so the reloaded module can reach the test DB
+    db_mod._engine = saved_engine
+    db_mod._async_session_factory = saved_factory
+
+    job = await db_mod.create_job(
+        db_mod.JobCreate(
+            project_name="ver-test",
+            project_path="/projects/ver-test",
+            transcript_file="/transcripts/ver-test.txt",
+        )
+    )
+    assert job.app_version == "v4.2-test"
+
+
+@pytest.mark.asyncio
+async def test_log_event_sets_default_app_version(test_db, monkeypatch):
+    monkeypatch.setenv("CARDIGAN_VERSION", "v4.2-test")
+    import importlib
+
+    import api.services.database as db_mod
+
+    # Save current engine state (set up by test_db fixture)
+    saved_engine = db_mod._engine
+    saved_factory = db_mod._async_session_factory
+
+    importlib.reload(db_mod)  # picks up the patched env var; resets engine globals
+
+    # Restore engine state so the reloaded module can reach the test DB
+    db_mod._engine = saved_engine
+    db_mod._async_session_factory = saved_factory
+
+    job = await db_mod.create_job(
+        db_mod.JobCreate(project_name="ev", project_path="/p/ev", transcript_file="/t/ev.txt")
+    )
+    event = await db_mod.log_event(
+        db_mod.EventCreate(job_id=job.id, event_type=db_mod.EventType.job_started, data=None)
+    )
+    # Read raw row to inspect column
+    from sqlalchemy import text
+
+    async with db_mod.get_session() as s:
+        row = (
+            await s.execute(
+                text("SELECT app_version FROM session_stats WHERE id = :id"),
+                {"id": event.id},
+            )
+        ).fetchone()
+    assert row[0] == "v4.2-test"
+
+
+@pytest.mark.asyncio
+async def test_create_job_accepts_app_version_override(test_db):
+    """Backfill scripts must be able to pass an explicit app_version."""
+    job = await create_job(
+        JobCreate(
+            project_name="legacy",
+            project_path="/p/legacy",
+            transcript_file="/t/legacy.txt",
+        ),
+        app_version="v2.1",
+    )
+    assert job.app_version == "v2.1"
+
+
+@pytest.mark.asyncio
+async def test_create_chat_session_app_version_default_and_override(test_db):
+    """create_chat_session stamps APP_VERSION by default; accepts explicit override."""
+    from api.services.database import create_chat_session
+
+    job = await create_job(JobCreate(project_name="cs", project_path="/p/cs", transcript_file="/t/cs.txt"))
+
+    # Default path
+    default_session = await create_chat_session(
+        session_id="00000000-0000-0000-0000-000000000001",
+        job_id=job.id,
+        project_name="cs",
+    )
+    # Default APP_VERSION at module import is whatever CARDIGAN_VERSION resolved to —
+    # in test env that's "v4.1" (the literal fallback). Re-import the constant to be safe.
+    from api.services.database import APP_VERSION
+
+    assert default_session.app_version == APP_VERSION
+
+    # Override path
+    override_session = await create_chat_session(
+        session_id="00000000-0000-0000-0000-000000000002",
+        job_id=job.id,
+        project_name="cs",
+        app_version="v2.1",
+    )
+    assert override_session.app_version == "v2.1"

@@ -36,6 +36,33 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+
+def _default_app_version() -> str:
+    """Derive the cost-epoch tag from the package version's major.minor.
+
+    Examples:
+        "4.1.0"               → "v4.1"
+        "4.1.1.dev3+g8a1b2c3" → "v4.1"
+        "0.0.0+unknown"       → "v0.0"  (build without git access; sentinel)
+
+    The CARDIGAN_VERSION env var (set in docker-compose.yml) overrides
+    this for short-lived experiments — useful when testing a model
+    routing change without wanting the rows tagged with the next epoch.
+    """
+    from api import __version__  # local import to avoid circular at module load
+
+    parts = __version__.split(".")[:2]
+    if len(parts) < 2:
+        parts = ["0", "0"]
+    return f"v{'.'.join(parts)}"
+
+
+# App version tag stamped on all rows produced by this process.
+# Source of truth: git tag → setuptools_scm → api/__version__ → here.
+# Override at runtime via CARDIGAN_VERSION env var (set in docker-compose.yml).
+# See docs/VERSIONING.md for release/bump policy.
+APP_VERSION = os.getenv("CARDIGAN_VERSION") or _default_app_version()
+
 from api.models.chat import ChatMessage, ChatSession, ChatSessionStatus
 from api.models.config import ConfigItem, ConfigValueType
 from api.models.events import EventCreate, EventData, EventType, SessionEvent
@@ -90,6 +117,7 @@ jobs_table = Table(
     Column("duration_minutes", Float, nullable=True),
     Column("word_count", Integer, nullable=True),
     Column("content_type", Text, nullable=True),  # 'full', 'short', or 'clip'
+    Column("app_version", Text, nullable=True),
 )
 
 # Define session_stats table
@@ -101,6 +129,7 @@ session_stats_table = Table(
     Column("timestamp", DateTime, server_default=func.current_timestamp()),
     Column("event_type", Text, nullable=False),
     Column("data", Text, nullable=True),
+    Column("app_version", Text, nullable=True),
 )
 
 # Define config table
@@ -128,6 +157,7 @@ chat_sessions_table = Table(
     Column("message_count", Integer, server_default="0"),
     Column("status", Text, server_default="active"),  # active, archived, cleared
     Column("model", Text, nullable=True),  # Primary model used in session
+    Column("app_version", Text, nullable=True),
 )
 
 # Define chat_messages table for message history
@@ -320,7 +350,7 @@ def sanitize_path_component(name: str) -> str:
 # ============================================================================
 
 
-async def create_job(job: JobCreate) -> Job:
+async def create_job(job: JobCreate, app_version: Optional[str] = None) -> Job:
     """Create a new job in the database.
 
     Args:
@@ -356,6 +386,7 @@ async def create_job(job: JobCreate) -> Job:
             "phases": json.dumps(initial_phases),
             "retry_count": 0,
             "max_retries": 3,
+            "app_version": app_version if app_version is not None else APP_VERSION,
         }
 
         # Insert job
@@ -1051,7 +1082,7 @@ async def run_stuck_job_cleanup(threshold_minutes: int = 10) -> dict:
 # ============================================================================
 
 
-async def log_event(event: EventCreate) -> SessionEvent:
+async def log_event(event: EventCreate, app_version: Optional[str] = None) -> SessionEvent:
     """Log a session event to the database.
 
     Args:
@@ -1071,6 +1102,7 @@ async def log_event(event: EventCreate) -> SessionEvent:
             "timestamp": datetime.now(timezone.utc),
             "event_type": event.event_type.value,
             "data": data_json,
+            "app_version": app_version if app_version is not None else APP_VERSION,
         }
 
         stmt = session_stats_table.insert().values(**values)
@@ -1291,6 +1323,7 @@ def _row_to_job(row) -> Job:
         word_count=getattr(row, "word_count", None),
         content_type=getattr(row, "content_type", None),
         outputs=outputs,
+        app_version=getattr(row, "app_version", None),
     )
 
 
@@ -1333,6 +1366,7 @@ async def create_chat_session(
     session_id: str,
     job_id: int,
     project_name: str,
+    app_version: Optional[str] = None,
 ) -> ChatSession:
     """Create a new chat session for a job.
 
@@ -1355,6 +1389,7 @@ async def create_chat_session(
             "total_cost": 0.0,
             "message_count": 0,
             "status": ChatSessionStatus.active.value,
+            "app_version": app_version if app_version is not None else APP_VERSION,
         }
 
         stmt = chat_sessions_table.insert().values(**values)
@@ -1638,6 +1673,7 @@ def _row_to_chat_session(row) -> ChatSession:
         message_count=row.message_count,
         status=ChatSessionStatus(row.status),
         model=row.model,
+        app_version=getattr(row, "app_version", None),
     )
 
 

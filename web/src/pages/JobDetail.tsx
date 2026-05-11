@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useState, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useFocusTrap } from '../hooks/useFocusTrap'
-import Breadcrumb from '../components/ui/Breadcrumb'
 import { useToast } from '../components/ui/Toast'
-import { Skeleton, SkeletonCard } from '../components/ui/Skeleton'
+import { Skeleton } from '../components/ui/Skeleton'
 import { formatRelativeTime, formatTimestamp, formatDuration } from '../utils/formatTime'
 import ChatPanel from '../components/chat/ChatPanel'
 import ScreengrabSlideout from '../components/ScreengrabSlideout'
@@ -118,6 +117,45 @@ export default function JobDetail() {
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const modalRef = useFocusTrap(!!viewingOutput)
   const { toast } = useToast()
+
+  const [tierLabels, setTierLabels] = useState<string[] | null>(null)
+  const [availableModels, setAvailableModels] = useState<Array<{ id: string; name: string; provider: string; tier: number }>>([])
+
+  useEffect(() => {
+    let cancelled = false
+    const loadConfig = async () => {
+      try {
+        const [routingRes, modelsRes] = await Promise.all([
+          fetch('/api/config/routing'),
+          fetch('/api/config/models'),
+        ])
+        if (!routingRes.ok || !modelsRes.ok) return
+        const routing = await routingRes.json()
+        const models = await modelsRes.json()
+        if (cancelled) return
+        if (Array.isArray(routing?.tier_labels)) setTierLabels(routing.tier_labels)
+        if (Array.isArray(models?.available_models)) setAvailableModels(models.available_models)
+      } catch (err) {
+        console.warn('Failed to load tier/model config (retry dialog will fall back to numeric tiers):', err)
+      }
+    }
+    loadConfig()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const retryTierOptions = useMemo(() => {
+    if (!tierLabels) return null
+    return tierLabels.map((label, idx) => {
+      const candidates = availableModels.filter((m) => m.tier === idx)
+      const primary =
+        candidates.find((m) => m.provider === 'Anthropic') ?? candidates[0] ?? null
+      const cleanedName = primary?.name.replace(/^[A-Za-z]+:\s*/, '') ?? null
+      const display = cleanedName ? `${cleanedName} — ${label}` : label
+      return { value: String(idx), label: display }
+    })
+  }, [tierLabels, availableModels])
 
   useEffect(() => {
     const fetchJob = async () => {
@@ -375,12 +413,7 @@ export default function JobDetail() {
     return (
       <div className="space-y-6" aria-label="Loading job details" role="status">
         <Skeleton className="h-8 w-64" />
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <SkeletonCard />
-          <SkeletonCard />
-          <SkeletonCard />
-          <SkeletonCard />
-        </div>
+        <Skeleton className="h-5 w-96" />
         <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
           <Skeleton className="h-6 w-48 mb-4" />
           <div className="space-y-3">
@@ -412,15 +445,6 @@ export default function JobDetail() {
 
   return (
     <div className="space-y-6">
-      {/* Breadcrumb */}
-      <Breadcrumb
-        items={[
-          { label: 'Home', href: '/' },
-          { label: 'Queue', href: '/queue' },
-          { label: `Job #${job.id}` },
-        ]}
-      />
-
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -655,18 +679,12 @@ export default function JobDetail() {
         </div>
       )}
 
-      {/* Info Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <InfoCard label="Status" value={job.status} />
-        <InfoCard label="Priority" value={String(job.priority)} />
-        <InfoCard
-          label="Cost"
-          value={job.actual_cost ? `$${job.actual_cost.toFixed(4)}` : '-'}
-        />
-        <InfoCard
-          label="Tokens"
-          value={job.phases?.reduce((sum, p) => sum + (p.tokens || 0), 0).toLocaleString() ?? '-'}
-        />
+      {/* Job Metadata */}
+      <div className="flex items-center gap-6 text-sm text-gray-400">
+        <span>Status: <span className="text-white">{job.status}</span></span>
+        <span>Priority: <span className="text-white">{job.priority}</span></span>
+        <span>Cost: <span className="text-green-400 font-mono">{job.actual_cost ? `$${job.actual_cost.toFixed(4)}` : '-'}</span></span>
+        <span>Tokens: <span className="text-white">{job.phases?.reduce((sum, p) => sum + (p.tokens || 0), 0).toLocaleString() ?? '-'}</span></span>
       </div>
 
       {/* Phases */}
@@ -804,47 +822,45 @@ export default function JobDetail() {
         </div>
       )}
 
-      {/* Keyword Report Upload */}
-      <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-medium text-white">SEMRush Keyword Report</h2>
-          <div className="flex items-center gap-2">
-            <input
-              ref={keywordInputRef}
-              type="file"
-              accept=".csv,.txt,.tsv"
-              className="hidden"
-              id="keyword-report-input"
-              onChange={(e) => {
-                const file = e.target.files?.[0]
-                if (file) handleKeywordUpload(file)
-              }}
-            />
-            <label
-              htmlFor="keyword-report-input"
-              className={`px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-sm cursor-pointer transition-colors ${keywordUploading ? 'opacity-50 pointer-events-none' : ''}`}
-            >
-              {keywordUploading ? 'Uploading...' : 'Upload Report'}
-            </label>
+      {/* Keyword Report Upload — shown when reports exist or job is completed */}
+      {(keywordReports.length > 0 || job.status === 'completed') && (
+        <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium text-gray-400">SEMRush Keyword Report</h2>
+            <div className="flex items-center gap-2">
+              <input
+                ref={keywordInputRef}
+                type="file"
+                accept=".csv,.txt,.tsv"
+                className="hidden"
+                id="keyword-report-input"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) handleKeywordUpload(file)
+                }}
+              />
+              <label
+                htmlFor="keyword-report-input"
+                className={`px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-md text-sm cursor-pointer transition-colors ${keywordUploading ? 'opacity-50 pointer-events-none' : ''}`}
+              >
+                {keywordUploading ? 'Uploading...' : 'Upload'}
+              </label>
+            </div>
           </div>
+          {keywordReports.length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {keywordReports.map((report) => (
+                <li key={report.filename} className="flex items-center justify-between text-sm">
+                  <span className="text-gray-300 font-mono">{report.filename}</span>
+                  {report.uploaded_at && (
+                    <span className="text-gray-500 text-xs">{report.uploaded_at}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
-        {keywordReports.length === 0 ? (
-          <p className="text-sm text-gray-500">
-            No keyword reports uploaded. Upload a SEMRush CSV export to enrich the SEO phase.
-          </p>
-        ) : (
-          <ul className="space-y-1">
-            {keywordReports.map((report) => (
-              <li key={report.filename} className="flex items-center justify-between text-sm">
-                <span className="text-gray-300 font-mono">{report.filename}</span>
-                {report.uploaded_at && (
-                  <span className="text-gray-500 text-xs">{report.uploaded_at}</span>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      )}
 
       {/* Screengrabs (inline) */}
       {job.media_id && (
@@ -978,19 +994,25 @@ export default function JobDetail() {
             </div>
             <div className="p-4 space-y-4">
               <div>
-                <label htmlFor="retry-tier" className="block text-sm text-gray-300 mb-1">
-                  Model tier
+                <label htmlFor="retry-model" className="block text-sm text-gray-300 mb-1">
+                  Model
                 </label>
                 <select
-                  id="retry-tier"
+                  id="retry-model"
                   value={retryTier}
                   onChange={(e) => setRetryTier(e.target.value)}
                   className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
                 >
-                  <option value="">Auto-escalate (recommended)</option>
-                  <option value="0">Cheapskate (tier 0)</option>
-                  <option value="1">Default (tier 1)</option>
-                  <option value="2">Big Brain (tier 2)</option>
+                  <option value="">Use phase default</option>
+                  {(retryTierOptions ?? [
+                    { value: '0', label: 'economy' },
+                    { value: '1', label: 'standard' },
+                    { value: '2', label: 'premium' },
+                  ]).map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div>
@@ -1091,113 +1113,35 @@ export default function JobDetail() {
   )
 }
 
-function InfoCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="bg-gray-800 rounded-lg border border-gray-700 p-3">
-      <div className="text-xs text-gray-400 uppercase tracking-wide">
-        {label}
-      </div>
-      <div className="text-lg font-medium text-white mt-1">{value}</div>
-    </div>
-  )
-}
-
 function CopyEditorHandoff({ projectName }: { projectName: string }) {
-  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle')
+  const [copied, setCopied] = useState(false)
   const promptText = `I'd like to edit ${projectName}`
 
-  const handleCopyPrompt = async () => {
+  const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(promptText)
-      setCopyState('copied')
-      setTimeout(() => setCopyState('idle'), 2000)
-    } catch (err) {
-      console.error('Failed to copy:', err)
-      // Fallback: select text for manual copy
-      setCopyState('error')
-      setTimeout(() => setCopyState('idle'), 3000)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Fallback: text is selectable
     }
   }
 
   return (
-    <div className="bg-gradient-to-r from-emerald-900/30 to-teal-900/30 rounded-lg border border-emerald-500/30 p-6">
-      <div className="flex items-start space-x-4">
-        {/* Icon */}
-        <div className="flex-shrink-0">
-          <div className="w-12 h-12 bg-emerald-500/20 rounded-full flex items-center justify-center">
-            <svg className="w-6 h-6 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 min-w-0">
-          <h3 className="text-lg font-semibold text-emerald-300 mb-2">
-            Ready for Copy Editing
-          </h3>
-          <p className="text-gray-300 text-sm mb-4">
-            This project is ready for interactive editing. Open Claude Desktop and start a conversation:
-          </p>
-
-          {/* Prompt Example */}
-          <div className="bg-gray-900/50 rounded-lg p-4 mb-4">
-            <div className="flex items-center justify-between">
-              <div className="flex-1 min-w-0">
-                <span className="text-gray-400 text-sm">Say:</span>
-                <p className="text-white font-medium mt-1 truncate select-all cursor-text">
-                  "{promptText}"
-                </p>
-              </div>
-              <button
-                onClick={handleCopyPrompt}
-                className={`ml-4 flex-shrink-0 px-3 py-1.5 text-white rounded-md text-sm font-medium transition-colors flex items-center space-x-1.5 ${
-                  copyState === 'error'
-                    ? 'bg-red-600 hover:bg-red-500'
-                    : 'bg-emerald-600 hover:bg-emerald-500'
-                }`}
-                aria-label="Copy prompt to clipboard"
-              >
-                {copyState === 'copied' ? (
-                  <>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                    <span>Copied!</span>
-                  </>
-                ) : copyState === 'error' ? (
-                  <>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                    </svg>
-                    <span>Select text</span>
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                    </svg>
-                    <span>Copy</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-
-          {/* Help Link */}
-          <p className="text-gray-400 text-xs">
-            First time?{' '}
-            <a
-              href="https://github.com/your-org/ai-editorial-assistant-v3/blob/main/docs/CLAUDE_DESKTOP_SETUP.md"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-emerald-400 hover:text-emerald-300 underline"
-            >
-              See the setup guide
-            </a>
-          </p>
-        </div>
+    <div className="flex items-center justify-between py-3 px-4 bg-gray-800 rounded-lg border border-gray-700">
+      <div className="flex items-center gap-3 min-w-0">
+        <span className="text-sm text-gray-400">Copy editing prompt:</span>
+        <code className="text-sm text-white select-all cursor-text truncate">
+          {promptText}
+        </code>
       </div>
+      <button
+        onClick={handleCopy}
+        className="ml-4 flex-shrink-0 px-3 py-1 text-sm text-gray-300 hover:text-white bg-gray-700 hover:bg-gray-600 rounded transition-colors"
+        aria-label="Copy prompt to clipboard"
+      >
+        {copied ? 'Copied' : 'Copy'}
+      </button>
     </div>
   )
 }

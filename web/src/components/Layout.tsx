@@ -102,13 +102,6 @@ export default function Layout() {
             </div>
             <div className="flex items-center space-x-1">
               <NavLink
-                to="/"
-                className={navLinkClass}
-                end
-              >
-                Dashboard
-              </NavLink>
-              <NavLink
                 to="/ready"
                 className={navLinkClass}
               >
@@ -131,12 +124,6 @@ export default function Layout() {
                 className={navLinkClass}
               >
                 Settings
-              </NavLink>
-              <NavLink
-                to="/system"
-                className={navLinkClass}
-              >
-                System
               </NavLink>
               <NavLink
                 to="/help"
