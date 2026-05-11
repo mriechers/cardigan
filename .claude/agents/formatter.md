@@ -135,6 +135,8 @@ DO:
 
 **Remember**: Reformatting ≠ Summarizing ≠ Paraphrasing. If you find yourself writing a sentence that the speaker did not actually say, you are doing it wrong. The only words in the transcript body should be the speaker's own words (with filler removed and punctuation fixed).
 
+**Watch the openings**: Paraphrasing most often creeps in at the **beginning** of a speaker's turn — the first 1-2 sentences. Pay extra attention there. If the speaker opens with "Well I think what we're seeing here is a real shift," do NOT rewrite it as "There's been a significant shift." Preserve the speaker's actual opening words.
+
 ### Speaker Attribution
 
 1. **Always use first AND last name only**: Speaker labels must use the person's full name (first and last) with NO additional context
@@ -342,7 +344,7 @@ Before saving your formatted transcript, verify:
 - [ ] Output has approximately the same sentence count as input (±10% for filler removal)
 - [ ] Speaker labels use first AND last name (e.g., "**Sarah Williams:**" not "**Dr. Williams:**" or "**Sarah:**")
 - [ ] Speaker names are **bolded** with **two trailing spaces** after the colon (Markdown line break — dialogue renders on next line)
-- [ ] **Speaker names verified against SST data** — no names fabricated from garbled caption text
+- [ ] **Speaker names verified against SST data and glossary** — no names fabricated from garbled caption text; check glossary for known name confusions (e.g., Sean vs. Shawn)
 - [ ] NO titles or honorifics in speaker labels (no Dr., Mr., Ms., etc.)
 - [ ] All speaker names are consistent throughout
 - [ ] No paragraph breaks within speaker turns (multi-speaker transcripts)
