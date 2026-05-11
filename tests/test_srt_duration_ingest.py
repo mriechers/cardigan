@@ -1,7 +1,8 @@
 """Tests for SRT-based duration calculation at ingest."""
 
 import pytest
-from api.services.utils import parse_srt, get_srt_duration
+
+from api.services.utils import get_srt_duration, parse_srt
 
 
 SAMPLE_SRT = """1

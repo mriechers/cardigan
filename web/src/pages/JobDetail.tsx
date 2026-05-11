@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -109,45 +109,6 @@ export default function JobDetail() {
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const modalRef = useFocusTrap(!!viewingOutput)
   const { toast } = useToast()
-
-  const [tierLabels, setTierLabels] = useState<string[] | null>(null)
-  const [availableModels, setAvailableModels] = useState<Array<{ id: string; name: string; provider: string; tier: number }>>([])
-
-  useEffect(() => {
-    let cancelled = false
-    const loadConfig = async () => {
-      try {
-        const [routingRes, modelsRes] = await Promise.all([
-          fetch('/api/config/routing'),
-          fetch('/api/config/models'),
-        ])
-        if (!routingRes.ok || !modelsRes.ok) return
-        const routing = await routingRes.json()
-        const models = await modelsRes.json()
-        if (cancelled) return
-        if (Array.isArray(routing?.tier_labels)) setTierLabels(routing.tier_labels)
-        if (Array.isArray(models?.available_models)) setAvailableModels(models.available_models)
-      } catch (err) {
-        console.warn('Failed to load tier/model config (retry dialog will fall back to numeric tiers):', err)
-      }
-    }
-    loadConfig()
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  const retryTierOptions = useMemo(() => {
-    if (!tierLabels) return null
-    return tierLabels.map((label, idx) => {
-      const candidates = availableModels.filter((m) => m.tier === idx)
-      const primary =
-        candidates.find((m) => m.provider === 'Anthropic') ?? candidates[0] ?? null
-      const cleanedName = primary?.name.replace(/^[A-Za-z]+:\s*/, '') ?? null
-      const display = cleanedName ? `${cleanedName} — ${label}` : label
-      return { value: String(idx), label: display }
-    })
-  }, [tierLabels, availableModels])
 
   useEffect(() => {
     const fetchJob = async () => {
