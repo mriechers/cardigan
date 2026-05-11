@@ -5,32 +5,10 @@ import { AGENT_INFO } from '../constants/agents'
 import ModelStatsWidget from '../components/ModelStatsWidget'
 import PhaseStatsWidget from '../components/PhaseStatsWidget'
 
-interface DurationThreshold {
-  max_minutes: number | null
-  tier: number
-}
-
-interface EscalationConfig {
-  enabled: boolean
-  on_failure: boolean
-  on_timeout: boolean
-  timeout_seconds: number
-  max_retries_per_tier: number
-}
-
-interface RoutingConfig {
-  tiers: string[]
-  tier_labels: string[]
-  duration_thresholds: DurationThreshold[]
-  phase_base_tiers: Record<string, number>
-  escalation: EscalationConfig
-}
-
 interface AvailableModel {
   id: string
   name: string
   provider: string
-  tier: number
 }
 
 interface PhaseModelsConfig {
@@ -63,18 +41,10 @@ interface IngestConfigUpdate {
   scan_time?: string  // "HH:MM" format
 }
 
-const TIER_COLORS = ['green', 'cyan', 'purple'] as const
-const TIER_STYLES: Record<string, { bg: string; border: string; text: string }> = {
-  green: { bg: 'bg-green-900/20', border: 'border-green-500/30', text: 'text-green-400' },
-  cyan: { bg: 'bg-cyan-900/20', border: 'border-cyan-500/30', text: 'text-cyan-400' },
-  purple: { bg: 'bg-purple-900/20', border: 'border-purple-500/30', text: 'text-purple-400' },
-}
-
-type TabId = 'agents' | 'routing' | 'worker' | 'ingest' | 'system' | 'accessibility'
+type TabId = 'agents' | 'worker' | 'ingest' | 'system' | 'accessibility'
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: 'agents', label: 'Agents', icon: '🤖' },
-  { id: 'routing', label: 'Routing', icon: '🔀' },
   { id: 'worker', label: 'Worker', icon: '⚙️' },
   { id: 'ingest', label: 'Ingest', icon: '📥' },
   { id: 'system', label: 'System', icon: '🖥️' },
@@ -95,7 +65,6 @@ interface SystemStatus {
 
 export default function Settings() {
   const { preferences, updatePreferences } = usePreferences()
-  const [routing, setRouting] = useState<RoutingConfig | null>(null)
   const [phaseModels, setPhaseModels] = useState<PhaseModelsConfig | null>(null)
   const [worker, setWorker] = useState<WorkerConfig | null>(null)
   const [ingestConfig, setIngestConfig] = useState<IngestConfig | null>(null)
@@ -107,7 +76,6 @@ export default function Settings() {
   const [activeTab, setActiveTab] = useState<TabId>('agents')
 
   // Track unsaved changes
-  const [pendingRouting, setPendingRouting] = useState<Partial<RoutingConfig> | null>(null)
   const [pendingPhaseModels, setPendingPhaseModels] = useState<Record<string, string> | null>(null)
   const [pendingWorker, setPendingWorker] = useState<Partial<WorkerConfig> | null>(null)
   const [pendingIngest, setPendingIngest] = useState<Partial<IngestConfigUpdate> | null>(null)
@@ -116,27 +84,20 @@ export default function Settings() {
   const fetchConfig = useCallback(async () => {
     try {
       setLoading(true)
-      const [routingRes, modelsRes, workerRes] = await Promise.all([
-        fetch('/api/config/routing'),
+      const [modelsRes, workerRes] = await Promise.all([
         fetch('/api/config/models'),
         fetch('/api/config/worker')
       ])
 
-      if (!routingRes.ok) {
-        throw new Error('Failed to fetch routing configuration')
-      }
       if (!workerRes.ok) {
         throw new Error('Failed to fetch worker configuration')
       }
 
-      const routingData = await routingRes.json()
       const workerData = await workerRes.json()
-      setRouting(routingData)
       if (modelsRes.ok) {
         setPhaseModels(await modelsRes.json())
       }
       setWorker(workerData)
-      setPendingRouting(null)
       setPendingPhaseModels(null)
       setPendingWorker(null)
       setError(null)
@@ -207,23 +168,6 @@ export default function Settings() {
     setPendingPhaseModels({ ...current, [phase]: modelId })
   }
 
-  const handleThresholdChange = (index: number, value: number | null) => {
-    const current = pendingRouting?.duration_thresholds || routing?.duration_thresholds || []
-    const updated = [...current]
-    updated[index] = { ...updated[index], max_minutes: value }
-    setPendingRouting({ ...pendingRouting, duration_thresholds: updated })
-  }
-
-  const handleEscalationChange = (key: keyof EscalationConfig, value: boolean | number) => {
-    const current = pendingRouting?.escalation || routing?.escalation || {
-      enabled: true, on_failure: true, on_timeout: true, timeout_seconds: 120, max_retries_per_tier: 1
-    }
-    setPendingRouting({
-      ...pendingRouting,
-      escalation: { ...current, [key]: value }
-    })
-  }
-
   const handleWorkerChange = (key: keyof WorkerConfig, value: number) => {
     setPendingWorker({
       ...pendingWorker,
@@ -244,25 +188,6 @@ export default function Settings() {
     setSuccess(null)
 
     try {
-      // Save routing config if changed
-      if (pendingRouting) {
-        const res = await fetch('/api/config/routing', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(pendingRouting)
-        })
-        if (!res.ok) {
-          let detail = 'Failed to save routing config'
-          try {
-            const data = await res.json()
-            detail = data.detail || detail
-          } catch {
-            // Response wasn't JSON
-          }
-          throw new Error(detail)
-        }
-      }
-
       // Save phase model assignments if changed
       if (pendingPhaseModels) {
         const res = await fetch('/api/config/models', {
@@ -324,13 +249,12 @@ export default function Settings() {
   }
 
   const handleReset = () => {
-    setPendingRouting(null)
     setPendingPhaseModels(null)
     setPendingWorker(null)
     setPendingIngest(null)
   }
 
-  const hasChanges = pendingRouting !== null || pendingPhaseModels !== null || pendingWorker !== null || pendingIngest !== null
+  const hasChanges = pendingPhaseModels !== null || pendingWorker !== null || pendingIngest !== null
 
   const getCurrentWorker = (): WorkerConfig => {
     return {
@@ -352,24 +276,6 @@ export default function Settings() {
       ignore_directories: ingestConfig?.ignore_directories ?? [],
       next_scan_at: ingestConfig?.next_scan_at ?? null
     }
-  }
-
-  const getCurrentThresholds = (): DurationThreshold[] => {
-    return pendingRouting?.duration_thresholds || routing?.duration_thresholds || []
-  }
-
-  const getCurrentEscalation = (): EscalationConfig => {
-    return pendingRouting?.escalation || routing?.escalation || {
-      enabled: true, on_failure: true, on_timeout: true, timeout_seconds: 120, max_retries_per_tier: 1
-    }
-  }
-
-  const getTierLabel = (tier: number): string => {
-    return routing?.tier_labels?.[tier] || `tier-${tier}`
-  }
-
-  const getTierColor = (tier: number): string => {
-    return TIER_COLORS[tier] || 'cyan'
   }
 
   const formatDateTime = (isoString: string | null): string => {
@@ -496,8 +402,7 @@ export default function Settings() {
                 </button>
               </div>
               <p className="text-sm text-gray-400 mb-6">
-                Choose which model runs each agent. On failure, the system escalates
-                to the next tier automatically.
+                Choose which model runs each agent phase.
               </p>
 
               <div className="space-y-4">
@@ -506,11 +411,10 @@ export default function Settings() {
                     || phaseModels?.phase_models?.[agent.id]
                     || ''
                   const models = phaseModels?.available_models || []
-                  const selectedModel = models.find(m => m.id === currentModel)
-                  const tierColor = selectedModel
-                    ? TIER_COLORS[selectedModel.tier] || 'cyan'
-                    : 'cyan'
-                  const styles = TIER_STYLES[tierColor]
+                  // Sort by provider then name
+                  const sortedModels = [...models].sort((a, b) =>
+                    a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name)
+                  )
 
                   return (
                     <div key={agent.id} className="p-4 bg-gray-900 rounded-lg space-y-2">
@@ -527,38 +431,17 @@ export default function Settings() {
                           id={`model-${agent.id}`}
                           value={currentModel}
                           onChange={(e) => handlePhaseModelChange(agent.id, e.target.value)}
-                          className={`pl-3 pr-8 py-2 rounded-md border text-sm font-medium ${styles.bg} ${styles.border} ${styles.text}`}
+                          className="pl-3 pr-8 py-2 rounded-md border text-sm font-medium bg-gray-800 border-gray-600 text-gray-200"
                           aria-label={`Select model for ${agent.name} agent`}
                         >
-                          {[0, 1, 2].map(tier => {
-                            const tierModels = models.filter(m => m.tier === tier)
-                            if (tierModels.length === 0) return null
-                            const tierLabel = routing?.tier_labels?.[tier] || `tier ${tier}`
-                            return (
-                              <optgroup key={tier} label={tierLabel}>
-                                {tierModels.map(m => (
-                                  <option key={m.id} value={m.id} className="bg-gray-800 text-white">
-                                    {m.name}
-                                  </option>
-                                ))}
-                              </optgroup>
-                            )
-                          })}
+                          {sortedModels.map(m => (
+                            <option key={m.id} value={m.id} className="bg-gray-800 text-white">
+                              {m.name}
+                            </option>
+                          ))}
                         </select>
                       </div>
                       <p className="text-sm text-gray-400 pl-8 max-w-prose">{agent.description}</p>
-                    </div>
-                  )
-                })}
-              </div>
-
-              <div className="mt-4 flex items-center space-x-6 text-xs text-gray-400">
-                {routing?.tier_labels?.map((label, idx) => {
-                  const dotColor = ['bg-green-500', 'bg-cyan-500', 'bg-purple-500'][idx] || 'bg-gray-500'
-                  return (
-                    <div key={idx} className="flex items-center space-x-2">
-                      <span className={`w-2 h-2 rounded-full ${dotColor}`} />
-                      <span>{label}</span>
                     </div>
                   )
                 })}
@@ -569,160 +452,6 @@ export default function Settings() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <ModelStatsWidget />
               <PhaseStatsWidget />
-            </div>
-          </div>
-        )}
-
-        {/* ROUTING TAB */}
-        {activeTab === 'routing' && (
-          <div className="space-y-6">
-            {/* Duration-Based Tier Escalation */}
-            <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
-              <h2 className="text-lg font-semibold text-white mb-4">Duration-Based Tier Selection</h2>
-              <p className="text-sm text-gray-400 mb-6">
-                Set duration thresholds for automatic tier escalation. Longer transcripts require
-                more capable models.
-              </p>
-
-              <div className="space-y-4">
-                {getCurrentThresholds().map((threshold, idx) => {
-                  const label = getTierLabel(threshold.tier)
-                  const color = getTierColor(threshold.tier)
-                  const styles = TIER_STYLES[color]
-
-                  return (
-                    <div key={idx} className={`p-4 rounded-lg border ${styles.bg} ${styles.border}`}>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className={`font-medium ${styles.text}`}>
-                          Tier {threshold.tier}: {label}
-                        </span>
-                        <span className="text-gray-400 text-sm">
-                          {threshold.max_minutes === null
-                            ? 'Unlimited duration'
-                            : `Up to ${threshold.max_minutes} minutes`}
-                        </span>
-                      </div>
-                      {threshold.max_minutes !== null && (
-                        <>
-                          <label htmlFor={`threshold-${idx}`} className="sr-only">
-                            Maximum duration in minutes for {label}
-                          </label>
-                          <input
-                            id={`threshold-${idx}`}
-                            type="range"
-                            min="5"
-                            max="60"
-                            step="5"
-                            value={threshold.max_minutes}
-                            onChange={(e) => handleThresholdChange(idx, parseInt(e.target.value))}
-                            className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
-                            aria-valuemin={5}
-                            aria-valuemax={60}
-                            aria-valuenow={threshold.max_minutes}
-                          />
-                        </>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-
-            {/* Failure-Based Escalation */}
-            <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
-              <h2 className="text-lg font-semibold text-white mb-4">Failure-Based Escalation</h2>
-              <p className="text-sm text-gray-400 mb-6">
-                When a model fails or times out, automatically retry with the next tier up.
-              </p>
-
-              <div className="space-y-4">
-                <div className="flex items-center justify-between p-4 bg-gray-900 rounded-lg">
-                  <div>
-                    <div className="font-medium text-white">Enable Auto-Escalation</div>
-                    <div className="text-sm text-gray-400">Automatically retry with higher tiers on failure</div>
-                  </div>
-                  <Toggle
-                    checked={getCurrentEscalation().enabled}
-                    onChange={() => handleEscalationChange('enabled', !getCurrentEscalation().enabled)}
-                    label="Enable auto-escalation"
-                  />
-                </div>
-
-                {getCurrentEscalation().enabled && (
-                  <>
-                    <div className="flex items-center justify-between p-4 bg-gray-900 rounded-lg">
-                      <div>
-                        <div className="font-medium text-white">Escalate on Failure</div>
-                        <div className="text-sm text-gray-400">Retry with next tier when LLM returns an error</div>
-                      </div>
-                      <Toggle
-                        checked={getCurrentEscalation().on_failure}
-                        onChange={() => handleEscalationChange('on_failure', !getCurrentEscalation().on_failure)}
-                        label="Escalate on failure"
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between p-4 bg-gray-900 rounded-lg">
-                      <div>
-                        <div className="font-medium text-white">Escalate on Timeout</div>
-                        <div className="text-sm text-gray-400">Retry with next tier when request times out</div>
-                      </div>
-                      <Toggle
-                        checked={getCurrentEscalation().on_timeout}
-                        onChange={() => handleEscalationChange('on_timeout', !getCurrentEscalation().on_timeout)}
-                        label="Escalate on timeout"
-                      />
-                    </div>
-
-                    <div className="p-4 bg-gray-900 rounded-lg">
-                      <div className="flex items-center justify-between mb-2">
-                        <label htmlFor="timeout-duration" className="font-medium text-white">Timeout Duration</label>
-                        <span className="text-gray-400">{getCurrentEscalation().timeout_seconds} seconds</span>
-                      </div>
-                      <input
-                        id="timeout-duration"
-                        type="range"
-                        min="30"
-                        max="300"
-                        step="30"
-                        value={getCurrentEscalation().timeout_seconds}
-                        onChange={(e) => handleEscalationChange('timeout_seconds', parseInt(e.target.value))}
-                        className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
-                        aria-valuemin={30}
-                        aria-valuemax={300}
-                        aria-valuenow={getCurrentEscalation().timeout_seconds}
-                      />
-                      <div className="flex justify-between text-xs text-gray-400 mt-1">
-                        <span>30s</span>
-                        <span>2 min</span>
-                        <span>5 min</span>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* OpenRouter Preset Note */}
-            <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
-              <div className="flex items-start space-x-3">
-                <span className="text-yellow-400 text-xl">💡</span>
-                <div>
-                  <h3 className="text-sm font-medium text-white">Managing OpenRouter Presets</h3>
-                  <p className="text-xs text-gray-400 mt-1">
-                    These presets are configured in your OpenRouter account. To modify the models in each
-                    preset tier, visit{' '}
-                    <a
-                      href="https://openrouter.ai/settings/presets"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-400 hover:text-blue-300"
-                    >
-                      openrouter.ai/settings/presets
-                    </a>
-                  </p>
-                </div>
-              </div>
             </div>
           </div>
         )}

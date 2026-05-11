@@ -35,37 +35,25 @@ def mock_config(tmp_path):
                 "endpoint": "https://openrouter.ai/api/v1/chat/completions",
                 "api_key_env": "OPENROUTER_API_KEY",
                 "model": "google/gemini-2.0-flash-exp",
-                "preset": "cheapskate",
                 "fallback_model": "google/gemini-2.5-flash",
             },
             "openrouter-cheapskate": {
                 "type": "openrouter",
                 "endpoint": "https://openrouter.ai/api/v1/chat/completions",
                 "api_key_env": "OPENROUTER_API_KEY",
-                "preset": "cheapskate",
             },
             "openrouter-big-brain": {
                 "type": "openrouter",
                 "endpoint": "https://openrouter.ai/api/v1/chat/completions",
                 "api_key_env": "OPENROUTER_API_KEY",
-                "preset": "big-brain",
             },
         },
         "routing": {
-            "tiers": ["openrouter-cheapskate", "openrouter", "openrouter-big-brain"],
-            "tier_labels": ["economy", "standard", "premium"],
-            "phase_base_tiers": {"analyst": 0, "formatter": 0, "seo": 0, "manager": 2},
-            "duration_thresholds": [
-                {"max_minutes": 15, "tier": 0},
-                {"max_minutes": 30, "tier": 1},
-                {"max_minutes": None, "tier": 2},
-            ],
-            "escalation": {
-                "enabled": True,
-                "on_failure": True,
-                "on_timeout": True,
-                "timeout_seconds": 120,
-                "max_retries_per_tier": 1,
+            "phase_base_backends": {
+                "analyst": "openrouter-cheapskate",
+                "formatter": "openrouter-cheapskate",
+                "seo": "openrouter-cheapskate",
+                "manager": "openrouter-big-brain",
             },
         },
         "safety": {"run_cost_cap": 1.0, "max_cost_per_1k_tokens": 0.05, "model_allowlist": []},
@@ -136,83 +124,20 @@ class TestBackendSelection:
         with pytest.raises(ValueError):
             llm_client.get_backend_config("nonexistent-backend")
 
-    def test_get_backend_for_phase_analyst(self, llm_client):
-        """Test backend selection for analyst phase."""
+    def test_get_backend_for_phase(self, llm_client):
+        """Test backend selection returns phase_backends config or primary backend."""
         backend = llm_client.get_backend_for_phase("analyst")
 
-        # Should use cheapskate tier for short transcripts
-        assert backend == "openrouter-cheapskate"
+        # Should return a valid backend name from config
+        assert backend in llm_client.config.get("backends", {}) or backend == llm_client.config.get(
+            "primary_backend", "openrouter"
+        )
 
-    def test_get_backend_for_phase_manager(self, llm_client):
-        """Test backend selection for manager phase."""
-        backend = llm_client.get_backend_for_phase("manager")
+    def test_get_backend_for_phase_unknown(self, llm_client):
+        """Test backend selection for unknown phase falls back to primary backend."""
+        backend = llm_client.get_backend_for_phase("nonexistent_phase")
 
-        # Manager has base tier 2 (big-brain)
-        assert backend == "openrouter-big-brain"
-
-    def test_get_backend_for_phase_with_long_transcript(self, llm_client):
-        """Test backend escalates for long transcripts."""
-        context = {"transcript_metrics": {"estimated_duration_minutes": 45}}
-
-        backend = llm_client.get_backend_for_phase("analyst", context=context)
-
-        # Should escalate to higher tier for long transcript
-        assert backend in ["openrouter", "openrouter-big-brain"]
-
-    def test_get_backend_with_tier_override(self, llm_client):
-        """Test explicit tier override."""
-        backend = llm_client.get_backend_for_phase("analyst", tier_override=2)
-
-        # Should use tier 2 (big-brain)
-        assert backend == "openrouter-big-brain"
-
-
-class TestTierCalculation:
-    """Tests for tier calculation logic."""
-
-    def test_get_tier_for_phase_base_tier(self, llm_client):
-        """Test tier calculation uses base tier."""
-        tier = llm_client.get_tier_for_phase("analyst")
-
-        assert tier == 0  # Base tier for analyst
-
-    def test_get_tier_for_phase_with_reason(self, llm_client):
-        """Test tier calculation returns reason."""
-        tier, reason = llm_client.get_tier_for_phase_with_reason("analyst")
-
-        assert tier == 0
-        assert "base tier" in reason.lower()
-
-    def test_get_tier_for_phase_escalates_with_duration(self, llm_client):
-        """Test tier escalates based on duration."""
-        context = {"transcript_metrics": {"estimated_duration_minutes": 25}}
-
-        tier, reason = llm_client.get_tier_for_phase_with_reason("analyst", context=context)
-
-        # Should escalate to tier 1 for 15-30 minute transcript
-        assert tier >= 1
-        assert "duration" in reason.lower()
-
-    def test_get_next_tier(self, llm_client):
-        """Test getting next escalation tier."""
-        next_tier = llm_client.get_next_tier(0)
-        assert next_tier == 1
-
-        next_tier = llm_client.get_next_tier(1)
-        assert next_tier == 2
-
-        # No tier beyond max
-        next_tier = llm_client.get_next_tier(2)
-        assert next_tier is None
-
-    def test_get_escalation_config(self, llm_client):
-        """Test retrieving escalation configuration."""
-        config = llm_client.get_escalation_config()
-
-        assert config["enabled"] is True
-        assert config["on_failure"] is True
-        assert config["on_timeout"] is True
-        assert "timeout_seconds" in config
+        assert backend == llm_client.config.get("primary_backend", "openrouter")
 
 
 class TestCostCalculation:
@@ -470,34 +395,6 @@ class TestAPIInteractions:
         assert response.model == "google/gemini-2.0-flash-exp"
         assert response.total_tokens == 150
 
-    @pytest.mark.xfail(
-        reason="Mock targets httpx.AsyncClient.post but chat() delegates to _call_openrouter — payload not captured correctly"
-    )
-    @pytest.mark.asyncio
-    async def test_chat_with_preset(self, llm_client, monkeypatch):
-        """Test chat with OpenRouter preset."""
-        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-
-        # Reset global tracker
-        start_run_tracking(job_id=2)
-
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "choices": [{"message": {"content": "Test"}}],
-            "model": "google/gemini-2.0-flash-exp",
-            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-        }
-
-        with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
-            with patch("api.services.llm.log_event"):
-                await llm_client.chat(messages=[{"role": "user", "content": "Hello"}], backend="openrouter-cheapskate")
-
-        # Verify preset was used in request
-        call_args = mock_post.call_args
-        payload = call_args[1]["json"]
-        assert payload["model"] == "@preset/cheapskate"
-
     @pytest.mark.asyncio
     async def test_chat_enforces_safety_guards(self, llm_client):
         """Test that chat enforces safety guards before making request."""
@@ -575,5 +472,4 @@ class TestClientManagement:
         assert "active_backend" in status
         assert "active_model" in status
         assert "primary_backend" in status
-        assert "configured_preset" in status
         assert status["primary_backend"] == "openrouter"

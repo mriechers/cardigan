@@ -8,7 +8,7 @@ Provides endpoints for querying observability data:
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
@@ -135,8 +135,6 @@ class PhaseModelStats(BaseModel):
     """Statistics for a model within a phase."""
 
     model: str = Field(..., description="Model identifier")
-    tier: Optional[int] = Field(None, description="Tier index (0=cheapskate, 1=default, 2=big-brain)")
-    tier_label: Optional[str] = Field(None, description="Human-readable tier name")
     completions: int = Field(0, description="Successful completions")
     failures: int = Field(0, description="Failed attempts")
     total_cost: float = Field(0.0, description="Total cost in USD")
@@ -153,7 +151,6 @@ class PhaseStats(BaseModel):
     total_cost: float = Field(0.0, description="Total cost across all models")
     total_tokens: int = Field(0, description="Total tokens across all models")
     success_rate: float = Field(0.0, description="Overall success rate")
-    escalation_rate: float = Field(0.0, description="Percentage that escalated from base tier")
     models: List[PhaseModelStats] = Field(default_factory=list, description="Per-model breakdown")
 
 
@@ -167,9 +164,6 @@ class PhaseStatsResponse(BaseModel):
     total_cost: float = Field(0.0)
     total_completions: int = Field(0)
     total_failures: int = Field(0)
-    escalation_summary: Dict[str, Any] = Field(default_factory=dict)
-    phase_base_tiers: Dict[str, int] = Field(default_factory=dict, description="Current configured tier per phase")
-    tier_labels: List[str] = Field(default_factory=list, description="Human-readable tier names")
 
 
 @router.get("/phase-stats", response_model=PhaseStatsResponse)
@@ -191,34 +185,30 @@ async def get_phase_stats(
     period_start = period_end - timedelta(days=days)
 
     async with get_session() as session:
-        # Query completions grouped by phase, model, tier
+        # Query completions grouped by phase and model
         completions_query = text("""
             SELECT
                 json_extract(data, '$.phase') as phase,
                 json_extract(data, '$.model') as model,
-                json_extract(data, '$.extra.tier') as tier,
-                json_extract(data, '$.extra.tier_label') as tier_label,
                 COUNT(*) as count,
                 COALESCE(SUM(json_extract(data, '$.cost')), 0) as total_cost,
                 COALESCE(SUM(json_extract(data, '$.tokens')), 0) as total_tokens
             FROM session_stats
             WHERE event_type = 'phase_completed'
               AND timestamp >= :period_start
-            GROUP BY phase, model, tier
-            ORDER BY phase, tier
+            GROUP BY phase, model
+            ORDER BY phase
         """)
 
-        # Query failures grouped by phase, tier
+        # Query failures grouped by phase
         failures_query = text("""
             SELECT
                 json_extract(data, '$.phase') as phase,
-                json_extract(data, '$.extra.tier') as tier,
-                json_extract(data, '$.extra.tier_label') as tier_label,
                 COUNT(*) as count
             FROM session_stats
             WHERE event_type = 'phase_failed'
               AND timestamp >= :period_start
-            GROUP BY phase, tier
+            GROUP BY phase
         """)
 
         completions_result = await session.execute(completions_query, {"period_start": period_start.isoformat()})
@@ -227,46 +217,38 @@ async def get_phase_stats(
         failures_result = await session.execute(failures_query, {"period_start": period_start.isoformat()})
         failures = failures_result.fetchall()
 
-    # Build failure lookup: phase -> tier -> count
-    failure_map: Dict[str, Dict[Optional[int], int]] = {}
+    # Build failure lookup: phase -> count
+    failure_map: Dict[str, int] = {}
     for row in failures:
         phase = row[0]
-        tier = int(row[1]) if row[1] is not None else None
-        count = row[3]
-        if phase not in failure_map:
-            failure_map[phase] = {}
-        failure_map[phase][tier] = count
+        count = row[1]
+        failure_map[phase] = count
 
     # Aggregate by phase
     phase_data: Dict[str, PhaseStats] = {}
 
     for row in completions:
-        phase_name, model, tier_raw, tier_label, count, cost, tokens = row
+        phase_name, model, count, cost, tokens = row
         if not phase_name:
             continue
-
-        tier = int(tier_raw) if tier_raw is not None else None
 
         if phase_name not in phase_data:
             phase_data[phase_name] = PhaseStats(phase=phase_name)
 
         ps = phase_data[phase_name]
 
-        # Get failures for this phase/tier combo
-        phase_failures = failure_map.get(phase_name, {})
-        tier_failures = phase_failures.get(tier, 0)
+        # Get failures for this phase
+        phase_failures = failure_map.get(phase_name, 0)
 
-        # Calculate success rate for this model/tier
-        total_attempts = count + tier_failures
+        # Calculate success rate for this model
+        total_attempts = count + phase_failures
         success_rate = (count / total_attempts * 100) if total_attempts > 0 else 100.0
 
         ps.models.append(
             PhaseModelStats(
                 model=model or "unknown",
-                tier=tier,
-                tier_label=tier_label,
                 completions=count,
-                failures=tier_failures,
+                failures=phase_failures,
                 total_cost=float(cost or 0),
                 total_tokens=int(tokens or 0),
                 success_rate=round(success_rate, 1),
@@ -278,23 +260,16 @@ async def get_phase_stats(
         ps.total_tokens += int(tokens or 0)
 
     # Add remaining failures not captured in completions
-    for phase_name, tier_failures in failure_map.items():
+    for phase_name, fail_count in failure_map.items():
         if phase_name not in phase_data:
             phase_data[phase_name] = PhaseStats(phase=phase_name)
         ps = phase_data[phase_name]
-        ps.total_failures = sum(tier_failures.values())
+        ps.total_failures = fail_count
 
-    # Load current routing config for tier-relative escalation calculation
-    from api.services.llm import get_llm_client
-
-    llm_config = get_llm_client().config
-    phase_base_tiers = llm_config.get("routing", {}).get("phase_base_tiers", {})
-
-    # Calculate overall stats and escalation rates
+    # Calculate overall stats
     total_cost = 0.0
     total_completions = 0
     total_failures = 0
-    escalation_summary = {"by_phase": {}}
 
     for phase_name, ps in phase_data.items():
         total_cost += ps.total_cost
@@ -305,26 +280,8 @@ async def get_phase_stats(
         total_attempts = ps.total_completions + ps.total_failures
         ps.success_rate = round((ps.total_completions / total_attempts * 100) if total_attempts > 0 else 0, 1)
 
-        # Calculate escalation rate relative to configured base tier
-        configured_tier = phase_base_tiers.get(phase_name, 0)
-        at_or_below = sum(m.completions for m in ps.models if m.tier is not None and m.tier <= configured_tier) + sum(
-            m.completions for m in ps.models if m.tier is None
-        )
-        escalated_completions = sum(m.completions for m in ps.models if m.tier is not None and m.tier > configured_tier)
-        if ps.total_completions > 0:
-            ps.escalation_rate = round(escalated_completions / ps.total_completions * 100, 1)
-
-        escalation_summary["by_phase"][phase_name] = {
-            "configured_tier": configured_tier,
-            "at_configured": at_or_below,
-            "escalated": escalated_completions,
-            "rate": ps.escalation_rate,
-        }
-
     # Sort phases by name
     phases = sorted(phase_data.values(), key=lambda p: p.phase)
-
-    tier_labels = llm_config.get("routing", {}).get("tier_labels", [])
 
     return PhaseStatsResponse(
         phases=phases,
@@ -334,7 +291,4 @@ async def get_phase_stats(
         total_cost=round(total_cost, 4),
         total_completions=total_completions,
         total_failures=total_failures,
-        escalation_summary=escalation_summary,
-        phase_base_tiers=phase_base_tiers,
-        tier_labels=tier_labels,
     )

@@ -166,11 +166,10 @@ async def resume_job(job_id: int):
 
 @router.post("/{job_id}/retry", response_model=Job)
 async def retry_job(job_id: int):
-    """Retry a failed or paused job with automatic tier escalation.
+    """Retry a failed or paused job.
 
-    Resets job status to 'pending', clears error message, and escalates
-    to the next model tier. For truncation-paused jobs, resets the formatter
-    and downstream phases while preserving analyst output.
+    Resets job status to 'pending' and clears error message. For truncation-paused
+    jobs, resets the formatter and downstream phases while preserving analyst output.
 
     Args:
         job_id: Job ID to retry
@@ -193,29 +192,11 @@ async def retry_job(job_id: int):
             f"Only {', '.join(s.value for s in RETRYABLE_STATES)} jobs can be retried.",
         )
 
-    # Determine escalation tier from previous max tier used
-    max_previous_tier = 0
-    phases = job.phases or []
-    for phase in phases:
-        if phase.tier is not None and phase.tier > max_previous_tier:
-            max_previous_tier = phase.tier
-    escalated_tier = min(max_previous_tier + 1, 2)  # Cap at tier 2 (Claude Opus)
-
-    tier_labels = {0: "economy", 1: "standard", 2: "premium"}
-    logger.info(
-        "Retry with escalation",
-        extra={
-            "job_id": job_id,
-            "previous_max_tier": max_previous_tier,
-            "escalated_tier": escalated_tier,
-            "tier_label": tier_labels.get(escalated_tier),
-        },
-    )
-
     # Determine which phases to reset based on failure type
+    phases = job.phases or []
     is_truncation = job.error_message and "TRUNCATION" in job.error_message
     if is_truncation:
-        phases_to_reset = {"formatter", "seo", "manager", "timestamp"}
+        phases_to_reset = {"formatter", "seo", "timestamp"}
     else:
         # Find the first non-completed phase and reset from there forward
         # This preserves completed phases (e.g., analyst) when a later phase fails
@@ -230,16 +211,14 @@ async def retry_job(job_id: int):
         else:
             phases_to_reset = None  # All completed — reset everything as fallback
 
-    # Reset phase statuses and set forced tier, archiving previous run data
+    # Reset phase statuses, archiving previous run data
     updated_phases = []
     for phase in phases:
         phase_dict = phase.model_dump()
         if phases_to_reset is None or phase.name in phases_to_reset:
             # Archive current run before resetting (if it had results)
-            if phase_dict.get("model") or phase_dict.get("tier") is not None:
+            if phase_dict.get("model"):
                 prev_run = {
-                    "tier": phase_dict.get("tier"),
-                    "tier_label": phase_dict.get("tier_label"),
                     "model": phase_dict.get("model"),
                     "cost": phase_dict.get("cost", 0),
                     "tokens": phase_dict.get("tokens", 0),
@@ -250,18 +229,14 @@ async def retry_job(job_id: int):
                 phase_dict["previous_runs"] = previous_runs
                 phase_dict["retry_count"] = (phase_dict.get("retry_count") or 0) + 1
 
-            # Reset this phase to pending with forced escalation tier
+            # Reset this phase to pending
             phase_dict["status"] = "pending"
             phase_dict["completed_at"] = None
             phase_dict["error_message"] = None
             phase_dict["cost"] = 0
             phase_dict["tokens"] = 0
             phase_dict["model"] = None
-            phase_dict["tier"] = None
-            phase_dict["tier_label"] = None
-            phase_dict["tier_reason"] = None
-            phase_dict["attempts"] = None
-            phase_dict["metadata"] = {"forced_tier": escalated_tier}
+            phase_dict["metadata"] = None
         updated_phases.append(phase_dict)
 
     from api.models.job import JobPhase
@@ -282,8 +257,6 @@ async def retry_job(job_id: int):
             data=EventData(
                 extra={
                     "action": "job_retry",
-                    "escalated_tier": escalated_tier,
-                    "tier_label": tier_labels.get(escalated_tier),
                     "is_truncation_retry": is_truncation,
                     "phases_reset": list(phases_to_reset) if phases_to_reset else "all",
                 }
@@ -413,10 +386,8 @@ async def replace_transcript(
     for phase in job.phases or []:
         phase_dict = phase.model_dump()
         # Archive previous run if it had results
-        if phase_dict.get("model") or phase_dict.get("tier") is not None:
+        if phase_dict.get("model"):
             prev_run = {
-                "tier": phase_dict.get("tier"),
-                "tier_label": phase_dict.get("tier_label"),
                 "model": phase_dict.get("model"),
                 "cost": phase_dict.get("cost", 0),
                 "tokens": phase_dict.get("tokens", 0),
@@ -432,10 +403,6 @@ async def replace_transcript(
         phase_dict["cost"] = 0
         phase_dict["tokens"] = 0
         phase_dict["model"] = None
-        phase_dict["tier"] = None
-        phase_dict["tier_label"] = None
-        phase_dict["tier_reason"] = None
-        phase_dict["attempts"] = None
         phase_dict["metadata"] = None
         reset_phases.append(phase_dict)
 
@@ -802,14 +769,8 @@ async def list_keyword_reports(job_id: int):
 
 
 class PhaseRetryRequest(BaseModel):
-    """Request body for phase retry with optional tier override and editorial feedback."""
+    """Request body for phase retry with optional editorial feedback."""
 
-    tier: Optional[int] = Field(
-        None,
-        ge=0,
-        description="Force specific tier index (0=economy, 1=standard, 2=premium). "
-        "If not specified, auto-escalates from the tier previously used.",
-    )
     feedback: Optional[str] = Field(
         None,
         description="Editorial feedback to guide the retry (e.g., 'add a chapter for topic X', "
@@ -832,7 +793,6 @@ OUTPUT_TO_PHASE = {
     "analysis": "analyst",
     "formatted_transcript": "formatter",
     "seo_metadata": "seo",
-    "qa_review": "manager",
     "timestamp_report": "timestamp",
 }
 
@@ -844,22 +804,19 @@ async def retry_phase(
     background_tasks: BackgroundTasks,
     body: PhaseRetryRequest = None,
 ):
-    """Retry a single phase for a job with optional tier override and editorial feedback.
+    """Retry a single phase for a job with optional editorial feedback.
 
-    Re-runs one output (e.g., timestamp) without re-running the entire
-    pipeline. If no tier is specified in the request body, automatically
-    escalates to the next tier above what was previously used for this phase.
+    Re-runs one output (e.g., timestamp) without re-running the entire pipeline.
 
     Accepts an optional JSON body with:
-      - tier: 0=cheapskate, 1=default, 2=big-brain (omit to auto-escalate)
       - feedback: editorial guidance injected into the agent prompt
 
     Args:
         job_id: Job ID to retry a phase for
-        phase_name: Phase name (analyst, formatter, seo, manager, timestamp,
+        phase_name: Phase name (analyst, formatter, seo, timestamp,
                     copy_editor) OR output key (analysis, seo_metadata,
                     timestamp_report, etc.)
-        body: Optional JSON body with tier and/or feedback fields
+        body: Optional JSON body with feedback field
 
     Returns:
         PhaseRetryResponse with status
@@ -869,14 +826,13 @@ async def retry_phase(
     """
     if body is None:
         body = PhaseRetryRequest()
-    tier = body.tier
     feedback = body.feedback
     # Map output key to phase name if needed
     if phase_name in OUTPUT_TO_PHASE:
         phase_name = OUTPUT_TO_PHASE[phase_name]
 
     # Validate phase name
-    valid_phases = {"analyst", "formatter", "seo", "manager", "timestamp"}
+    valid_phases = {"analyst", "formatter", "seo", "timestamp"}
     if phase_name not in valid_phases:
         raise HTTPException(
             status_code=400, detail=f"Invalid phase: {phase_name}. Valid phases: {', '.join(sorted(valid_phases))}"
@@ -886,25 +842,6 @@ async def retry_phase(
     job = await get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
-
-    # Auto-escalate if no explicit tier provided
-    effective_tier = tier
-    if effective_tier is None:
-        previous_tier = 0
-        for phase in job.phases or []:
-            if phase.name == phase_name and phase.tier is not None:
-                previous_tier = phase.tier
-                break
-        effective_tier = previous_tier + 1
-        logger.info(
-            "Auto-escalating phase retry",
-            extra={
-                "job_id": job_id,
-                "phase": phase_name,
-                "previous_tier": previous_tier,
-                "escalated_tier": effective_tier,
-            },
-        )
 
     # Capture original model for event logging
     original_model = None
@@ -923,8 +860,6 @@ async def retry_phase(
                 model=original_model,
                 extra={
                     "action": "phase_retry",
-                    "tier": effective_tier,
-                    "auto_escalated": tier is None,
                     "original_model": original_model,
                     "has_feedback": feedback is not None,
                 },
@@ -940,22 +875,19 @@ async def retry_phase(
         from api.services.worker import JobWorker
 
         worker = JobWorker()
-        result = await worker.retry_single_phase(job_id, phase_name, force_tier=effective_tier, feedback=feedback)
+        result = await worker.retry_single_phase(job_id, phase_name, feedback=feedback)
         if not result.get("success"):
             logger.error(
                 "Phase retry failed",
-                extra={"job_id": job_id, "phase": phase_name, "tier": effective_tier, "error": result.get("error")},
+                extra={"job_id": job_id, "phase": phase_name, "error": result.get("error")},
             )
         # Clear current_phase after retry completes
         await update_job(job_id, JobUpdate(current_phase=None))
 
     background_tasks.add_task(run_retry)
 
-    tier_labels = {0: "economy", 1: "standard", 2: "premium"}
-    escalation_note = " (auto-escalated)" if tier is None else ""
-    tier_msg = f" at tier {effective_tier} ({tier_labels.get(effective_tier, '?')}){escalation_note}"
     return PhaseRetryResponse(
         success=True,
         phase=phase_name,
-        message=f"Phase '{phase_name}' retry started for job {job_id}{tier_msg}. Refresh to see results.",
+        message=f"Phase '{phase_name}' retry started for job {job_id}. Refresh to see results.",
     )

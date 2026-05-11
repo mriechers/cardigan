@@ -466,8 +466,8 @@ class TestRetryPhaseEndpoint:
         assert data["phase"] == "analyst"
 
     @pytest.mark.asyncio
-    async def test_retry_phase_with_tier_in_body(self, sample_job):
-        """Test that phase retry accepts tier as a JSON body field."""
+    async def test_retry_phase_with_extra_body_fields_ignored(self, sample_job):
+        """Test that phase retry silently ignores unknown body fields (like former tier)."""
         job_id = sample_job["id"]
 
         response = client.post(
@@ -478,8 +478,6 @@ class TestRetryPhaseEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        # Message should reflect the explicit tier
-        assert "tier 1" in data["message"]
 
     @pytest.mark.asyncio
     async def test_retry_phase_with_feedback_in_body(self, sample_job):
@@ -496,19 +494,19 @@ class TestRetryPhaseEndpoint:
         assert data["success"] is True
 
     @pytest.mark.asyncio
-    async def test_retry_phase_with_tier_and_feedback(self, sample_job):
-        """Test that phase retry accepts both tier and feedback together."""
+    async def test_retry_phase_with_feedback_and_unknown_fields(self, sample_job):
+        """Test that phase retry accepts feedback with unknown extra fields silently ignored."""
         job_id = sample_job["id"]
 
         response = client.post(
-            f"/api/jobs/{job_id}/phases/manager/retry",
+            f"/api/jobs/{job_id}/phases/seo/retry",
             json={"tier": 2, "feedback": "Focus more on SEO consistency issues."},
         )
 
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        assert data["phase"] == "manager"
+        assert data["phase"] == "seo"
 
     @pytest.mark.asyncio
     async def test_retry_phase_high_tier_accepted(self, sample_job):
@@ -529,8 +527,8 @@ class TestRetryPhaseEndpoint:
         assert response.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_retry_phase_negative_tier_rejected(self, sample_job):
-        """Test that negative tier values are rejected with 422."""
+    async def test_retry_phase_negative_tier_ignored(self, sample_job):
+        """Test that unknown body fields including former tier values are silently ignored."""
         job_id = sample_job["id"]
 
         response = client.post(
@@ -538,7 +536,8 @@ class TestRetryPhaseEndpoint:
             json={"tier": -1},
         )
 
-        assert response.status_code == 422
+        # tier is no longer a recognized field; unknown fields are ignored
+        assert response.status_code == 200
 
     @pytest.mark.asyncio
     async def test_retry_phase_invalid_phase_name(self, sample_job):

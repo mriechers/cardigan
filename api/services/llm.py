@@ -261,10 +261,9 @@ class LLMClient:
         self.config = self._load_config()
         self._http_client: Optional[httpx.AsyncClient] = None
 
-        # Track active model/preset for health endpoint
+        # Track active model for health endpoint
         self.active_backend: Optional[str] = None
         self.active_model: Optional[str] = None
-        self.active_preset: Optional[str] = None
 
         # Load safety guards from env/config
         self._load_safety_config()
@@ -405,117 +404,13 @@ class LLMClient:
 
         return backends[backend_name]
 
-    def get_backend_for_phase(
-        self, phase: str, context: Optional[Dict[str, Any]] = None, tier_override: Optional[int] = None
-    ) -> str:
-        """Get the configured backend for a specific agent phase.
+    def get_backend_for_phase(self, phase: str) -> str:
+        """Get the configured backend name for a phase.
 
-        Supports tiered routing based on transcript duration and explicit tier override.
-
-        Args:
-            phase: Phase name (e.g., 'analyst', 'formatter', 'seo', 'copy_editor')
-            context: Optional context dict with transcript_metrics
-            tier_override: Optional tier index to use instead of calculated tier
-
-        Returns:
-            Backend name to use for this phase
+        Returns the backend from phase_backends config, or the primary backend as fallback.
         """
-        routing_config = self.config.get("routing", {})
-        tiers = routing_config.get("tiers", ["openrouter-cheapskate", "openrouter", "openrouter-big-brain"])
-
-        # Get base tier for this phase (default to tier 0 = cheapskate)
-        phase_base_tiers = routing_config.get("phase_base_tiers", {})
-        base_tier = phase_base_tiers.get(phase, 0)
-
-        # If tier override provided, use it directly
-        if tier_override is not None:
-            selected_tier = min(tier_override, len(tiers) - 1)
-        else:
-            # Calculate tier based on transcript duration
-            selected_tier = base_tier
-
-            if context:
-                transcript_metrics = context.get("transcript_metrics", {})
-                estimated_duration = transcript_metrics.get("estimated_duration_minutes", 0)
-
-                # Find appropriate tier based on duration thresholds
-                duration_thresholds = routing_config.get("duration_thresholds", [])
-                for threshold in duration_thresholds:
-                    max_minutes = threshold.get("max_minutes")
-                    tier = threshold.get("tier", 0)
-
-                    if max_minutes is None or estimated_duration <= max_minutes:
-                        # Use the higher of base tier or duration-based tier
-                        selected_tier = max(base_tier, tier)
-                        break
-                else:
-                    # No threshold matched, use max tier
-                    selected_tier = max(base_tier, len(tiers) - 1)
-
-        # Get backend for selected tier
-        if selected_tier < len(tiers):
-            backend = tiers[selected_tier]
-            # Validate backend exists
-            if backend in self.config.get("backends", {}):
-                return backend
-
-        # Fall back to phase_backends config or primary backend
         phase_backends = self.config.get("phase_backends", {})
         return phase_backends.get(phase, self.config.get("primary_backend", "openrouter"))
-
-    def get_tier_for_phase(self, phase: str, context: Optional[Dict[str, Any]] = None) -> int:
-        """Get the calculated tier index for a phase based on context.
-
-        Args:
-            phase: Phase name
-            context: Optional context dict with transcript_metrics
-
-        Returns:
-            Tier index (0 = cheapskate, 1 = default, 2 = big-brain)
-        """
-        tier, _ = self.get_tier_for_phase_with_reason(phase, context)
-        return tier
-
-    def get_tier_for_phase_with_reason(self, phase: str, context: Optional[Dict[str, Any]] = None) -> tuple:
-        """Get the calculated tier index and reason for a phase.
-
-        Args:
-            phase: Phase name
-            context: Optional context dict with transcript_metrics
-
-        Returns:
-            Tuple of (tier index, reason string)
-        """
-        routing_config = self.config.get("routing", {})
-        tiers = routing_config.get("tiers", ["openrouter-cheapskate", "openrouter", "openrouter-big-brain"])
-
-        # Get base tier for this phase
-        phase_base_tiers = routing_config.get("phase_base_tiers", {})
-        base_tier = phase_base_tiers.get(phase, 0)
-
-        if not context:
-            return base_tier, f"phase default (base tier {base_tier})"
-
-        transcript_metrics = context.get("transcript_metrics", {})
-        estimated_duration = transcript_metrics.get("estimated_duration_minutes", 0)
-
-        # Find appropriate tier based on duration thresholds
-        duration_thresholds = routing_config.get("duration_thresholds", [])
-        for threshold in duration_thresholds:
-            max_minutes = threshold.get("max_minutes")
-            tier = threshold.get("tier", 0)
-
-            if max_minutes is None or estimated_duration <= max_minutes:
-                selected_tier = max(base_tier, tier)
-                if selected_tier > base_tier:
-                    reason = f"duration {estimated_duration:.0f}min (threshold: ≤{max_minutes}min → tier {tier})"
-                else:
-                    reason = f"phase default (base tier {base_tier})"
-                return selected_tier, reason
-
-        # No threshold matched, use max tier
-        max_tier = len(tiers) - 1
-        return max(base_tier, max_tier), f"duration {estimated_duration:.0f}min exceeds all thresholds"
 
     def get_next_tier(self, current_tier: int) -> Optional[int]:
         """Get the next escalation tier, or None if at max.
@@ -565,8 +460,6 @@ class LLMClient:
         model: Optional[str] = None,
         job_id: Optional[int] = None,
         phase: Optional[str] = None,
-        tier: Optional[int] = None,
-        tier_label: Optional[str] = None,
         **kwargs,
     ) -> LLMResponse:
         """Make a chat completion request.
@@ -577,8 +470,6 @@ class LLMClient:
             model: Model override (default: phase_models config, then backend model)
             job_id: Job ID for event logging
             phase: Agent phase name for observability (analyst, formatter, etc.)
-            tier: Tier index for observability (0=cheapskate, 1=default, 2=big-brain)
-            tier_label: Human-readable tier name
             **kwargs: Additional parameters passed to the API
 
         Returns:
@@ -601,8 +492,6 @@ class LLMClient:
 
         if not model_id:
             model_id = backend_config.get("model") or backend_config.get("fallback_model")
-
-        self.active_preset = None
 
         self.active_backend = backend_name
         self.active_model = model_id
@@ -670,8 +559,6 @@ class LLMClient:
                 duration_ms=duration_ms,
                 job_id=job_id,
                 phase=phase,
-                tier=tier,
-                tier_label=tier_label,
                 backend=backend_name,
             )
 
@@ -935,35 +822,27 @@ class LLMClient:
         """Get current LLM client status for health endpoint.
 
         Returns:
-            Dict with active/configured backend, model, preset, and last_run_totals
+            Dict with active/configured backend, model, and last_run_totals
         """
         tracker = get_run_tracker()
         last_run = tracker.to_dict() if tracker else None
 
         # Get configured settings from primary backend
         primary_backend = self.config.get("primary_backend")
-        configured_preset = None
         fallback_model = None
         if primary_backend:
             backend_config = self.config.get("backends", {}).get(primary_backend, {})
-            configured_preset = backend_config.get("preset")
             fallback_model = backend_config.get("fallback_model") or backend_config.get("model")
 
         # Get phase-to-backend mapping
         phase_backends = self.config.get("phase_backends", {})
 
-        # Get OpenRouter preset details (manually maintained)
-        openrouter_presets = self.config.get("openrouter_presets", {})
-
         return {
             "active_backend": self.active_backend,
             "active_model": self.active_model,
-            "active_preset": self.active_preset,
             "primary_backend": primary_backend,
-            "configured_preset": configured_preset,
             "fallback_model": fallback_model,
             "phase_backends": phase_backends,
-            "openrouter_presets": openrouter_presets,
             "last_run_totals": last_run,
         }
 

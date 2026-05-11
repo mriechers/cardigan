@@ -1,11 +1,6 @@
 {
   "primary_backend": "openrouter",
   "fallback_backend": "openrouter",
-  "chat": {
-    "backend": "openrouter",
-    "max_tokens": 4096,
-    "temperature": 0.7
-  },
   "backends": {
     "local-ollama": {
       "type": "ollama",
@@ -76,7 +71,6 @@
     "openrouter": {
       "type": "openrouter",
       "endpoint": "https://openrouter.ai/api/v1/chat/completions",
-      "preset": "ai-editorial-assistant",
       "fallback_model": "anthropic/claude-sonnet-4.6",
       "api_key_env": "OPENROUTER_API_KEY",
       "timeout": 180,
@@ -85,7 +79,6 @@
     "openrouter-big-brain": {
       "type": "openrouter",
       "endpoint": "https://openrouter.ai/api/v1/chat/completions",
-      "preset": "ai-editorial-assistant-big-brain",
       "fallback_model": "anthropic/claude-opus-4.6",
       "api_key_env": "OPENROUTER_API_KEY",
       "timeout": 300,
@@ -94,7 +87,6 @@
     "openrouter-cheapskate": {
       "type": "openrouter",
       "endpoint": "https://openrouter.ai/api/v1/chat/completions",
-      "preset": "ai-editorial-assistant-cheapskate",
       "fallback_model": "anthropic/claude-haiku-4.5",
       "api_key_env": "OPENROUTER_API_KEY",
       "timeout": 300,
@@ -129,52 +121,10 @@
     "analyst": "openrouter-cheapskate",
     "formatter": "openrouter",
     "seo": "openrouter-cheapskate",
-    "manager": "openrouter-big-brain",
     "timestamp": "openrouter",
-    "copy_editor": "openrouter-big-brain",
-    "chat": "openrouter"
+    "copy_editor": "openrouter-big-brain"
   },
   "routing": {
-    "tiers": [
-      "openrouter-cheapskate",
-      "openrouter",
-      "openrouter-big-brain"
-    ],
-    "tier_labels": [
-      "economy",
-      "standard",
-      "premium"
-    ],
-    "duration_thresholds": [
-      {
-        "max_minutes": 30,
-        "tier": 0
-      },
-      {
-        "max_minutes": 45,
-        "tier": 1
-      },
-      {
-        "max_minutes": null,
-        "tier": 2
-      }
-    ],
-    "phase_base_tiers": {
-      "analyst": 0,
-      "formatter": 1,
-      "seo": 0,
-      "manager": 2,
-      "timestamp": 1,
-      "copy_editor": 2,
-      "chat": 1
-    },
-    "escalation": {
-      "enabled": true,
-      "on_failure": true,
-      "on_timeout": true,
-      "timeout_seconds": 120,
-      "max_retries_per_tier": 1
-    },
     "completeness": {
       "enabled": true,
       "coverage_threshold": 0.70,
@@ -260,37 +210,7 @@
     "seo": "anthropic/claude-haiku-4.5",
     "manager": "anthropic/claude-opus-4.6",
     "timestamp": "anthropic/claude-sonnet-4.6",
-    "copy_editor": "anthropic/claude-opus-4.6",
-    "chat": "anthropic/claude-sonnet-4.6"
-  },
-  "openrouter_presets": {
-    "ai-editorial-assistant": {
-      "description": "Default tier — Claude Sonnet via OpenRouter",
-      "models": [
-        "anthropic/claude-sonnet-4.6",
-        "google/gemini-3-flash-preview",
-        "openai/gpt-5.1-codex-mini"
-      ],
-      "models_verified": "2026-04-02"
-    },
-    "ai-editorial-assistant-big-brain": {
-      "description": "Big Brain tier — Claude Opus via OpenRouter",
-      "models": [
-        "anthropic/claude-opus-4.6",
-        "google/gemini-3-pro-preview",
-        "openai/gpt-5.1-codex"
-      ],
-      "models_verified": "2026-04-02"
-    },
-    "ai-editorial-assistant-cheapskate": {
-      "description": "Cheapskate tier — Claude Haiku via OpenRouter",
-      "models": [
-        "anthropic/claude-haiku-4.5",
-        "openai/gpt-oss-120b",
-        "moonshotai/kimi-k2-0711"
-      ],
-      "models_verified": "2026-04-02"
-    }
+    "copy_editor": "anthropic/claude-opus-4.6"
   },
   "safety": {
     "run_cost_cap": 1.0,

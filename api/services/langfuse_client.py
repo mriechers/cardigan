@@ -121,8 +121,6 @@ class LangfuseClient:
         tags: Optional[List[str]] = None,
         job_id: Optional[int] = None,
         phase: Optional[str] = None,
-        tier: Optional[int] = None,
-        tier_label: Optional[str] = None,
         backend: Optional[str] = None,
     ) -> Optional[str]:
         """
@@ -147,8 +145,6 @@ class LangfuseClient:
             trace_metadata.update(
                 {
                     "backend": backend,
-                    "tier": tier,
-                    "tier_label": tier_label,
                     "duration_ms": duration_ms,
                 }
             )
@@ -157,8 +153,6 @@ class LangfuseClient:
             trace_tags = tags or []
             if phase:
                 trace_tags.append(f"phase:{phase}")
-            if tier_label:
-                trace_tags.append(f"tier:{tier_label}")
             trace_tags.append("editorial-assistant")
 
             # Build batch ingestion payload

@@ -1,4 +1,9 @@
-"""Migration 011: app_version column exists on jobs, session_stats, chat_sessions."""
+"""Migration 011: app_version column exists on jobs, session_stats.
+
+(The chat_sessions table also received an app_version column in migration 011,
+but migration 012 drops chat_sessions entirely as part of v4.1 chat removal —
+so we no longer assert on it here.)
+"""
 
 import os
 import tempfile
@@ -46,7 +51,9 @@ async def test_app_version_column_exists_on_session_stats(fresh_db):
 
 
 @pytest.mark.asyncio
-async def test_app_version_column_exists_on_chat_sessions(fresh_db):
+async def test_chat_sessions_table_dropped_in_012(fresh_db):
+    """Migration 012 drops chat_sessions as part of v4.1 chat removal."""
     async with db_mod.get_session() as s:
-        cols = [r[1] for r in (await s.execute(text("PRAGMA table_info(chat_sessions)"))).fetchall()]
-    assert "app_version" in cols
+        tables = [r[0] for r in (await s.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))).fetchall()]
+    assert "chat_sessions" not in tables
+    assert "chat_messages" not in tables
