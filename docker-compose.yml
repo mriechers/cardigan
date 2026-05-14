@@ -1,5 +1,6 @@
 services:
   api:
+    image: cardigan-v4-api
     build:
       context: .
       dockerfile: Dockerfile.api
@@ -68,9 +69,10 @@ services:
       - api
 
   mcp:
-    build:
-      context: .
-      dockerfile: Dockerfile.api
+    # Shares the api image — same content, different command. Mirrors prod
+    # (docker-compose.prod.yml), where both services pull the same GHCR tag.
+    # Build with `docker compose build api` (mcp has no build of its own).
+    image: cardigan-v4-api
     command: ["python", "-m", "mcp_server.server"]
     ports:
       - "8180:8080"
@@ -89,6 +91,12 @@ services:
       - db-data:/data/db
       - output-data:/data/output
       - ./transcripts:/data/transcripts
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket,sys; s=socket.socket(); s.settimeout(3); s.connect(('localhost', 8080)); s.close()"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
     depends_on:
       api:
         condition: service_healthy
