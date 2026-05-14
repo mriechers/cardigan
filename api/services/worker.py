@@ -619,6 +619,38 @@ class JobWorker:
                     extra={"job_id": job_id, "error": str(e)},
                 )
 
+            # Attempt diarization if service is available and media file exists
+            diarization_result = None
+            media_path = self._find_media_file(job)
+            if media_path:
+                try:
+                    from api.services.diarization_client import DiarizationClient
+
+                    diarization_client = DiarizationClient()
+                    if await diarization_client.is_available():
+                        logger.info(
+                            "Diarization service available, processing media file",
+                            extra={"job_id": job_id, "media_file": media_path.name},
+                        )
+                        diarization_result = await diarization_client.diarize(str(media_path))
+                        if diarization_result:
+                            logger.info(
+                                "Diarization complete",
+                                extra={
+                                    "job_id": job_id,
+                                    "speakers": len(diarization_result.get("speakers", [])),
+                                    "segments": len(diarization_result.get("segments", [])),
+                                },
+                            )
+                    else:
+                        logger.debug("Diarization service not available", extra={"job_id": job_id})
+                    await diarization_client.close()
+                except Exception as e:
+                    logger.warning(
+                        "Diarization failed (non-fatal, continuing without it)",
+                        extra={"job_id": job_id, "error": str(e)},
+                    )
+
             # Get existing phases or initialize
             phases = job.get("phases") or []
             if isinstance(phases, str):
@@ -632,6 +664,7 @@ class JobWorker:
                 "transcript_metrics": transcript_metrics,
                 "sst_context": sst_context,  # Add SST context to processing context
                 "content_type": content_type,  # Expose content_type for prompt building
+                "diarization_result": diarization_result,  # Speaker diarization (may be None)
             }
 
             truncation_paused = False
@@ -1160,6 +1193,39 @@ class JobWorker:
                 srt_media_id = extract_media_id(srt_file.name)
                 if srt_media_id == media_id:
                     return srt_file
+
+        return None
+
+    # Media file extensions for diarization, in preference order
+    MEDIA_EXTENSIONS = [".mp4", ".mkv", ".mov", ".webm", ".wav", ".mp3", ".m4a", ".flac"]
+
+    def _find_media_file(
+        self, job: Dict[str, Any], search_dirs: Optional[List[Path]] = None
+    ) -> Optional[Path]:
+        """Find an audio/video file matching the job's media ID.
+
+        Searches the transcripts directory (and any extra search_dirs) for files
+        whose name starts with the media ID and has a recognized media extension.
+        Returns the first match in MEDIA_EXTENSIONS preference order (video first).
+
+        Args:
+            job: Job dict with media_id and transcript_file fields.
+            search_dirs: Override search directories (for testing). Defaults to TRANSCRIPTS_DIR.
+
+        Returns:
+            Path to the media file, or None if not found.
+        """
+        media_id = job.get("media_id")
+        if not media_id:
+            return None
+
+        dirs_to_search = search_dirs or [Path(os.environ.get("TRANSCRIPTS_DIR", "transcripts"))]
+
+        for ext in self.MEDIA_EXTENSIONS:
+            for search_dir in dirs_to_search:
+                candidate = search_dir / f"{media_id}{ext}"
+                if candidate.exists():
+                    return candidate
 
         return None
 
@@ -1884,6 +1950,33 @@ Please format this transcript:
 ---
 {transcript}
 ---"""
+
+            # Inject diarization data if available
+            diarization = context.get("diarization_result")
+            if diarization and diarization.get("segments"):
+                speakers = ", ".join(diarization["speakers"])
+                # Format a compact segment list for the prompt
+                seg_lines = []
+                for seg in diarization["segments"][:50]:  # Cap at 50 segments to limit prompt size
+                    start = seg["start"]
+                    end = seg["end"]
+                    speaker = seg["speaker"]
+                    conf = seg.get("confidence", 0)
+                    m_start, s_start = divmod(int(start), 60)
+                    m_end, s_end = divmod(int(end), 60)
+                    seg_lines.append(f"  {m_start}:{s_start:02d}-{m_end}:{s_end:02d}  {speaker} (conf: {conf:.0%})")
+
+                prompt += f"""
+
+## Speaker Diarization Analysis
+
+The following speaker diarization was generated from the audio track. Use this to verify
+and correct speaker labels in the captions. Detected speakers: {speakers}
+
+{chr(10).join(seg_lines)}
+
+Note: Diarization confidence scores below 70% should be treated as uncertain."""
+
             editorial_feedback = context.get("_editorial_feedback")
             if editorial_feedback:
                 prompt += f"""

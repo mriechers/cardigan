@@ -1,0 +1,6 @@
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+python-multipart==0.0.20
+whisperx @ git+https://github.com/m-bain/whisperX.git
+torch==2.6.0+cpu
+torchaudio==2.6.0+cpu
