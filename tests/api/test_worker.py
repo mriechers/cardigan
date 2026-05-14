@@ -399,53 +399,6 @@ class TestHeartbeatLoop:
         assert mock_update_heartbeat.call_count >= 1
 
 
-class TestAnalyzeAndRecover:
-    """Tests for _analyze_and_recover method."""
-
-    @pytest.mark.asyncio
-    @patch("api.services.worker.get_llm_client")
-    @patch("api.services.worker.log_event")
-    @patch("api.services.worker.update_job_phase")
-    @patch("api.services.worker.update_job_status")
-    @patch("api.services.worker.AGENTS_DIR")
-    async def test_recovery_action_fail(
-        self,
-        mock_agents_dir,
-        mock_update_status,
-        mock_update_phase,
-        mock_log_event,
-        mock_get_llm,
-        mock_llm_client,
-        tmp_path,
-    ):
-        """Should return not recovered when action is FAIL."""
-        mock_get_llm.return_value = mock_llm_client
-        mock_log_event.return_value = None
-        mock_update_phase.return_value = None
-        mock_update_status.return_value = None
-        mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
-
-        # Manager returns FAIL action
-        fail_response = MagicMock()
-        fail_response.content = "ACTION: FAIL\nREASON: Unrecoverable error"
-        fail_response.cost = 0.01
-        fail_response.model = "test-model"
-        mock_llm_client.generate = AsyncMock(return_value=fail_response)
-
-        worker = JobWorker()
-        result = await worker._analyze_and_recover(
-            job={"id": 1, "project_name": "Test"},
-            project_path=tmp_path,
-            phases=[{"name": "analyst", "status": "failed"}],
-            context={"transcript": "test"},
-            error="Test error",
-            current_cost=0.001,
-        )
-
-        assert result["recovered"] is False
-        assert result["action"] == "FAIL"
-
-
 class TestProcessJob:
     """Tests for process_job method."""
 

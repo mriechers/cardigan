@@ -776,6 +776,11 @@ class PhaseRetryRequest(BaseModel):
         description="Editorial feedback to guide the retry (e.g., 'add a chapter for topic X', "
         "'merge the first two chapters'). Injected into the agent prompt.",
     )
+    model: Optional[str] = Field(
+        None,
+        description="Model ID to use for this retry (e.g., 'anthropic/claude-sonnet-4.6'). "
+        "Defaults to the phase's configured model if not specified.",
+    )
 
 
 class PhaseRetryResponse(BaseModel):
@@ -861,6 +866,7 @@ async def retry_phase(
                 extra={
                     "action": "phase_retry",
                     "original_model": original_model,
+                    "model_override": body.model,
                     "has_feedback": feedback is not None,
                 },
             ),
@@ -875,7 +881,9 @@ async def retry_phase(
         from api.services.worker import JobWorker
 
         worker = JobWorker()
-        result = await worker.retry_single_phase(job_id, phase_name, feedback=feedback)
+        result = await worker.retry_single_phase(
+            job_id, phase_name, feedback=feedback, model_override=body.model
+        )
         if not result.get("success"):
             logger.error(
                 "Phase retry failed",

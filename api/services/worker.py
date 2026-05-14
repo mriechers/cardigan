@@ -274,7 +274,8 @@ class JobWorker:
             self._heartbeat_task.cancel()
 
     async def retry_single_phase(
-        self, job_id: int, phase_name: str, feedback: Optional[str] = None
+        self, job_id: int, phase_name: str, feedback: Optional[str] = None,
+        model_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Retry a single phase for a completed job.
 
@@ -285,6 +286,7 @@ class JobWorker:
             job_id: The job ID to retry a phase for
             phase_name: The phase to retry (e.g., 'timestamp', 'seo', 'analyst')
             feedback: Optional editorial feedback to guide the retry
+            model_override: Optional model ID to use instead of the phase default
 
         Returns:
             Dict with status, phase result, and any errors
@@ -347,6 +349,27 @@ class JobWorker:
         if sst_context:
             context["sst_context"] = sst_context
 
+        # Load validation flags for context enrichment
+        validation_flags = []
+        if job_dict.get("validation_result"):
+            vr = job_dict["validation_result"]
+            if isinstance(vr, str):
+                vr = json.loads(vr)
+            phase_validation = vr.get("phase_results", {}).get(phase_name, {})
+            validation_flags = phase_validation.get("flags", [])
+
+        if validation_flags:
+            context["_validation_flags"] = validation_flags
+            logger.info(
+                "Including validation flags in retry context",
+                extra={"job_id": job_id, "phase": phase_name, "flag_count": len(validation_flags)},
+            )
+
+        # Load previous output for context feed-forward
+        prev_output_file = project_path / f"{phase_name}_output.md"
+        if prev_output_file.exists():
+            context["_previous_output"] = prev_output_file.read_text()
+
         # Inject editorial feedback if provided
         if feedback:
             context["_editorial_feedback"] = feedback
@@ -357,13 +380,17 @@ class JobWorker:
 
         # Run the phase
         try:
-            logger.info("Retrying single phase", extra={"job_id": job_id, "phase": phase_name})
+            logger.info(
+                "Retrying single phase",
+                extra={"job_id": job_id, "phase": phase_name, "model_override": model_override},
+            )
 
             phase_result = await self._run_phase(
                 job_id=job_id,
                 phase_name=phase_name,
                 context=context,
                 project_path=project_path,
+                model_override=model_override,
             )
 
             # Update phase status in job record
@@ -383,10 +410,8 @@ class JobWorker:
             for p in phases:
                 if p.get("name") == phase_name:
                     # Archive the current run before overwriting
-                    if p.get("model") or p.get("tier") is not None:
+                    if p.get("model"):
                         prev_run = {
-                            "tier": p.get("tier"),
-                            "tier_label": p.get("tier_label"),
                             "model": p.get("model"),
                             "cost": p.get("cost", 0),
                             "tokens": p.get("tokens", 0),
@@ -404,10 +429,6 @@ class JobWorker:
                     p["cost"] = phase_result.get("cost", 0)
                     p["tokens"] = phase_result.get("tokens", 0)
                     p["model"] = phase_result.get("model")
-                    p["tier"] = phase_result.get("tier")
-                    p["tier_label"] = phase_result.get("tier_label")
-                    p["tier_reason"] = phase_result.get("tier_reason")
-                    p["attempts"] = phase_result.get("attempts", 1)
                     p["completed_at"] = datetime.now(timezone.utc).isoformat()
                     phase_updated = True
                     break
@@ -429,6 +450,44 @@ class JobWorker:
             from api.models.job import JobUpdate
 
             await update_job(job_id, JobUpdate(phases=phases))
+
+            # Re-run validator after successful retry (unless we just retried the validator)
+            if phase_name != "validator" and phase_result.get("success"):
+                try:
+                    logger.info("Re-running validator after retry", extra={"job_id": job_id})
+                    # Update context with the new output
+                    context[f"{phase_name}_output"] = phase_result.get("output", "")
+                    validator_result = await self._run_phase(
+                        job_id=job_id,
+                        phase_name="validator",
+                        context=context,
+                        project_path=project_path,
+                    )
+                    if validator_result.get("output"):
+                        try:
+                            validation_data = self._parse_validation_result(
+                                validator_result["output"]
+                            )
+                            await update_job(
+                                job_id, JobUpdate(validation_result=validation_data)
+                            )
+                            logger.info(
+                                "Post-retry validation complete",
+                                extra={
+                                    "job_id": job_id,
+                                    "overall": validation_data.get("overall"),
+                                },
+                            )
+                        except json.JSONDecodeError:
+                            logger.warning(
+                                "Post-retry validator returned invalid JSON",
+                                extra={"job_id": job_id},
+                            )
+                except Exception as e:
+                    logger.warning(
+                        f"Post-retry validation failed (non-fatal): {e}",
+                        extra={"job_id": job_id},
+                    )
 
             return {
                 "success": True,
@@ -756,10 +815,6 @@ class JobWorker:
                         "tokens": phase_result.get("tokens", 0),
                         "completed_at": datetime.now(timezone.utc).isoformat(),
                         "model": phase_result.get("model"),
-                        "tier": phase_result.get("tier"),
-                        "tier_label": phase_result.get("tier_label"),
-                        "tier_reason": phase_result.get("tier_reason"),
-                        "attempts": phase_result.get("attempts", 1),
                         "optional": True,  # Mark as optional phase
                     }
 
@@ -826,54 +881,21 @@ class JobWorker:
             run_summary = await end_run_tracking(job_id)
             current_cost = run_summary["total_cost"] if run_summary else 0
 
-            # Set status to investigating while validator analyzes the failure
-            await update_job_status(
-                job_id,
-                JobStatus.investigating,
-                error_message=str(e),
-            )
-
-            # Run recovery analysis to analyze and decide on recovery action
-            recovery_result = await self._analyze_and_recover(
-                job=job,
-                project_path=project_path,
-                phases=phases,
-                context=context,
-                error=str(e),
-                current_cost=current_cost,
-            )
-
-            # If recovery was successful, job status already updated
-            if recovery_result.get("recovered"):
-                logger.info(
-                    "Job recovered by recovery analysis",
-                    extra={
-                        "job_id": job_id,
-                        "action": recovery_result.get("action"),
-                        "total_cost": recovery_result.get("total_cost", 0),
-                    },
-                )
-                return
-
-            # Recovery failed - mark job as failed
+            # Mark job as failed — user can retry individual phases from the UI
             await update_job_status(
                 job_id,
                 JobStatus.failed,
                 error_message=str(e),
-                actual_cost=current_cost + recovery_result.get("cost", 0),
+                actual_cost=current_cost,
             )
 
-            # Log error event with investigation summary
+            # Log error event
             await log_event(
                 EventCreate(
                     job_id=job_id,
                     event_type=EventType.job_failed,
                     data=EventData(
-                        extra={
-                            "error": str(e),
-                            "recovery_attempted": recovery_result.get("action", "none"),
-                            "recovery_reason": recovery_result.get("reason", "Unknown"),
-                        }
+                        extra={"error": str(e)}
                     ),
                 )
             )
@@ -1254,11 +1276,16 @@ class JobWorker:
         phase_name: str,
         context: Dict[str, Any],
         project_path: Path,
+        model_override: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Run a single agent phase with tiered escalation on failure.
+        """Run a single agent phase.
 
-        Attempts to run with the initial tier based on transcript duration.
-        On failure or timeout, escalates to the next tier and retries.
+        Args:
+            job_id: Job ID for tracking
+            phase_name: Phase to run
+            context: Context dict with transcript, outputs, etc.
+            project_path: Path to project output directory
+            model_override: Optional model ID to override the phase default
         """
         # Check for chunked formatter processing
         if phase_name == "formatter":
@@ -1335,6 +1362,7 @@ class JobWorker:
                 self.llm.chat(
                     messages=messages,
                     backend=backend,
+                    model=model_override,
                     job_id=job_id,
                     phase=phase_name,
                 ),
@@ -1643,411 +1671,6 @@ Please format this transcript section:
                 "cost": 0,
             }
 
-    async def _analyze_and_recover(
-        self,
-        job: Dict[str, Any],
-        project_path: Path,
-        phases: List[Dict[str, Any]],
-        context: Dict[str, Any],
-        error: str,
-        current_cost: float,
-    ) -> Dict[str, Any]:
-        """Run validator agent to analyze failure and attempt recovery.
-
-        The validator decides on an action:
-        - RETRY: Re-run the failed phase at the same tier
-        - ESCALATE: Re-run with a higher tier model
-        - FIX: Apply corrections and continue
-        - FAIL: Mark as failed (truly unrecoverable)
-
-        Note: There's a theoretical race condition if the worker crashes between
-        updating phase status and completing phase execution. The phase would
-        be marked "pending" but work may have been done. This is mitigated by:
-        1. LLM calls being idempotent (re-running produces valid output)
-        2. Output files being overwritten on each run
-        3. Single-worker design (no concurrent access to same job)
-        For multi-worker deployments, distributed locking would be needed.
-
-        Returns:
-            Dict with recovery results including whether job was recovered
-        """
-        job_id = job.get("id")
-        project_name = job.get("project_name", "Unknown")
-
-        logger.info("Validator analyzing failure", extra={"job_id": job_id, "error": error[:100]})
-
-        try:
-            # Find the failed phase
-            failed_phase = None
-            failed_phase_idx = -1
-            for i, phase in enumerate(phases):
-                if phase.get("status") == "failed":
-                    failed_phase = phase
-                    failed_phase_idx = i
-                    break
-
-            # Build context summary
-            phases_summary = []
-            for phase in phases:
-                status = phase.get("status", "unknown")
-                phase_name = phase.get("name", "unknown")
-                phase_error = phase.get("error_message", "")
-                phases_summary.append(
-                    f"- {phase_name}: {status}"
-                    f"{f' - Error: {phase_error}' if phase_error else ''}"
-                )
-
-            # Get partial outputs for context
-            partial_outputs = []
-            for phase_name in ["analyst", "formatter", "seo"]:
-                output = context.get(f"{phase_name}_output", "")
-                if output:
-                    partial_outputs.append(f"## {phase_name.title()} Output:\n{output[:800]}...")
-
-            # Build decision prompt
-            decision_prompt = f"""## Failure Recovery Analysis
-
-**Job ID:** {job_id}
-**Project:** {project_name}
-**Error:** {error}
-**Failed Phase:** {failed_phase.get('name', 'unknown') if failed_phase else 'unknown'}
-
-## Phase Status:
-{chr(10).join(phases_summary)}
-
-## Available Outputs:
-{chr(10).join(partial_outputs) if partial_outputs else "No outputs available yet"}
-
-## Your Task:
-Analyze this failure and decide on the BEST recovery action. You MUST respond with exactly ONE of these actions on the FIRST LINE of your response:
-
-**ACTION: RETRY** - The failure is transient (API timeout, rate limit, temporary issue). Re-run at the same tier.
-
-**ACTION: ESCALATE** - The task failed and should be re-run (model routing is config-driven).
-
-**ACTION: FIX** - The output has minor issues you can correct. Provide the corrected output after your analysis.
-
-**ACTION: FAIL** - The failure is unrecoverable (missing transcript, invalid input, fundamental issue).
-
-## Response Format:
-ACTION: [RETRY|ESCALATE|FIX|FAIL]
-REASON: [Brief explanation - 1-2 sentences]
-
-[If ACTION is FIX, provide the corrected output below]
-"""
-
-            # Load validator system prompt
-            system_prompt = self._load_agent_prompt("validator")
-
-            # Use the validator's configured backend for recovery decisions
-            backend_name = self.llm.get_backend_for_phase("validator")
-
-            logger.info("Running recovery analysis", extra={"job_id": job_id, "backend": backend_name})
-
-            # Run the analysis
-            response = await self.llm.generate(
-                system_prompt=system_prompt, user_prompt=decision_prompt, backend=backend_name, timeout=120
-            )
-
-            # Parse the decision - search full content for action pattern
-            content = response.content.strip()
-            # Normalize content for pattern matching (handles **ACTION:** markdown format)
-            content_upper = content.upper().replace("**", "")
-
-            action = "FAIL"  # Default to fail if we can't parse
-            if "ACTION: RETRY" in content_upper or "ACTION:RETRY" in content_upper:
-                action = "RETRY"
-            elif "ACTION: ESCALATE" in content_upper or "ACTION:ESCALATE" in content_upper:
-                action = "ESCALATE"
-            elif "ACTION: FIX" in content_upper or "ACTION:FIX" in content_upper:
-                action = "FIX"
-            elif "ACTION: FAIL" in content_upper or "ACTION:FAIL" in content_upper:
-                action = "FAIL"
-
-            # Extract reason - check multiple formats
-            reason = "No reason provided"
-            lines = content.split("\n")
-            for i, line in enumerate(lines):
-                line_upper = line.upper().strip()
-                # Check for "REASON:" format
-                if line_upper.startswith("REASON:"):
-                    reason = line[line.find(":") + 1 :].strip()
-                    break
-                # Check for "### Rationale" section (recovery prompt format)
-                elif "RATIONALE" in line_upper and line_upper.startswith("#"):
-                    # Get the next non-empty line as the reason
-                    for j in range(i + 1, min(i + 5, len(lines))):
-                        next_line = lines[j].strip()
-                        if next_line and not next_line.startswith("#"):
-                            reason = next_line
-                            break
-                    break
-
-            logger.info(
-                "Recovery decision",
-                extra={
-                    "job_id": job_id,
-                    "action": action,
-                    "reason": reason[:100],
-                    "analysis_cost": response.cost,
-                },
-            )
-
-            # Save the analysis report
-            report_file = project_path / "recovery_analysis.md"
-            report_file.write_text(f"""# Recovery Analysis Report
-**Job ID:** {job_id}
-**Project:** {project_name}
-**Error:** {error}
-**Analysis Time:** {datetime.now(timezone.utc).isoformat()}
-
-## Decision
-**Action:** {action}
-**Reason:** {reason}
-
-## Full Analysis
-{response.content}
-
----
-**Analysis Cost:** ${response.cost:.4f}
-**Model:** {response.model}
-""")
-
-            total_cost = current_cost + response.cost
-
-            # Execute the recovery action
-            if action == "FAIL":
-                return {
-                    "recovered": False,
-                    "action": action,
-                    "reason": reason,
-                    "cost": response.cost,
-                }
-
-            elif action == "RETRY":
-                # Re-run the failed phase at the same tier
-                # Validate index is within bounds (phases may have changed via API)
-                if failed_phase and 0 <= failed_phase_idx < len(phases):
-                    logger.info("Retrying failed phase", extra={"job_id": job_id, "phase": failed_phase.get("name")})
-
-                    # Reset phase status
-                    phases[failed_phase_idx]["status"] = "pending"
-                    phases[failed_phase_idx]["error_message"] = None
-                    await update_job_phase(job_id, phases)
-
-                    # Re-run the phase
-                    retry_result = await self._run_phase(
-                        job_id=job_id,
-                        phase_name=failed_phase.get("name"),
-                        context=context,
-                        project_path=project_path,
-                    )
-
-                    if retry_result["success"]:
-                        # Continue with remaining phases
-                        context[f"{failed_phase.get('name')}_output"] = retry_result.get("output", "")
-                        return await self._complete_remaining_phases(
-                            job=job,
-                            phases=phases,
-                            context=context,
-                            project_path=project_path,
-                            start_from=failed_phase_idx + 1,
-                            total_cost=total_cost + retry_result.get("cost", 0),
-                        )
-
-                return {"recovered": False, "action": action, "reason": "Retry failed", "cost": response.cost}
-
-            elif action == "ESCALATE":
-                # Re-run the failed phase (model routing is now config-driven; no tier override needed)
-                if failed_phase and 0 <= failed_phase_idx < len(phases):
-                    logger.info(
-                        "Manager requested escalation — re-running phase with configured backend",
-                        extra={
-                            "job_id": job_id,
-                            "phase": failed_phase.get("name"),
-                        },
-                    )
-
-                    # Reset phase status for re-run
-                    phases[failed_phase_idx]["status"] = "pending"
-                    phases[failed_phase_idx]["error_message"] = None
-                    await update_job_phase(job_id, phases)
-
-                    retry_result = await self._run_phase(
-                        job_id=job_id,
-                        phase_name=failed_phase.get("name"),
-                        context=context,
-                        project_path=project_path,
-                    )
-
-                    if retry_result["success"]:
-                        context[f"{failed_phase.get('name')}_output"] = retry_result.get("output", "")
-                        return await self._complete_remaining_phases(
-                            job=job,
-                            phases=phases,
-                            context=context,
-                            project_path=project_path,
-                            start_from=failed_phase_idx + 1,
-                            total_cost=total_cost + retry_result.get("cost", 0),
-                        )
-
-                return {"recovered": False, "action": action, "reason": "Escalation failed", "cost": response.cost}
-
-            elif action == "FIX":
-                # Manager provided a fix - extract and save it
-                # Validate index is within bounds (phases may have changed via API)
-                if failed_phase and 0 <= failed_phase_idx < len(phases):
-                    phase_name = failed_phase.get("name")
-
-                    # The fix content is everything after the REASON line
-                    fix_content = ""
-                    found_reason = False
-                    for line in content.split("\n"):
-                        if found_reason:
-                            fix_content += line + "\n"
-                        elif line.upper().startswith("REASON:"):
-                            found_reason = True
-
-                    fix_content = fix_content.strip()
-
-                    if fix_content:
-                        logger.info(
-                            "Applying recovery fix",
-                            extra={"job_id": job_id, "phase": phase_name, "fix_length": len(fix_content)},
-                        )
-
-                        # Save the fixed output
-                        output_file = project_path / f"{phase_name}_output.md"
-                        output_file.write_text(fix_content)
-
-                        # Mark phase as completed
-                        phases[failed_phase_idx]["status"] = "completed"
-                        phases[failed_phase_idx]["error_message"] = None
-                        phases[failed_phase_idx]["completed_at"] = datetime.now(timezone.utc).isoformat()
-                        await update_job_phase(job_id, phases)
-
-                        # Add to context and continue
-                        context[f"{phase_name}_output"] = fix_content
-
-                        return await self._complete_remaining_phases(
-                            job=job,
-                            phases=phases,
-                            context=context,
-                            project_path=project_path,
-                            start_from=failed_phase_idx + 1,
-                            total_cost=total_cost,
-                        )
-
-                return {
-                    "recovered": False,
-                    "action": action,
-                    "reason": "Fix could not be applied",
-                    "cost": response.cost,
-                }
-
-            return {"recovered": False, "action": action, "reason": reason, "cost": response.cost}
-
-        except Exception as recovery_err:
-            logger.warning("Recovery analysis failed", extra={"job_id": job_id, "error": str(recovery_err)})
-            return {
-                "recovered": False,
-                "action": "FAIL",
-                "reason": f"Recovery analysis failed: {str(recovery_err)[:100]}",
-                "cost": 0,
-            }
-
-    async def _complete_remaining_phases(
-        self,
-        job: Dict[str, Any],
-        phases: List[Dict[str, Any]],
-        context: Dict[str, Any],
-        project_path: Path,
-        start_from: int,
-        total_cost: float,
-    ) -> Dict[str, Any]:
-        """Complete remaining phases after recovery.
-
-        Returns:
-            Dict indicating if job was fully recovered
-        """
-        job_id = job.get("id")
-
-        try:
-            # Run remaining phases
-            for i in range(start_from, len(phases)):
-                phase = phases[i]
-                phase_name = phase.get("name")
-
-                if phase.get("status") == "completed":
-                    continue
-
-                # Update phase status
-                phase["status"] = "in_progress"
-                phase["started_at"] = datetime.now(timezone.utc).isoformat()
-                await update_job_phase(job_id, phases)
-
-                # Run the phase
-                result = await self._run_phase(
-                    job_id=job_id,
-                    phase_name=phase_name,
-                    context=context,
-                    project_path=project_path,
-                )
-
-                if not result["success"]:
-                    # Another failure - don't recurse infinitely
-                    return {
-                        "recovered": False,
-                        "action": "FAIL",
-                        "reason": f"Phase {phase_name} failed after recovery",
-                        "cost": total_cost,
-                    }
-
-                # Update phase as completed
-                phase["status"] = "completed"
-                phase["completed_at"] = datetime.now(timezone.utc).isoformat()
-                phase["cost"] = result.get("cost", 0)
-                phase["tokens"] = result.get("tokens", 0)
-                phase["model"] = result.get("model")
-                await update_job_phase(job_id, phases)
-
-                total_cost += result.get("cost", 0)
-                context[f"{phase_name}_output"] = result.get("output", "")
-
-            # All phases complete - create manifest and mark done
-            from api.services.tracking import CostTracker
-
-            tracker = CostTracker()
-            tracker.total_cost = total_cost
-
-            await self._create_manifest(job, project_path, phases, tracker)
-
-            await update_job_status(
-                job_id,
-                JobStatus.completed,
-                actual_cost=total_cost,
-            )
-
-            # Archive transcript
-            try:
-                self._archive_transcript(job)
-            except Exception:
-                pass  # Non-fatal
-
-            return {
-                "recovered": True,
-                "action": "COMPLETED",
-                "total_cost": total_cost,
-            }
-
-        except Exception as e:
-            return {
-                "recovered": False,
-                "action": "FAIL",
-                "reason": str(e),
-                "cost": total_cost,
-            }
-
     def _load_agent_prompt(self, phase_name: str) -> str:
         """Load the system prompt for an agent phase."""
         prompt_file = AGENTS_DIR / f"{phase_name}.md"
@@ -2118,7 +1741,31 @@ Output a structured JSON checklist with:
         )
 
     def _build_phase_prompt(self, phase_name: str, context: Dict[str, Any]) -> str:
-        """Build the user prompt for a phase with relevant context."""
+        """Build the user prompt for a phase with relevant context.
+
+        On retries, appends validation flags and previous output to help
+        the model fix identified issues.
+        """
+        prompt = self._build_phase_prompt_base(phase_name, context)
+
+        # Append retry context (validation flags + previous output) if present
+        validation_flags = context.get("_validation_flags")
+        if validation_flags:
+            prompt += "\n\n## Validation Issues from Previous Attempt\n\n"
+            prompt += "The previous output was flagged for these issues. Address each one:\n\n"
+            for flag in validation_flags:
+                prompt += f"- {flag}\n"
+
+        previous_output = context.get("_previous_output")
+        if previous_output:
+            prompt += "\n\n## Previous Output (for reference)\n\n"
+            prompt += "Use this as a starting point. Fix the flagged issues while preserving what worked:\n\n"
+            prompt += f"---\n{previous_output}\n---"
+
+        return prompt
+
+    def _build_phase_prompt_base(self, phase_name: str, context: Dict[str, Any]) -> str:
+        """Build the base user prompt for a phase (without retry context)."""
         transcript = context.get("transcript", "")
         sst_context = context.get("sst_context")
 
