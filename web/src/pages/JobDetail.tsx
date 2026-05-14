@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState, useRef, Fragment } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { useFocusTrap } from '../hooks/useFocusTrap'
+import ProseContainer from '../components/ProseContainer'
 import { useToast } from '../components/ui/Toast'
 import { Skeleton } from '../components/ui/Skeleton'
 import { formatRelativeTime, formatTimestamp, formatDuration } from '../utils/formatTime'
@@ -128,7 +127,7 @@ function CostBreakdownTable({ phases }: { phases: JobPhase[] }) {
           {phasesWithCost.map(phase => (
             <Fragment key={phase.name}>
               {phase.previous_runs?.map((run, i) => (
-                <tr key={`${phase.name}-prev-${i}`} className="text-gray-500 text-xs">
+                <tr key={`${phase.name}-prev-${i}`} className="text-gray-400 text-xs">
                   <td className="py-1 pl-4">{phase.name} (attempt {i + 1})</td>
                   <td className="py-1 font-mono">{run.model?.split('/').pop() || '-'}</td>
                   <td className="py-1 text-right font-mono">{run.input_tokens?.toLocaleString() || '-'}</td>
@@ -176,6 +175,8 @@ export default function JobDetail() {
   const [availableModels, setAvailableModels] = useState<{id: string, name: string}[]>([])
   const [showScreengrabs, setShowScreengrabs] = useState(false)
   const [hasScreengrabs, setHasScreengrabs] = useState(false)
+  const [driveConfigured, setDriveConfigured] = useState(false)
+  const [uploadingToDrive, setUploadingToDrive] = useState<string | null>(null)
   const [keywordReports, setKeywordReports] = useState<Array<{ filename: string; version: number; uploaded_at?: string }>>([])
   const [keywordUploading, setKeywordUploading] = useState(false)
   const keywordInputRef = useRef<HTMLInputElement | null>(null)
@@ -279,6 +280,15 @@ export default function JobDetail() {
       .then(res => res.json())
       .then(data => {
         setAvailableModels(data.available_models || [])
+      })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    fetch('/api/export/status')
+      .then(res => res.json())
+      .then(data => {
+        setDriveConfigured(data.google_drive?.configured || false)
       })
       .catch(() => {})
   }, [])
@@ -410,6 +420,30 @@ export default function JobDetail() {
     }
   }
 
+  const handleDriveUpload = async (key: string, filename: string) => {
+    setUploadingToDrive(key)
+    try {
+      const folderId = localStorage.getItem('cardigan_drive_folder_id') || ''
+      const params = folderId ? `?folder_id=${encodeURIComponent(folderId)}` : ''
+      const response = await fetch(`/api/export/google-drive/${id}/${filename}${params}`, {
+        method: 'POST',
+      })
+      if (response.ok) {
+        const data = await response.json()
+        toast('Uploaded to Google Drive', 'success')
+        window.open(data.drive_url, '_blank')
+      } else {
+        const data = await response.json()
+        toast(data.detail || 'Failed to upload to Google Drive', 'error')
+      }
+    } catch (err) {
+      console.error('Failed to upload to Drive:', err)
+      toast('Failed to upload to Google Drive', 'error')
+    } finally {
+      setUploadingToDrive(null)
+    }
+  }
+
   const closeModal = () => {
     setViewingOutput(null)
     // Return focus to trigger button
@@ -511,7 +545,7 @@ export default function JobDetail() {
                   ? 'bg-green-900/50 text-green-400 border border-green-800'
                   : 'bg-red-900/50 text-red-400 border border-red-800'
               }`}>
-                {job.validation_result.overall === 'pass' ? '✓ Validated' : '✗ Validation Failed'}
+                {job.validation_result.overall === 'pass' ? '\u2713 Validated' : '\u2717 Validation Failed'}
               </span>
             )}
           </div>
@@ -746,7 +780,7 @@ export default function JobDetail() {
                           ? 'bg-green-900/30 text-green-400'
                           : 'bg-red-900/30 text-red-400'
                       }`}>
-                        {job.validation_result.phase_results[phase.name].status === 'pass' ? '✓ Pass' : '✗ Fail'}
+                        {job.validation_result.phase_results[phase.name].status === 'pass' ? '\u2713 Pass' : '\u2717 Fail'}
                       </span>
                     )}
                     {phase.model && (
@@ -817,7 +851,7 @@ export default function JobDetail() {
           <h2 className="text-lg font-medium text-white mb-4">
             Output Files
           </h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {Object.entries(job.outputs).map(([key, filename]) => {
               const fileInfo = OUTPUT_FILES[key]
               if (!fileInfo || !filename) return null
@@ -853,7 +887,7 @@ export default function JobDetail() {
                   <button
                     onClick={() => openRetryModal(key, label)}
                     disabled={isRetrying || retryingPhase !== null}
-                    className="px-2 py-2 bg-gray-600 hover:bg-orange-600 rounded-r-md text-sm text-gray-300 hover:text-white transition-colors disabled:opacity-50"
+                    className={`px-2 py-2 bg-gray-600 hover:bg-orange-600 ${driveConfigured ? '' : 'rounded-r-md'} text-sm text-gray-300 hover:text-white transition-colors disabled:opacity-50`}
                     aria-label={`Retry ${label}`}
                     title={`Retry this phase`}
                   >
@@ -863,6 +897,23 @@ export default function JobDetail() {
                       <span>&#8635;</span>
                     )}
                   </button>
+                  {driveConfigured && (
+                    <button
+                      onClick={() => handleDriveUpload(key, actualFilename)}
+                      disabled={uploadingToDrive !== null}
+                      className="px-2 py-2 bg-gray-600 hover:bg-green-700 rounded-r-md text-sm text-gray-300 hover:text-white transition-colors disabled:opacity-50"
+                      aria-label={`Upload ${label} to Google Drive`}
+                      title="Upload to Google Drive"
+                    >
+                      {uploadingToDrive === key ? (
+                        <span className="animate-spin">&#8635;</span>
+                      ) : (
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                      )}
+                    </button>
+                  )}
                 </div>
               )
             })}
@@ -1136,9 +1187,7 @@ export default function JobDetail() {
                   {viewingOutput.content}
                 </pre>
               ) : (
-                <div className="prose prose-invert prose-sm max-w-none prose-table:border-collapse prose-th:border prose-th:border-gray-600 prose-th:p-2 prose-th:bg-gray-800 prose-td:border prose-td:border-gray-700 prose-td:p-2">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{viewingOutput.content}</ReactMarkdown>
-                </div>
+                <ProseContainer content={viewingOutput.content} />
               )}
             </div>
           </div>
