@@ -13,6 +13,7 @@ Langfuse credentials are loaded from:
 2. macOS Keychain via keychain_secrets (fallback)
 """
 
+import asyncio
 import json
 import uuid
 from dataclasses import dataclass
@@ -62,6 +63,14 @@ class LangfuseClient:
         self._initialized = False
         self._init_error: Optional[str] = None
         self._host: Optional[str] = None
+
+    async def initialize(self) -> bool:
+        """Eagerly initialize the Langfuse client.
+
+        Call this at app startup to avoid lazy-init delays during job processing.
+        Returns True if client is ready, False if credentials are missing.
+        """
+        return self._ensure_initialized()
 
     def _ensure_initialized(self) -> bool:
         """Lazily initialize credentials and HTTP client."""
@@ -192,9 +201,12 @@ class LangfuseClient:
                 },
             ]
 
-            resp = await self._http_client.post(
-                "/api/public/ingestion",
-                json={"batch": batch},
+            resp = await asyncio.wait_for(
+                self._http_client.post(
+                    "/api/public/ingestion",
+                    json={"batch": batch},
+                ),
+                timeout=5.0,
             )
             resp.raise_for_status()
 
