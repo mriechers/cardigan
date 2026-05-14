@@ -45,6 +45,7 @@ services:
       - TRANSCRIPTS_DIR=/data/transcripts
       - LANGFUSE_BASE_URL=https://us.cloud.langfuse.com
       - CARDIGAN_VERSION=${CARDIGAN_VERSION:-v4.1}
+      - DIARIZATION_SERVICE_URL=http://diarization:8000
     secrets:
       - openrouter_api_key
       - airtable_api_key
@@ -102,6 +103,25 @@ services:
       - mcp
     restart: unless-stopped
 
+  diarization:
+    image: ghcr.io/mriechers/cardigan-diarization:latest
+    environment:
+      - WHISPER_MODEL_SIZE=base
+      - HF_TOKEN_FILE=/run/secrets/hf_token
+    secrets:
+      - hf_token
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    profiles:
+      - diarization
+    restart: unless-stopped
+
   tunnel:
     image: cloudflare/cloudflared:latest
     command: tunnel --no-autoupdate run
@@ -139,6 +159,8 @@ secrets:
     file: ./secrets/langfuse_public_key
   langfuse_secret_key:
     file: ./secrets/langfuse_secret_key
+  hf_token:
+    file: ./secrets/hf_token
 
 volumes:
   db-data:
