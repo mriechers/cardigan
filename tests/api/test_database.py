@@ -97,7 +97,7 @@ async def test_create_and_get_job(test_db):
     assert job.priority == 5
     assert job.status == JobStatus.pending
     assert job.project_name == "test-project"
-    assert job.agent_phases == ["analyst", "formatter", "seo", "manager"]
+    assert job.agent_phases == ["analyst", "formatter", "seo", "validator"]
     assert job.retry_count == 0
     assert job.max_retries == 3
 

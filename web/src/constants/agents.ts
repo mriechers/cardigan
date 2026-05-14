@@ -39,11 +39,11 @@ export const AGENT_INFO: AgentInfo[] = [
       'Generates search-optimized metadata including titles, descriptions, tags and keywords. Optimizes for streaming platform discovery and search rankings.',
   },
   {
-    id: 'manager',
-    name: 'QA Manager',
+    id: 'validator',
+    name: 'Validator',
     icon: '✅',
     description:
-      'Reviews all automated outputs for quality before completion. Audits pipeline output and flags issues requiring human review.',
+      'Runs automated quality checks on all phase outputs. Returns pass/fail status per phase with specific flags for issues requiring human review.',
   },
   {
     id: 'timestamp',

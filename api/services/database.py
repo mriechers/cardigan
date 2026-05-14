@@ -117,6 +117,7 @@ jobs_table = Table(
     Column("word_count", Integer, nullable=True),
     Column("content_type", Text, nullable=True),  # 'full', 'short', or 'clip'
     Column("app_version", Text, nullable=True),
+    Column("validation_result", Text, nullable=True),  # JSON validation result
 )
 
 # Define session_stats table
@@ -327,8 +328,8 @@ async def create_job(job: JobCreate, app_version: Optional[str] = None) -> Job:
         Complete Job record with generated ID and defaults
     """
     async with get_session() as session:
-        # Initialize phases - automated pipeline phases (manager is QA, copy_editor is interactive)
-        default_phases = ["analyst", "formatter", "seo", "manager"]
+        # Initialize phases - automated pipeline phases (validator is QA, copy_editor is interactive)
+        default_phases = ["analyst", "formatter", "seo", "validator"]
         initial_phases = [JobPhase(name=name, status=PhaseStatus.pending).model_dump() for name in default_phases]
 
         # Derive project_path from project_name if not provided
@@ -614,6 +615,9 @@ async def update_job(job_id: int, job_update: JobUpdate) -> Optional[Job]:
 
         if job_update.content_type is not None:
             update_values["content_type"] = job_update.content_type
+
+        if job_update.validation_result is not None:
+            update_values["validation_result"] = json.dumps(job_update.validation_result)
 
         # Handle phases update (replaces all phases)
         if job_update.phases is not None:
@@ -1289,6 +1293,7 @@ def _row_to_job(row) -> Job:
         duration_minutes=getattr(row, "duration_minutes", None),
         word_count=getattr(row, "word_count", None),
         content_type=getattr(row, "content_type", None),
+        validation_result=json.loads(row.validation_result) if getattr(row, "validation_result", None) else None,
         outputs=outputs,
         app_version=getattr(row, "app_version", None),
     )
@@ -1331,3 +1336,4 @@ def _row_to_config(row) -> ConfigItem:
 # Legacy alias - prefer claim_next_job for worker use
 get_next_job = claim_next_job
 update_job_heartbeat = update_heartbeat
+

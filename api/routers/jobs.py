@@ -524,7 +524,7 @@ async def get_job_output(job_id: int, filename: str, download: bool = Query(defa
         "analyst_output.md",
         "formatter_output.md",
         "seo_output.md",
-        "manager_output.md",
+        "validator_output.md",
         "timestamp_output.md",
         "copy_editor_output.md",
         "recovery_analysis.md",
@@ -832,7 +832,7 @@ async def retry_phase(
         phase_name = OUTPUT_TO_PHASE[phase_name]
 
     # Validate phase name
-    valid_phases = {"analyst", "formatter", "seo", "timestamp"}
+    valid_phases = {"analyst", "formatter", "seo", "validator", "timestamp"}
     if phase_name not in valid_phases:
         raise HTTPException(
             status_code=400, detail=f"Invalid phase: {phase_name}. Valid phases: {', '.join(sorted(valid_phases))}"

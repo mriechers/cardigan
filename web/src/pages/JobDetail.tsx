@@ -71,6 +71,10 @@ interface JobDetail {
   airtable_url?: string
   media_id?: string
   content_type?: string
+  validation_result?: {
+    phase_results: Record<string, { status: 'pass' | 'fail'; flags: string[] }>
+    overall: 'pass' | 'fail'
+  }
 }
 
 // Map output keys to their display names and filenames
@@ -78,7 +82,7 @@ const OUTPUT_FILES: Record<string, { label: string; filename: string }> = {
   analysis: { label: 'Analysis', filename: 'analyst_output.md' },
   formatted_transcript: { label: 'Formatted Transcript', filename: 'formatter_output.md' },
   seo_metadata: { label: 'SEO Metadata', filename: 'seo_output.md' },
-  qa_review: { label: 'QA Review', filename: 'manager_output.md' },
+  qa_review: { label: 'Validation', filename: 'validator_output.md' },
   timestamp_report: { label: 'Timestamps', filename: 'timestamp_output.md' },
   copy_edited: { label: 'Copy Edited', filename: 'copy_editor_output.md' },
   recovery_analysis: { label: 'Recovery Analysis', filename: 'recovery_analysis.md' },
@@ -418,6 +422,15 @@ export default function JobDetail() {
                 Clip
               </span>
             )}
+            {job.validation_result && (
+              <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${
+                job.validation_result.overall === 'pass'
+                  ? 'bg-green-900/50 text-green-400 border border-green-800'
+                  : 'bg-red-900/50 text-red-400 border border-red-800'
+              }`}>
+                {job.validation_result.overall === 'pass' ? '✓ Validated' : '✗ Validation Failed'}
+              </span>
+            )}
           </div>
           <p className="text-gray-400">
             Job #{job.id}
@@ -644,6 +657,15 @@ export default function JobDetail() {
                   <div className="flex items-center space-x-3">
                     {phaseStatusIcon(phase.status)}
                     <span className="text-white">{phase.name}</span>
+                    {job.validation_result?.phase_results?.[phase.name] && (
+                      <span className={`ml-2 px-2 py-0.5 rounded text-xs font-medium ${
+                        job.validation_result.phase_results[phase.name].status === 'pass'
+                          ? 'bg-green-900/30 text-green-400'
+                          : 'bg-red-900/30 text-red-400'
+                      }`}>
+                        {job.validation_result.phase_results[phase.name].status === 'pass' ? '✓ Pass' : '✗ Fail'}
+                      </span>
+                    )}
                     {phase.model && (
                       <span className="text-xs px-2 py-0.5 rounded-full bg-gray-700 text-gray-300 font-mono">
                         {phase.model}
@@ -680,6 +702,17 @@ export default function JobDetail() {
                         <span className="text-gray-600">#{i + 1}</span>
                         {run.model && <span className="font-mono text-gray-400">{run.model}</span>}
                         <span>${(run.cost || 0).toFixed(4)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {job.validation_result?.phase_results?.[phase.name]?.flags &&
+                 job.validation_result.phase_results[phase.name].flags.length > 0 && (
+                  <div className="mt-1.5 ml-8 space-y-1">
+                    {job.validation_result.phase_results[phase.name].flags.map((flag: string, i: number) => (
+                      <div key={i} className="text-xs text-red-400 flex items-start gap-1">
+                        <span className="mt-0.5">&#9888;</span>
+                        <span>{flag}</span>
                       </div>
                     ))}
                   </div>
