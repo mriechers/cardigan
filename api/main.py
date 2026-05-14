@@ -27,6 +27,7 @@ from api.middleware.rate_limit import limiter, rate_limit_exceeded_handler
 from api.services import database
 from api.services.ingest_config import ensure_defaults as ensure_ingest_defaults
 from api.services.ingest_scheduler import start_scheduler, stop_scheduler
+from api.services.langfuse_client import get_langfuse_client
 from api.services.llm import close_llm_client, get_llm_client
 from api.services.logging import get_logger, setup_logging
 
@@ -48,6 +49,9 @@ async def lifespan(app: FastAPI):
     logger.info("Database initialized")
     get_llm_client()  # Initialize LLM client
     logger.info("LLM client initialized")
+    langfuse = get_langfuse_client()
+    await langfuse.initialize()
+    logger.info("Langfuse client initialized")
     # Initialize ingest config defaults (Sprint 11.1)
     await ensure_ingest_defaults()
     logger.info("Ingest configuration initialized")

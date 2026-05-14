@@ -428,6 +428,8 @@ class JobWorker:
                     p["status"] = phase_result.get("status", "completed")
                     p["cost"] = phase_result.get("cost", 0)
                     p["tokens"] = phase_result.get("tokens", 0)
+                    p["input_tokens"] = phase_result.get("input_tokens", 0)
+                    p["output_tokens"] = phase_result.get("output_tokens", 0)
                     p["model"] = phase_result.get("model")
                     p["completed_at"] = datetime.now(timezone.utc).isoformat()
                     phase_updated = True
@@ -441,6 +443,8 @@ class JobWorker:
                         "status": "completed",
                         "cost": phase_result.get("cost", 0),
                         "tokens": phase_result.get("tokens", 0),
+                        "input_tokens": phase_result.get("input_tokens", 0),
+                        "output_tokens": phase_result.get("output_tokens", 0),
                         "model": phase_result.get("model"),
                         "completed_at": datetime.now(timezone.utc).isoformat(),
                     }
@@ -656,6 +660,8 @@ class JobWorker:
                     "status": "completed" if phase_result["success"] else "failed",
                     "cost": phase_result.get("cost", 0),
                     "tokens": phase_result.get("tokens", 0),
+                    "input_tokens": phase_result.get("input_tokens", 0),
+                    "output_tokens": phase_result.get("output_tokens", 0),
                     "completed_at": datetime.now(timezone.utc).isoformat(),
                     "model": phase_result.get("model"),
                     "attempts": phase_result.get("attempts", 1),
@@ -813,6 +819,8 @@ class JobWorker:
                         "status": "completed" if phase_result["success"] else "failed",
                         "cost": phase_result.get("cost", 0),
                         "tokens": phase_result.get("tokens", 0),
+                        "input_tokens": phase_result.get("input_tokens", 0),
+                        "output_tokens": phase_result.get("output_tokens", 0),
                         "completed_at": datetime.now(timezone.utc).isoformat(),
                         "model": phase_result.get("model"),
                         "optional": True,  # Mark as optional phase
@@ -1404,6 +1412,8 @@ class JobWorker:
                 "output": response.content,
                 "cost": response.cost,
                 "tokens": response.total_tokens,
+                "input_tokens": response.input_tokens,
+                "output_tokens": response.output_tokens,
                 "model": response.model,
             }
 
@@ -1558,7 +1568,13 @@ Please format this transcript section:
                     },
                 )
 
-                return {"content": response.content, "cost": response.cost, "tokens": response.total_tokens}
+                return {
+                    "content": response.content,
+                    "cost": response.cost,
+                    "tokens": response.total_tokens,
+                    "input_tokens": response.input_tokens,
+                    "output_tokens": response.output_tokens,
+                }
 
         # Log phase start
         await log_event(
@@ -1608,6 +1624,8 @@ Please format this transcript section:
             # Aggregate cost/tokens from all chunks
             total_cost = sum(r["cost"] for r in chunk_results)
             total_tokens = sum(r["tokens"] for r in chunk_results)
+            total_input_tokens = sum(r.get("input_tokens", 0) for r in chunk_results)
+            total_output_tokens = sum(r.get("output_tokens", 0) for r in chunk_results)
 
             # Merge text outputs
             merged = merge_formatter_chunks([r["content"] for r in chunk_results])
@@ -1648,6 +1666,8 @@ Please format this transcript section:
                 "output": merged,
                 "cost": total_cost,
                 "tokens": total_tokens,
+                "input_tokens": total_input_tokens,
+                "output_tokens": total_output_tokens,
                 "model": f"chunked ({total_chunks} chunks via {backend})",
             }
 

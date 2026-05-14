@@ -42,6 +42,8 @@ class JobPhase(BaseModel):
     completed_at: Optional[datetime] = None
     cost: float = Field(default=0.0, description="Cost incurred during this phase")
     tokens: int = Field(default=0, description="Tokens used during this phase")
+    input_tokens: int = Field(default=0, description="Input/prompt tokens used")
+    output_tokens: int = Field(default=0, description="Output/completion tokens used")
     error_message: Optional[str] = None
     output_path: Optional[str] = Field(None, description="Path to phase output file if applicable")
     metadata: Optional[Dict[str, Any]] = Field(default=None, description="Phase-specific metadata")
