@@ -75,7 +75,7 @@ ARTIFACT_LABELS = {
     "analyst_output.md": "Analysis",
     "formatter_output.md": "Formatted Transcript",
     "seo_output.md": "SEO Metadata",
-    "manager_output.md": "QA Review",
+    "validator_output.md": "Validation",
     "timestamp_output.md": "Timestamps",
     "copy_editor_output.md": "Copy Edited",
     "recovery_analysis.md": "Recovery Analysis",

@@ -78,7 +78,7 @@ async def get_phase_backends():
 
     phase_backends = config.get("phase_backends", {})
     available_backends = list(config.get("backends", {}).keys())
-    available_phases = ["analyst", "formatter", "seo", "manager", "timestamp", "copy_editor", "chat"]
+    available_phases = ["analyst", "formatter", "seo", "validator", "timestamp", "copy_editor", "chat"]
 
     return PhaseBackendsResponse(
         phase_backends=phase_backends,
@@ -96,7 +96,7 @@ async def update_phase_backends(update: PhaseBackendsUpdate):
     """
     config = _load_config()
     available_backends = list(config.get("backends", {}).keys())
-    valid_phases = {"analyst", "formatter", "seo", "manager", "timestamp", "copy_editor", "chat"}
+    valid_phases = {"analyst", "formatter", "seo", "validator", "timestamp", "copy_editor", "chat"}
 
     # Validate the update
     for phase, backend in update.phase_backends.items():
@@ -158,7 +158,7 @@ DEFAULT_PHASE_MODELS = {
     "analyst": "anthropic/claude-haiku-4.5",
     "formatter": "anthropic/claude-sonnet-4.6",
     "seo": "anthropic/claude-haiku-4.5",
-    "manager": "anthropic/claude-opus-4.6",
+    "validator": "anthropic/claude-haiku-4.5",
     "timestamp": "anthropic/claude-sonnet-4.6",
     "copy_editor": "anthropic/claude-opus-4.6",
     "chat": "anthropic/claude-sonnet-4.6",
@@ -178,7 +178,7 @@ async def get_phase_models():
     models_data = await get_available_models()
     available_models = [AvailableModel(**m) for m in models_data]
     phase_models = config.get("phase_models", DEFAULT_PHASE_MODELS)
-    available_phases = ["analyst", "formatter", "seo", "manager", "timestamp", "copy_editor", "chat"]
+    available_phases = ["analyst", "formatter", "seo", "validator", "timestamp", "copy_editor", "chat"]
 
     return PhaseModelsResponse(
         phase_models=phase_models,
@@ -195,7 +195,7 @@ async def update_phase_models(update: PhaseModelsUpdate):
     Changes are persisted to the config file and take effect immediately.
     """
     config = _load_config()
-    valid_phases = {"analyst", "formatter", "seo", "manager", "timestamp", "copy_editor", "chat"}
+    valid_phases = {"analyst", "formatter", "seo", "validator", "timestamp", "copy_editor", "chat"}
     models_data = await get_available_models()
     available_model_ids = {m["id"] for m in models_data}
 

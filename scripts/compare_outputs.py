@@ -62,7 +62,7 @@ def list_versions(job_id: int):
     print(f"Outputs for Job {job_id} ({project_path.name})")
     print("=" * 60)
 
-    phases = ["analyst", "formatter", "seo", "manager", "timestamp"]
+    phases = ["analyst", "formatter", "seo", "validator", "timestamp"]
 
     for phase in phases:
         current = project_path / f"{phase}_output.md"
