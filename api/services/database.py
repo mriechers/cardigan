@@ -1336,4 +1336,3 @@ def _row_to_config(row) -> ConfigItem:
 # Legacy alias - prefer claim_next_job for worker use
 get_next_job = claim_next_job
 update_job_heartbeat = update_heartbeat
-
