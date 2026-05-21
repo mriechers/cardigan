@@ -11,8 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code (same as API — shares layers when built together)
 COPY api/ api/
 COPY config/ config/
-# Copy .claude subdirectories if they exist (agents for system prompts, templates for output formats)
-COPY .claude/ .claude/
+# Copy LLM phase prompts (system prompts for analyst, formatter, seo, validator, timestamp, copy_editor)
+COPY prompts/ prompts/
 COPY knowledge/ knowledge/
 COPY alembic.ini* ./
 COPY scripts/ scripts/

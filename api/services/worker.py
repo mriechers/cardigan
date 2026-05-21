@@ -38,7 +38,7 @@ logger = get_logger(__name__)
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "OUTPUT"))
 TRANSCRIPTS_DIR = Path(os.getenv("TRANSCRIPTS_DIR", "transcripts"))
 TRANSCRIPTS_ARCHIVE_DIR = TRANSCRIPTS_DIR / "archive"
-AGENTS_DIR = Path(".claude/agents")
+AGENTS_DIR = Path("prompts")
 KNOWLEDGE_DIR = Path("knowledge")
 
 
