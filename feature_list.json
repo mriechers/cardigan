@@ -94,7 +94,7 @@
       "api/routers/jobs.py",
       "api/services/worker.py",
       "web/src/pages/JobDetail.tsx",
-      ".claude/agents/seo.md"
+      "prompts/seo.md"
     ],
     "exit_criteria": [
       "Upload button on Job Detail page for CSV files",
