@@ -284,9 +284,7 @@ class TestLoadAgentPrompt:
         mock_get_llm.return_value = mock_llm_client
         mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
 
-        (tmp_path / "analyst.md").write_text(
-            "**Date Processed:** {TODAY'S DATE in YYYY-MM-DD format}\n"
-        )
+        (tmp_path / "analyst.md").write_text("**Date Processed:** {TODAY'S DATE in YYYY-MM-DD format}\n")
 
         worker = JobWorker()
         result = worker._load_agent_prompt("analyst")
@@ -306,8 +304,7 @@ class TestLoadAgentPrompt:
         mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
 
         (tmp_path / "seo.md").write_text(
-            "**Model:** {model name you are running as}\n"
-            "Other line: {the model you are running as}\n"
+            "**Model:** {model name you are running as}\n" "Other line: {the model you are running as}\n"
         )
 
         worker = JobWorker()
@@ -324,9 +321,7 @@ class TestLoadAgentPrompt:
         mock_get_llm.return_value = mock_llm_client
         mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
 
-        (tmp_path / "analyst.md").write_text(
-            "**Model:** {model name you are running as}\n"
-        )
+        (tmp_path / "analyst.md").write_text("**Model:** {model name you are running as}\n")
 
         worker = JobWorker()
         result = worker._load_agent_prompt("analyst")

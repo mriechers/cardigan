@@ -329,7 +329,7 @@ def merge_formatter_chunks(chunks: List[str]) -> str:
         # remains intact.
         fence_open = re.match(r"^```(?:markdown|md)?\s*\n", chunk)
         if fence_open:
-            chunk = chunk[fence_open.end():]
+            chunk = chunk[fence_open.end() :]
             chunk = re.sub(r"\n```\s*\Z", "", chunk.rstrip()) + "\n"
 
         # Strip LLM-generated model/creator attribution lines (appear at end of chunk responses)
