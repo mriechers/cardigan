@@ -46,3 +46,7 @@ watchfiles>=0.21.0
 # MCP Server (for Claude Desktop integration)
 mcp>=1.27.0
 sse-starlette>=2.0.0
+
+# Google Drive integration (optional — only needed when Drive export is configured)
+google-api-python-client>=2.100.0
+google-auth>=2.25.0

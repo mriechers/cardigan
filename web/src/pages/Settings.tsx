@@ -41,13 +41,14 @@ interface IngestConfigUpdate {
   scan_time?: string  // "HH:MM" format
 }
 
-type TabId = 'agents' | 'worker' | 'ingest' | 'system' | 'accessibility'
+type TabId = 'agents' | 'worker' | 'ingest' | 'system' | 'export' | 'accessibility'
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: 'agents', label: 'Agents', icon: '🤖' },
   { id: 'worker', label: 'Worker', icon: '⚙️' },
   { id: 'ingest', label: 'Ingest', icon: '📥' },
   { id: 'system', label: 'System', icon: '🖥️' },
+  { id: 'export', label: 'Export', icon: '📤' },
   { id: 'accessibility', label: 'Accessibility', icon: '♿' },
 ]
 
@@ -74,6 +75,8 @@ export default function Settings() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<TabId>('agents')
+  const [exportStatus, setExportStatus] = useState<{ google_drive: { configured: boolean } } | null>(null)
+  const [driveFolderId, setDriveFolderId] = useState(() => localStorage.getItem('cardigan_drive_folder_id') || '')
 
   // Track unsaved changes
   const [pendingPhaseModels, setPendingPhaseModels] = useState<Record<string, string> | null>(null)
@@ -145,6 +148,23 @@ export default function Settings() {
     const interval = setInterval(fetchSystemStatus, 5000)
     return () => clearInterval(interval)
   }, [activeTab, fetchSystemStatus])
+
+  useEffect(() => {
+    if (activeTab === 'export') {
+      fetch('/api/export/status')
+        .then(res => res.json())
+        .then(setExportStatus)
+        .catch(() => {})
+    }
+  }, [activeTab])
+
+  useEffect(() => {
+    if (driveFolderId) {
+      localStorage.setItem('cardigan_drive_folder_id', driveFolderId)
+    } else {
+      localStorage.removeItem('cardigan_drive_folder_id')
+    }
+  }, [driveFolderId])
 
   const handleRefreshModels = async () => {
     try {
@@ -810,6 +830,65 @@ export default function Settings() {
                     </div>
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* EXPORT TAB */}
+        {activeTab === 'export' && (
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-xl font-semibold text-white mb-4">Export Settings</h2>
+
+              <div className="bg-gray-800 rounded-lg border border-gray-700 p-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-medium text-white">Google Drive</h3>
+                  {exportStatus ? (
+                    <span className={`px-2 py-1 rounded text-xs font-medium ${
+                      exportStatus.google_drive.configured
+                        ? 'bg-green-900/50 text-green-400 border border-green-800'
+                        : 'bg-gray-700 text-gray-400'
+                    }`}>
+                      {exportStatus.google_drive.configured ? 'Connected' : 'Not Configured'}
+                    </span>
+                  ) : (
+                    <span className="text-gray-500 text-sm">Loading...</span>
+                  )}
+                </div>
+
+                {exportStatus?.google_drive.configured ? (
+                  <div className="space-y-3">
+                    <p className="text-sm text-gray-400">
+                      Google Drive export is active. Output files can be uploaded directly from job detail pages.
+                    </p>
+                    <div>
+                      <label htmlFor="drive-folder-id" className="block text-sm text-gray-300 mb-1">
+                        Default folder ID <span className="text-gray-500">(optional)</span>
+                      </label>
+                      <input
+                        id="drive-folder-id"
+                        type="text"
+                        value={driveFolderId}
+                        onChange={(e) => setDriveFolderId(e.target.value)}
+                        placeholder="e.g., 1a2b3c4d5e6f..."
+                        className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 font-mono"
+                      />
+                      <p className="mt-1 text-xs text-gray-500">
+                        Find this in the Drive folder URL after /folders/. Leave empty to upload to the service account's root.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-sm text-gray-400">
+                      To enable Google Drive export, add a service account credentials JSON file as the <code className="text-blue-300 bg-gray-900 px-1 rounded text-xs">GOOGLE_DRIVE_CREDENTIALS</code> secret.
+                    </p>
+                    <p className="text-sm text-gray-500">
+                      See the project documentation for setup instructions.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
