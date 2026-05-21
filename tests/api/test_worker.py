@@ -1,7 +1,7 @@
 """Tests for the JobWorker class.
 
 Tests job claiming, phase processing, heartbeat updates, error handling,
-and manager phase analysis/recovery.
+and recovery analysis.
 """
 
 import asyncio
@@ -103,7 +103,7 @@ class TestJobWorker:
         assert worker.config is not None
         assert worker.llm is not None
         assert worker.running is False
-        assert worker.PHASES == ["analyst", "formatter", "seo", "manager"]
+        assert worker.PHASES == ["analyst", "formatter", "seo", "validator"]
 
     @patch("api.services.worker.get_llm_client")
     def test_worker_with_custom_config(self, mock_get_llm, mock_llm_client, worker_config):
@@ -137,7 +137,7 @@ class TestAllPhasesComplete:
             {"name": "analyst", "status": "completed"},
             {"name": "formatter", "status": "pending"},
             {"name": "seo", "status": "pending"},
-            {"name": "manager", "status": "pending"},
+            {"name": "validator", "status": "pending"},
         ]
         result = worker._all_phases_complete(phases, tmp_path)
         assert result is False
@@ -152,7 +152,7 @@ class TestAllPhasesComplete:
             {"name": "analyst", "status": "completed"},
             {"name": "formatter", "status": "completed"},
             {"name": "seo", "status": "completed"},
-            {"name": "manager", "status": "completed"},
+            {"name": "validator", "status": "completed"},
         ]
         result = worker._all_phases_complete(phases, tmp_path)
         assert result is False
@@ -164,14 +164,14 @@ class TestAllPhasesComplete:
         worker = JobWorker()
 
         # Create output files
-        for phase in ["analyst", "formatter", "seo", "manager"]:
+        for phase in ["analyst", "formatter", "seo", "validator"]:
             (tmp_path / f"{phase}_output.md").write_text(f"Output for {phase}")
 
         phases = [
             {"name": "analyst", "status": "completed"},
             {"name": "formatter", "status": "completed"},
             {"name": "seo", "status": "completed"},
-            {"name": "manager", "status": "completed"},
+            {"name": "validator", "status": "completed"},
         ]
         result = worker._all_phases_complete(phases, tmp_path)
         assert result is True
@@ -321,8 +321,8 @@ class TestBuildPhasePrompt:
         assert "SEO" in result or "metadata" in result.lower()
 
     @patch("api.services.worker.get_llm_client")
-    def test_manager_prompt_includes_all_outputs(self, mock_get_llm, mock_llm_client):
-        """Should include all phase outputs in manager prompt."""
+    def test_validator_prompt_includes_all_outputs(self, mock_get_llm, mock_llm_client):
+        """Should include all phase outputs in validator prompt."""
         mock_get_llm.return_value = mock_llm_client
 
         worker = JobWorker()
@@ -333,7 +333,7 @@ class TestBuildPhasePrompt:
             "seo_output": '{"title": "Test"}',
         }
 
-        result = worker._build_phase_prompt("manager", context)
+        result = worker._build_phase_prompt("validator", context)
         assert "Analysis" in result
         assert "Formatted" in result
         assert "Test" in result

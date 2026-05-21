@@ -33,7 +33,7 @@ export const ARTIFACT_LABELS: Record<string, ArtifactInfo> = {
     description: 'Search-optimized titles, descriptions, and tags'
   },
   qa_review: {
-    filename: 'manager_output.md',
+    filename: 'validator_output.md',
     label: 'QA Review',
     description: 'Quality assurance review and final recommendations'
   },

@@ -38,7 +38,7 @@ const PHASE_INFO: Record<string, { name: string; icon: string }> = {
   analyst: { name: 'Analyst', icon: '🔍' },
   formatter: { name: 'Formatter', icon: '📝' },
   seo: { name: 'SEO', icon: '🎯' },
-  manager: { name: 'QA Manager', icon: '✅' },
+  validator: { name: 'Validator', icon: '✅' },
   copy_editor: { name: 'Copy Editor', icon: '✏️' },
   timestamp: { name: 'Timestamps', icon: '⏱️' },
 }

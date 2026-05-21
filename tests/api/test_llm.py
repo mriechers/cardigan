@@ -53,7 +53,7 @@ def mock_config(tmp_path):
                 "analyst": "openrouter-cheapskate",
                 "formatter": "openrouter-cheapskate",
                 "seo": "openrouter-cheapskate",
-                "manager": "openrouter-big-brain",
+                "validator": "openrouter-cheapskate",
             },
         },
         "safety": {"run_cost_cap": 1.0, "max_cost_per_1k_tokens": 0.05, "model_allowlist": []},

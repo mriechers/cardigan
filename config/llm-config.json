@@ -121,6 +121,7 @@
     "analyst": "openrouter-cheapskate",
     "formatter": "openrouter",
     "seo": "openrouter-cheapskate",
+    "validator": "openrouter-cheapskate",
     "timestamp": "openrouter",
     "copy_editor": "openrouter-big-brain"
   },
@@ -208,7 +209,7 @@
     "analyst": "anthropic/claude-haiku-4.5",
     "formatter": "anthropic/claude-sonnet-4.6",
     "seo": "anthropic/claude-haiku-4.5",
-    "manager": "anthropic/claude-opus-4.6",
+    "validator": "anthropic/claude-haiku-4.5",
     "timestamp": "anthropic/claude-sonnet-4.6",
     "copy_editor": "anthropic/claude-opus-4.6"
   },

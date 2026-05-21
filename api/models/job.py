@@ -120,6 +120,9 @@ class JobUpdate(BaseModel):
     content_type: Optional[str] = Field(None, description="Detected content type: 'full', 'short', or 'clip'")
     phases: Optional[List[JobPhase]] = Field(None, description="Replace all phases")
     phase_update: Optional[PhaseUpdate] = Field(None, description="Update a single phase")
+    validation_result: Optional[Dict[str, Any]] = Field(
+        None, description="Structured validation result from validator phase"
+    )
 
 
 class JobOutputs(BaseModel):
@@ -168,6 +171,10 @@ class Job(BaseModel):
     content_type: Optional[str] = Field(None, description="Detected content type: 'full', 'short', or 'clip'")
     outputs: Optional[JobOutputs] = Field(None, description="Output files from manifest")
     app_version: Optional[str] = None
+    validation_result: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Structured validation result from validator phase: {phase_results: {phase: {status, flags}}, overall}",
+    )
 
     class Config:
         from_attributes = True

@@ -127,11 +127,11 @@ class JobWorker:
     It's designed to be run interactively via Claude Desktop/MCP for
     human-in-the-loop editing workflow.
 
-    The manager phase runs last as QA review of all outputs.
+    The validator phase runs last to check all outputs.
     """
 
     # Required phases that always run
-    PHASES = ["analyst", "formatter", "seo", "manager"]
+    PHASES = ["analyst", "formatter", "seo", "validator"]
 
     # Optional phases with trigger conditions
     # timestamp: Runs automatically for 10+ minute content, or when requested
@@ -139,6 +139,27 @@ class JobWorker:
 
     # Duration threshold (in minutes) for auto-triggering timestamp phase
     TIMESTAMP_AUTO_THRESHOLD_MINUTES = 10
+
+    @staticmethod
+    def _parse_validation_result(raw_output: str) -> dict:
+        """Parse validator JSON output, handling markdown fences.
+
+        Args:
+            raw_output: Raw LLM response (may include markdown code fences)
+
+        Returns:
+            Parsed validation result dict
+
+        Raises:
+            json.JSONDecodeError: If output is not valid JSON after cleaning
+        """
+        cleaned = raw_output.strip()
+        # Strip markdown code fences if present
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[1]
+        if cleaned.endswith("```"):
+            cleaned = cleaned.rsplit("```", 1)[0]
+        return json.loads(cleaned.strip())
 
     def __init__(self, config: Optional[WorkerConfig] = None):
         self.config = config or WorkerConfig()
@@ -601,6 +622,30 @@ class JobWorker:
                 # Add output to context for next phase
                 context[f"{phase_name}_output"] = phase_result.get("output", "")
 
+                # Parse and store validation result
+                if phase_name == "validator" and phase_result.get("output"):
+                    try:
+                        validation_data = self._parse_validation_result(phase_result["output"])
+                        from api.models.job import JobUpdate as JU
+                        from api.services.database import update_job as db_update_job
+
+                        await db_update_job(job_id, JU(validation_result=validation_data))
+                        logger.info(
+                            "Validation complete",
+                            extra={
+                                "job_id": job_id,
+                                "overall": validation_data.get("overall"),
+                                "flags": sum(
+                                    len(p.get("flags", [])) for p in validation_data.get("phase_results", {}).values()
+                                ),
+                            },
+                        )
+                    except json.JSONDecodeError as e:
+                        logger.warning(
+                            "Validator returned invalid JSON, storing raw output",
+                            extra={"job_id": job_id, "error": str(e)},
+                        )
+
                 # === Completeness check after formatter phase ===
                 if phase_name == "formatter":
                     from api.services.completeness import check_completeness
@@ -778,14 +823,14 @@ class JobWorker:
             run_summary = await end_run_tracking(job_id)
             current_cost = run_summary["total_cost"] if run_summary else 0
 
-            # Set status to investigating while manager analyzes the failure
+            # Set status to investigating while validator analyzes the failure
             await update_job_status(
                 job_id,
                 JobStatus.investigating,
                 error_message=str(e),
             )
 
-            # Run manager to analyze and decide on recovery action
+            # Run recovery analysis to analyze and decide on recovery action
             recovery_result = await self._analyze_and_recover(
                 job=job,
                 project_path=project_path,
@@ -798,7 +843,7 @@ class JobWorker:
             # If recovery was successful, job status already updated
             if recovery_result.get("recovered"):
                 logger.info(
-                    "Job recovered by manager",
+                    "Job recovered by recovery analysis",
                     extra={
                         "job_id": job_id,
                         "action": recovery_result.get("action"),
@@ -1606,9 +1651,9 @@ Please format this transcript section:
         error: str,
         current_cost: float,
     ) -> Dict[str, Any]:
-        """Run manager agent to analyze failure and attempt recovery.
+        """Run validator agent to analyze failure and attempt recovery.
 
-        The manager decides on an action:
+        The validator decides on an action:
         - RETRY: Re-run the failed phase at the same tier
         - ESCALATE: Re-run with a higher tier model
         - FIX: Apply corrections and continue
@@ -1628,7 +1673,7 @@ Please format this transcript section:
         job_id = job.get("id")
         project_name = job.get("project_name", "Unknown")
 
-        logger.info("Manager analyzing failure", extra={"job_id": job_id, "error": error[:100]})
+        logger.info("Validator analyzing failure", extra={"job_id": job_id, "error": error[:100]})
 
         try:
             # Find the failed phase
@@ -1689,11 +1734,11 @@ REASON: [Brief explanation - 1-2 sentences]
 [If ACTION is FIX, provide the corrected output below]
 """
 
-            # Load manager system prompt
-            system_prompt = self._load_agent_prompt("manager")
+            # Load validator system prompt
+            system_prompt = self._load_agent_prompt("validator")
 
-            # Use the manager's configured backend for recovery decisions
-            backend_name = self.llm.get_backend_for_phase("manager")
+            # Use the validator's configured backend for recovery decisions
+            backend_name = self.llm.get_backend_for_phase("validator")
 
             logger.info("Running recovery analysis", extra={"job_id": job_id, "backend": backend_name})
 
@@ -1726,7 +1771,7 @@ REASON: [Brief explanation - 1-2 sentences]
                 if line_upper.startswith("REASON:"):
                     reason = line[line.find(":") + 1 :].strip()
                     break
-                # Check for "### Rationale" section (manager prompt format)
+                # Check for "### Rationale" section (recovery prompt format)
                 elif "RATIONALE" in line_upper and line_upper.startswith("#"):
                     # Get the next non-empty line as the reason
                     for j in range(i + 1, min(i + 5, len(lines))):
@@ -1737,7 +1782,7 @@ REASON: [Brief explanation - 1-2 sentences]
                     break
 
             logger.info(
-                "Manager decision",
+                "Recovery decision",
                 extra={
                     "job_id": job_id,
                     "action": action,
@@ -1865,7 +1910,7 @@ REASON: [Brief explanation - 1-2 sentences]
 
                     if fix_content:
                         logger.info(
-                            "Applying manager fix",
+                            "Applying recovery fix",
                             extra={"job_id": job_id, "phase": phase_name, "fix_length": len(fix_content)},
                         )
 
@@ -2052,18 +2097,18 @@ Focus on:
 - Preserving speaker voice while improving prose
 
 Output the polished transcript with any notes on changes made.""",
-            "manager": """You are the QA Manager for Cardigan. Review all pipeline outputs for quality.
+            "validator": """You are a quality validation agent for Cardigan. Review all pipeline outputs for quality.
 
 Check:
 1. Formatter: Speaker labels use first+last name only (no titles like Dr./Mr./Ms.), review notes only at top
 2. SEO: Title <60 chars, descriptions are engaging, tags relevant
 3. Analyst: Speakers identified, topics captured
 
-Output a QA report with:
-- Overall Status: APPROVED or NEEDS_REVISION
-- Checklist of passes/fails
-- Issues found (CRITICAL/MAJOR/MINOR)
-- Recommendation""",
+Output a structured JSON checklist with:
+- overall_status: "approved" or "needs_revision"
+- checks: array of {phase, criterion, passed, note}
+- issues: array of {severity, phase, description}
+- recommendation: string""",
         }
 
         return fallback_prompts.get(
@@ -2253,53 +2298,23 @@ The editor reviewed the copy-edited transcript and requests these changes:
 {editorial_feedback}"""
             return prompt
 
-        elif phase_name == "manager":
+        elif phase_name == "validator":
             analysis = context.get("analyst_output", "")
             formatted = context.get("formatter_output", "")
             seo = context.get("seo_output", "")
-            prompt = "Please perform a QA review of the following pipeline outputs.\n\n"
-            if content_type == "short":
-                prompt += (
-                    "NOTE: This is a YouTube Short. QA standards are relaxed — "
-                    "shorter analysis and simplified SEO are expected.\n\n"
-                )
+            prompt = "Validate the following pipeline outputs and return your JSON verdict.\n\n"
 
             # Add completeness check results if available
             completeness = context.get("completeness_check")
             if completeness:
                 status = "PASS" if completeness["is_complete"] else "FAIL - TRUNCATION DETECTED"
-                prompt += f"""## Transcript Completeness Check (Automated)
-
-The system performed an automated word-count completeness check on the formatter output:
-- **Coverage Ratio:** {completeness['coverage_ratio']:.1%}
-- **Source Word Count:** {completeness['source_word_count']:,}
-- **Output Word Count:** {completeness['output_word_count']:,}
-- **Threshold:** {completeness['threshold']:.0%}
-- **Result:** {status}
-- **Detail:** {completeness['reason']}
-
-{"The automated check passed, but please independently verify the formatted transcript covers the full content and reaches a natural conclusion." if completeness['is_complete'] else "CRITICAL: The automated check detected possible truncation. Verify manually whether content is missing."}
+                prompt += f"""## Automated Completeness Check
+- Coverage: {completeness['coverage_ratio']:.1%}
+- Result: {status}
 
 """
 
-            # Add transcript metrics if available
-            metrics = context.get("transcript_metrics")
-            if metrics:
-                prompt += f"""## Transcript Metrics
-- **Estimated Duration:** {metrics.get('estimated_duration_minutes', 0):.1f} minutes
-- **Word Count:** {metrics.get('word_count', 0):,}
-- **Long-Form Content:** {"Yes" if metrics.get('is_long_form') else "No"}
-
-"""
-
-            if sst_section:
-                prompt += sst_section
-            prompt += f"""## Original Transcript (for reference):
----
-{transcript[:3000]}{"..." if len(transcript) > 3000 else ""}
----
-
-## Analyst Output:
+            prompt += f"""## Analyst Output:
 ---
 {analysis}
 ---
@@ -2312,18 +2327,7 @@ The system performed an automated word-count completeness check on the formatter
 ## SEO Metadata:
 ---
 {seo}
----
-
-Review all outputs against PBS Wisconsin quality standards and provide your QA report."""
-            editorial_feedback = context.get("_editorial_feedback")
-            if editorial_feedback:
-                prompt += f"""
-
-## Editorial Feedback
-
-The editor reviewed the QA report and requests these changes:
-
-{editorial_feedback}"""
+---"""
             return prompt
 
         elif phase_name == "timestamp":
@@ -2412,7 +2416,7 @@ The editor reviewed the previous timestamp output and provided the following fee
                 "analysis": "analyst_output.md",
                 "formatted_transcript": "formatter_output.md",
                 "seo_metadata": "seo_output.md",
-                "qa_review": "manager_output.md",
+                "qa_review": "validator_output.md",
                 "copy_edited": "copy_editor_output.md",
             },
             # Airtable SST linking - enables MCP server to fetch live metadata
