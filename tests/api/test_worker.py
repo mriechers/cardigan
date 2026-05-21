@@ -273,6 +273,65 @@ class TestLoadAgentPrompt:
         result = worker._load_agent_prompt("analyst")
         assert "transcript analyst" in result.lower()
 
+    @patch("api.services.worker.get_llm_client")
+    @patch("api.services.worker.AGENTS_DIR")
+    def test_substitutes_today_date_placeholder(self, mock_agents_dir, mock_get_llm, mock_llm_client, tmp_path):
+        """The literal {TODAY'S DATE in YYYY-MM-DD format} placeholder must be replaced
+        with today's actual date so the LLM doesn't hallucinate a date near its
+        training cutoff."""
+        from datetime import datetime, timezone
+
+        mock_get_llm.return_value = mock_llm_client
+        mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
+
+        (tmp_path / "analyst.md").write_text(
+            "**Date Processed:** {TODAY'S DATE in YYYY-MM-DD format}\n"
+        )
+
+        worker = JobWorker()
+        result = worker._load_agent_prompt("analyst")
+        expected_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        assert expected_date in result
+        assert "{TODAY'S DATE" not in result
+
+    @patch("api.services.worker.get_llm_client")
+    @patch("api.services.worker.AGENTS_DIR")
+    def test_substitutes_model_placeholder_when_provided(
+        self, mock_agents_dir, mock_get_llm, mock_llm_client, tmp_path
+    ):
+        """When a model identifier is provided, both placeholder spellings should be
+        substituted so the artifact header reflects the real model rather than an
+        LLM guess."""
+        mock_get_llm.return_value = mock_llm_client
+        mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
+
+        (tmp_path / "seo.md").write_text(
+            "**Model:** {model name you are running as}\n"
+            "Other line: {the model you are running as}\n"
+        )
+
+        worker = JobWorker()
+        result = worker._load_agent_prompt("seo", model="anthropic/claude-4.5-haiku-20251001")
+        assert "anthropic/claude-4.5-haiku-20251001" in result
+        assert "{model name" not in result
+        assert "{the model" not in result
+
+    @patch("api.services.worker.get_llm_client")
+    @patch("api.services.worker.AGENTS_DIR")
+    def test_leaves_model_placeholder_when_none(self, mock_agents_dir, mock_get_llm, mock_llm_client, tmp_path):
+        """When no model is provided, the model placeholder is left alone (the LLM
+        will then hallucinate, but date substitution still happens)."""
+        mock_get_llm.return_value = mock_llm_client
+        mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
+
+        (tmp_path / "analyst.md").write_text(
+            "**Model:** {model name you are running as}\n"
+        )
+
+        worker = JobWorker()
+        result = worker._load_agent_prompt("analyst")
+        assert "{model name you are running as}" in result
+
 
 class TestBuildPhasePrompt:
     """Tests for _build_phase_prompt method."""
