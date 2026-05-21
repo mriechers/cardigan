@@ -173,7 +173,7 @@ class Job(BaseModel):
     app_version: Optional[str] = None
     validation_result: Optional[Dict[str, Any]] = Field(
         default=None,
-        description="Structured validation result from validator phase: {phase_results: {phase: {status, flags}}, overall}"
+        description="Structured validation result from validator phase: {phase_results: {phase: {status, flags}}, overall}",
     )
 
     class Config:

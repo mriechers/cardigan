@@ -1,8 +1,5 @@
 """Tests for user-driven retry with context feed-forward."""
 
-import json
-
-import pytest
 from unittest.mock import MagicMock
 
 
@@ -97,8 +94,9 @@ def test_build_phase_prompt_retry_context_with_editorial_feedback():
 
 def test_run_phase_accepts_model_override():
     """_run_phase should accept model_override parameter."""
-    from api.services.worker import JobWorker
     import inspect
+
+    from api.services.worker import JobWorker
 
     sig = inspect.signature(JobWorker._run_phase)
     assert "model_override" in sig.parameters

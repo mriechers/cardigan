@@ -274,7 +274,10 @@ class JobWorker:
             self._heartbeat_task.cancel()
 
     async def retry_single_phase(
-        self, job_id: int, phase_name: str, feedback: Optional[str] = None,
+        self,
+        job_id: int,
+        phase_name: str,
+        feedback: Optional[str] = None,
         model_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Retry a single phase for a completed job.
@@ -465,12 +468,8 @@ class JobWorker:
                     )
                     if validator_result.get("output"):
                         try:
-                            validation_data = self._parse_validation_result(
-                                validator_result["output"]
-                            )
-                            await update_job(
-                                job_id, JobUpdate(validation_result=validation_data)
-                            )
+                            validation_data = self._parse_validation_result(validator_result["output"])
+                            await update_job(job_id, JobUpdate(validation_result=validation_data))
                             logger.info(
                                 "Post-retry validation complete",
                                 extra={
@@ -697,8 +696,7 @@ class JobWorker:
                                 "job_id": job_id,
                                 "overall": validation_data.get("overall"),
                                 "flags": sum(
-                                    len(p.get("flags", []))
-                                    for p in validation_data.get("phase_results", {}).values()
+                                    len(p.get("flags", [])) for p in validation_data.get("phase_results", {}).values()
                                 ),
                             },
                         )
@@ -894,9 +892,7 @@ class JobWorker:
                 EventCreate(
                     job_id=job_id,
                     event_type=EventType.job_failed,
-                    data=EventData(
-                        extra={"error": str(e)}
-                    ),
+                    data=EventData(extra={"error": str(e)}),
                 )
             )
 
@@ -1382,7 +1378,9 @@ class JobWorker:
                 )
 
             # Add provenance header
-            provenance_header = f"<!-- model: {response.model} | cost: ${response.cost:.4f} | tokens: {response.total_tokens} -->\n"
+            provenance_header = (
+                f"<!-- model: {response.model} | cost: ${response.cost:.4f} | tokens: {response.total_tokens} -->\n"
+            )
             output_file.write_text(provenance_header + response.content)
 
             # Log phase completed
