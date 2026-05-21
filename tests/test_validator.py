@@ -1,8 +1,8 @@
 """Tests for the validator phase."""
 
 import json
-import pytest
 
+import pytest
 
 VALID_RESULT = {
     "phase_results": {
