@@ -1,7 +1,6 @@
 """Tests for cost visibility: token granularity and pricing."""
 
 
-
 def test_job_phase_has_token_breakdown():
     """JobPhase should support input_tokens and output_tokens fields."""
     from api.models.job import JobPhase
