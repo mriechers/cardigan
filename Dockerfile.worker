@@ -13,8 +13,6 @@ COPY api/ api/
 COPY config/ config/
 # Copy LLM phase prompts (system prompts for analyst, formatter, seo, validator, timestamp, copy_editor)
 COPY prompts/ prompts/
-# Copy .claude subdirectories if they exist (templates for output formats)
-COPY .claude/ .claude/
 COPY knowledge/ knowledge/
 COPY alembic.ini* ./
 COPY scripts/ scripts/
