@@ -458,6 +458,21 @@ class JobWorker:
 
             await update_job(job_id, JobUpdate(phases=phases))
 
+            # Extract glossary entries from editorial feedback (fire-and-forget)
+            if feedback and phase_result.get("success"):
+                try:
+                    added = await self._extract_glossary_entries(feedback, job_id)
+                    if added > 0:
+                        logger.info(
+                            "Glossary updated from editorial feedback",
+                            extra={"job_id": job_id, "entries_added": added},
+                        )
+                except Exception as e:
+                    logger.warning(
+                        "Glossary extraction failed (non-fatal)",
+                        extra={"job_id": job_id, "error": str(e)},
+                    )
+
             # Re-run validator after successful retry (unless we just retried the validator)
             if phase_name != "validator" and phase_result.get("success"):
                 try:
@@ -503,6 +518,138 @@ class JobWorker:
                 "Phase retry failed", extra={"job_id": job_id, "phase": phase_name, "error": str(e)}, exc_info=True
             )
             return {"success": False, "error": str(e)}
+
+    async def _extract_glossary_entries(self, feedback: str, job_id: int) -> int:
+        """Extract glossary-worthy corrections from editorial feedback.
+
+        Sends feedback through a lightweight LLM call to identify name
+        corrections, spelling fixes, and terms that should be added to
+        knowledge/glossary.md. Returns the number of entries added.
+        """
+        glossary_path = KNOWLEDGE_DIR / "glossary.md"
+        if not glossary_path.exists():
+            return 0
+
+        current_glossary = glossary_path.read_text()
+
+        system_prompt = """You extract name corrections and spelling fixes from editorial feedback on transcripts.
+
+Given editorial feedback, identify any corrections that should be added to a glossary for future transcripts. Focus on:
+- Name spelling corrections (e.g., "used Shawn instead of Sean")
+- Proper noun fixes
+- Recurring terms that were wrong
+
+For each correction, output ONE line in this exact format:
+CORRECTION: wrong_form -> correct_form | context
+
+If there are no glossary-worthy corrections in the feedback, output exactly:
+NO_CORRECTIONS
+
+Do NOT include general formatting feedback, style notes, or paraphrasing observations — only specific spelling/naming corrections."""
+
+        user_prompt = f"""Editorial feedback:
+---
+{feedback}
+---
+
+Current glossary (to avoid duplicates):
+---
+{current_glossary}
+---
+
+Extract any name or spelling corrections that should be added to the glossary. Skip anything already covered."""
+
+        # Use cheapest tier for this lightweight extraction
+        backend = self.llm.get_backend_for_phase("analyst")
+
+        try:
+            response = await self.llm.chat(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                backend=backend,
+                job_id=job_id,
+                phase="glossary_extraction",
+            )
+            content = response.content.strip()
+        except Exception as e:
+            logger.warning(
+                "Glossary extraction LLM call failed",
+                extra={"job_id": job_id, "error": str(e)},
+            )
+            return 0
+
+        if "NO_CORRECTIONS" in content or not content:
+            return 0
+
+        # Parse corrections and append to glossary
+        new_entries = []
+        for line in content.split("\n"):
+            line = line.strip()
+            if not line.startswith("CORRECTION:"):
+                continue
+            try:
+                correction_part = line[len("CORRECTION:") :].strip()
+                if " -> " not in correction_part:
+                    continue
+                forms, _, context_note = correction_part.partition("|")
+                wrong, _, correct = forms.partition("->")
+                wrong = wrong.strip()
+                correct = correct.strip()
+                context_note = context_note.strip() if context_note else ""
+
+                if not wrong or not correct:
+                    continue
+
+                # Skip if already in glossary
+                if wrong.lower() in current_glossary.lower() and correct.lower() in current_glossary.lower():
+                    continue
+
+                new_entries.append((correct, wrong, context_note))
+            except Exception:
+                continue
+
+        if not new_entries:
+            return 0
+
+        # Append to the Editor Corrections section (or end of file)
+        lines = current_glossary.split("\n")
+        insert_idx = None
+        for i, line in enumerate(lines):
+            if line.strip() == "## Editor Corrections":
+                # Find end of table in this section
+                for j in range(i + 1, len(lines)):
+                    if lines[j].startswith("## "):
+                        insert_idx = j
+                        break
+                    if lines[j].startswith("|") and not lines[j].startswith("| Correct"):
+                        insert_idx = j + 1
+                if insert_idx is None:
+                    insert_idx = len(lines)
+                break
+            if line.strip() == "## Name Disambiguation":
+                insert_idx = i
+                break
+
+        if insert_idx is None:
+            insert_idx = len(lines)
+
+        new_lines = [f"| {correct} | {wrong} | {context_note} |" for correct, wrong, context_note in new_entries]
+        for offset, new_line in enumerate(new_lines):
+            lines.insert(insert_idx + offset, new_line)
+
+        glossary_path.write_text("\n".join(lines))
+
+        logger.info(
+            "Appended glossary entries from editorial feedback",
+            extra={
+                "job_id": job_id,
+                "entries": [f"{w} -> {c}" for c, w, _ in new_entries],
+            },
+        )
+
+        return len(new_entries)
 
     async def process_job(self, job: Dict[str, Any]):
         """Process a single job through all phases."""
@@ -1526,6 +1673,12 @@ class JobWorker:
         analysis = context.get("analyst_output", "")
         sst_context = context.get("sst_context")
 
+        # Load glossary for chunked formatter (mirrors _build_phase_prompt_base)
+        glossary_section = ""
+        glossary_path = KNOWLEDGE_DIR / "glossary.md"
+        if glossary_path.exists():
+            glossary_section = f"\n## Transcript Glossary\n\n{glossary_path.read_text()}\n\n"
+
         # Build SST section (reuse logic from _build_phase_prompt)
         sst_section = ""
         if sst_context:
@@ -1576,12 +1729,14 @@ SPELLING: Always use "partisan" (not "partizan"), "bipartisan" (not "bipartisan"
                     user_message += "Using the following analysis as guidance:\n\n"
                     if sst_section:
                         user_message += sst_section
+                    if glossary_section:
+                        user_message += glossary_section
                     user_message += f"---\n{analysis}\n---\n\n"
                     user_message += f"Please format this transcript:\n\n---\n{chunk.content}\n---"
                 else:
                     # Continuation chunks: skip header, start with dialogue
                     user_message = f"""{verbatim_instruction}
-
+{glossary_section}
 IMPORTANT: This is section {chunk.index + 1} of {total_chunks} of a long transcript being processed in parts.
 DO NOT generate the metadata header (Project, Program, Duration, Date).
 DO NOT generate "# Formatted Transcript" heading.
@@ -1883,12 +2038,12 @@ Output a structured JSON checklist with:
         # Detect content type for Shorts-specific prompt adjustments
         content_type = context.get("content_type", "full")
 
-        # Load Wisconsin proper-noun reference for analyst and formatter phases
+        # Load transcript glossary for analyst and formatter phases
         wi_reference = ""
         if phase_name in ("analyst", "formatter"):
-            wi_ref_path = KNOWLEDGE_DIR / "wisconsin_reference.md"
-            if wi_ref_path.exists():
-                wi_reference = f"\n## Wisconsin Proper-Noun Reference\n\n{wi_ref_path.read_text()}\n\n"
+            glossary_path = KNOWLEDGE_DIR / "glossary.md"
+            if glossary_path.exists():
+                wi_reference = f"\n## Transcript Glossary\n\n{glossary_path.read_text()}\n\n"
 
         if phase_name == "analyst":
             if content_type == "short":
