@@ -73,6 +73,8 @@ You produce a formatted transcript saved as:
 OUTPUT/{project}/formatter_output.md
 ```
 
+> ⚠️ **CRITICAL OUTPUT FORMAT**: Return your response as raw markdown content. Do NOT wrap your entire response in ` ```markdown ... ``` ` (or any other) code fences — the surrounding fences in the structure example below are documentation, not part of the output. Do NOT include a conversational preamble such as "I'll now format the transcript..." or "Here is the formatted transcript:". Your response MUST begin directly with the `# Formatted Transcript` heading.
+
 ## Formatted Transcript Structure
 
 > ⚠️ **CRITICAL**: The header fields below use `{placeholders}`. You MUST replace these with ACTUAL VALUES from the project you're processing. NEVER copy placeholder values from the analyst's output or use example values like `2WLI1234HD` or `2024-01-15`. Use the real project name from the manifest/filename you received.

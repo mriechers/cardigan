@@ -309,6 +309,29 @@ def merge_formatter_chunks(chunks: List[str]) -> str:
         # Strip provenance HTML comment from top (<!-- model: ... -->)
         chunk = re.sub(r"^<!--\s*model:.*?-->\s*\n?", "", chunk.strip())
 
+        # Strip LLM conversational preamble before any markdown content
+        # (e.g., "I'll now format the complete transcript..." that some models
+        # emit before their actual output). Anything before the first markdown
+        # structure marker (```, #, **, ---, or <!-- HTML comment) is treated
+        # as preamble and removed.
+        preamble_strip = re.sub(
+            r"\A(?:(?!^(?:```|#\s|\*\*|---|<!--))[^\n]*\n)+",
+            "",
+            chunk,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        chunk = preamble_strip.lstrip("\n")
+
+        # Strip wrapping ```markdown ... ``` code fence if the LLM wrapped its
+        # output. We only strip the OUTERMOST fence pair (opening at start,
+        # closing at end), so any legitimate fenced code within the dialogue
+        # remains intact.
+        fence_open = re.match(r"^```(?:markdown|md)?\s*\n", chunk)
+        if fence_open:
+            chunk = chunk[fence_open.end() :]
+            chunk = re.sub(r"\n```\s*\Z", "", chunk.rstrip()) + "\n"
+
         # Strip LLM-generated model/creator attribution lines (appear at end of chunk responses)
         chunk = re.sub(
             r"^\*\*(?:Model|Creator|Agent):\*\*.*\n?",

@@ -1908,12 +1908,28 @@ Please format this transcript section:
                 "cost": 0,
             }
 
-    def _load_agent_prompt(self, phase_name: str) -> str:
-        """Load the system prompt for an agent phase."""
+    def _load_agent_prompt(self, phase_name: str, model: Optional[str] = None) -> str:
+        """Load the system prompt for an agent phase.
+
+        Substitutes runtime values into known placeholders:
+        - `{TODAY'S DATE in YYYY-MM-DD format}` → current UTC date (LLM has no clock).
+        - `{model name you are running as}` / `{the model you are running as}` →
+          the model identifier, if provided. Without this, the LLM would
+          hallucinate (typically a date near its training cutoff and a generic
+          model name).
+        """
         prompt_file = AGENTS_DIR / f"{phase_name}.md"
 
         if prompt_file.exists():
-            return prompt_file.read_text()
+            text = prompt_file.read_text()
+            text = text.replace(
+                "{TODAY'S DATE in YYYY-MM-DD format}",
+                datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            )
+            if model:
+                text = text.replace("{model name you are running as}", model)
+                text = text.replace("{the model you are running as}", model)
+            return text
 
         # Fallback prompts if files don't exist
         fallback_prompts = {

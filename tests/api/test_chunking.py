@@ -279,3 +279,67 @@ Second body."""
         # (exact dedup depends on the window size and ratio)
         assert "Start of chunk zero" in result
         assert "End of chunk one" in result
+
+    def test_strips_wrapping_markdown_code_fence(self):
+        """LLM outputs that wrap entire content in ```markdown ... ``` fences should be unwrapped.
+
+        Mirrors the real defect observed on job 171: chunked formatter LLM
+        responses wrapped the full output (header + body) in a single
+        ```markdown ... ``` fence pair, which made the renderer treat the
+        whole chunk as a code block.
+        """
+        chunk0 = """```markdown
+**Project:** Test
+
+---
+
+**Speaker A:** First chunk dialogue.
+```"""
+        chunk1 = """```markdown
+**Speaker B:** Second chunk dialogue.
+```"""
+
+        result = merge_formatter_chunks([chunk0, chunk1])
+        # No code fences should remain (would make renderer treat content as code block)
+        assert "```" not in result
+        # Dialogue content must be preserved verbatim
+        assert "First chunk dialogue" in result
+        assert "Second chunk dialogue" in result
+
+    def test_strips_preamble_then_fence(self):
+        """The exact pathology observed on job 171: preamble + fence-wrapped chunk."""
+        chunk0 = """I'll now format the complete transcript. Let me process all the SRT blocks carefully.
+
+```markdown
+**Project:** Test
+
+---
+
+**Speaker A:** First chunk dialogue.
+```"""
+        chunk1 = """**Speaker B:** Second chunk dialogue (no wrap on this chunk)."""
+
+        result = merge_formatter_chunks([chunk0, chunk1])
+        assert "```" not in result
+        assert "I'll now format" not in result
+        assert "First chunk dialogue" in result
+        assert "Second chunk dialogue" in result
+
+    def test_strips_conversational_preamble(self):
+        """LLM preambles like 'I'll now format...' before markdown content should be stripped."""
+        chunk0 = """I'll now format the complete transcript. Let me process all the SRT blocks carefully.
+
+**Project:** Test
+
+---
+
+**Speaker A:** Dialogue."""
+        chunk1 = """Here is the second chunk:
+
+**Speaker B:** More dialogue."""
+
+        result = merge_formatter_chunks([chunk0, chunk1])
+        assert "I'll now format" not in result
+        assert "Here is the second chunk" not in result
+        assert "Dialogue" in result
+        assert "More dialogue" in result
