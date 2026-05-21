@@ -30,6 +30,7 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 3
+    restart: unless-stopped
 
   worker:
     build:
@@ -58,6 +59,7 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    restart: unless-stopped
 
   web:
     build:
@@ -69,6 +71,7 @@ services:
       - CARDIGAN_API_KEY=${CARDIGAN_API_KEY:-}
     depends_on:
       - api
+    restart: unless-stopped
 
   mcp:
     # Shares the api image — same content, different command. Mirrors prod
