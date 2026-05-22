@@ -64,7 +64,41 @@ export default function Help() {
   }
 
   return (
-    <div className="flex gap-8">
+    <div className="lg:flex lg:gap-8">
+      {/* Mobile TOC — collapsible, shown below lg: */}
+      <details className="lg:hidden mb-6">
+        <summary className="flex items-center justify-between px-4 py-3 bg-surface-800 rounded-lg border border-surface-700 cursor-pointer text-sm font-display font-semibold text-surface-300 select-none">
+          <span>Contents</span>
+          <svg className="w-4 h-4 text-surface-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </summary>
+        <nav className="mt-2 px-4 py-3 bg-surface-800 rounded-lg border border-surface-700" aria-label="Table of contents">
+          <ul className="space-y-1">
+            {toc.filter(e => e.level <= 2).map((entry) => (
+              <li key={entry.id}>
+                <button
+                  onClick={() => {
+                    scrollTo(entry.id)
+                    const details = document.querySelector('details.lg\\:hidden') as HTMLDetailsElement
+                    if (details) details.open = false
+                  }}
+                  className={`block w-full text-left text-sm px-2 py-1 rounded transition-colors ${
+                    entry.level === 2 ? 'pl-4' : ''
+                  } ${
+                    activeSection === entry.id
+                      ? 'text-pbs-400 bg-surface-700'
+                      : 'text-surface-400 hover:text-surface-200 hover:bg-surface-800/50'
+                  }`}
+                >
+                  {entry.text}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      </details>
+
       {/* Table of Contents Sidebar */}
       <nav
         className="hidden lg:block w-56 flex-shrink-0 sticky top-20 self-start max-h-[calc(100vh-6rem)] overflow-y-auto"
@@ -95,8 +129,8 @@ export default function Help() {
 
       {/* Main Content */}
       <article className="flex-1 min-w-0">
-        <div className="bg-surface-800 rounded-lg border border-surface-700 p-8">
-          <div className="prose prose-invert prose-gray max-w-none
+        <div className="bg-surface-800 rounded-lg border border-surface-700 p-4 sm:p-6 lg:p-8">
+          <div className="prose prose-invert max-w-none
             prose-headings:scroll-mt-20
             prose-h1:text-2xl prose-h1:font-bold prose-h1:text-white prose-h1:border-b prose-h1:border-surface-700 prose-h1:pb-3 prose-h1:mb-6
             prose-h2:text-xl prose-h2:font-semibold prose-h2:text-white prose-h2:mt-10 prose-h2:mb-4

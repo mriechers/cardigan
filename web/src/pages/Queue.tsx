@@ -282,7 +282,7 @@ export default function Queue() {
         </div>
 
         {/* Upload, Clear Button and Search */}
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-3">
           {/* Upload Button */}
           <button
             onClick={() => setShowUploader(!showUploader)}
@@ -310,7 +310,7 @@ export default function Queue() {
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Search by filename..."
-              className="bg-surface-800 border border-surface-700 rounded-lg px-4 py-2 text-white placeholder-surface-400 focus:outline-none focus:border-pbs-500 w-64 pr-8"
+              className="bg-surface-800 border border-surface-700 rounded-lg px-4 py-2 text-white placeholder-surface-400 focus:outline-none focus:border-pbs-500 w-full sm:w-64 pr-8"
               aria-describedby="queue-search-desc"
             />
             {searchInput && (
