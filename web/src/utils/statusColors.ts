@@ -25,21 +25,22 @@ export type JobStatus =
 export function getStatusTextColor(status: string): string {
   switch (status) {
     case 'pending':
-      return 'text-yellow-400'
+      return 'text-status-pending'
     case 'in_progress':
-      return 'text-blue-400'
+      return 'text-status-processing'
     case 'completed':
-      return 'text-green-400'
+      return 'text-status-completed'
     case 'failed':
-      return 'text-red-400'
+      return 'text-status-failed'
     case 'investigating':
-      return 'text-orange-400'
+      // teal-400 — distinct from pbs-blue (in_progress/processing) and amber (pending/paused)
+      return 'text-teal-400'
     case 'paused':
-      return 'text-orange-400'
+      return 'text-status-paused'
     case 'cancelled':
-      return 'text-gray-400'
+      return 'text-status-cancelled'
     default:
-      return 'text-gray-400'
+      return 'text-surface-400'
   }
 }
 
@@ -55,20 +56,21 @@ export function getStatusTextColor(status: string): string {
 export function getStatusBadgeColor(status: string): string {
   switch (status) {
     case 'pending':
-      return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+      return 'bg-status-pending/15 text-status-pending border-status-pending/30'
     case 'in_progress':
-      return 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+      return 'bg-status-processing/15 text-status-processing border-status-processing/30'
     case 'completed':
-      return 'bg-green-500/20 text-green-400 border-green-500/30'
+      return 'bg-status-completed/15 text-status-completed border-status-completed/30'
     case 'failed':
-      return 'bg-red-500/20 text-red-400 border-red-500/30'
+      return 'bg-status-failed/15 text-status-failed border-status-failed/30'
     case 'investigating':
-      return 'bg-purple-500/20 text-purple-400 border-purple-500/30'
+      // teal-400 (#2dd4bf) — visually distinct from pbs-blue in_progress/processing and amber pending/paused
+      return 'bg-teal-500/15 text-teal-400 border-teal-500/30'
     case 'paused':
-      return 'bg-orange-500/20 text-orange-400 border-orange-500/30'
+      return 'bg-status-paused/15 text-status-paused border-status-paused/30'
     case 'cancelled':
-      return 'bg-gray-500/20 text-gray-400 border-gray-500/30'
+      return 'bg-status-cancelled/15 text-status-cancelled border-status-cancelled/30'
     default:
-      return 'bg-gray-500/20 text-gray-400 border-gray-500/30'
+      return 'bg-surface-500/15 text-surface-400 border-surface-500/30'
   }
 }

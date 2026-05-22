@@ -368,13 +368,13 @@ export default function Settings() {
 
       {/* Status Messages */}
       {error && (
-        <div role="alert" aria-live="assertive" className="bg-red-900/20 border border-red-500/30 rounded-lg p-4">
-          <p className="text-red-400">{error}</p>
+        <div role="alert" aria-live="assertive" className="bg-status-failed/15 border border-status-failed/30 rounded-lg p-4">
+          <p className="text-status-failed">{error}</p>
         </div>
       )}
       {success && (
-        <div role="status" aria-live="polite" className="bg-green-900/20 border border-green-500/30 rounded-lg p-4">
-          <p className="text-green-400">{success}</p>
+        <div role="status" aria-live="polite" className="bg-status-completed/15 border border-status-completed/30 rounded-lg p-4">
+          <p className="text-status-completed">{success}</p>
         </div>
       )}
 
@@ -633,8 +633,8 @@ export default function Settings() {
                       <div className="font-medium text-white">Last Scan</div>
                       <span className={`px-2 py-1 rounded text-xs font-medium ${
                         getCurrentIngest().last_scan_success
-                          ? 'bg-green-900/20 text-green-400'
-                          : 'bg-red-900/20 text-red-400'
+                          ? 'bg-status-completed/15 text-status-completed'
+                          : 'bg-status-failed/15 text-status-failed'
                       }`}>
                         {getCurrentIngest().last_scan_success ? 'Success' : 'Failed'}
                       </span>
@@ -720,7 +720,7 @@ export default function Settings() {
                 <div className="p-4 bg-surface-900 rounded-lg">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
-                      <div className="w-3 h-3 rounded-full bg-green-400" />
+                      <div className="w-3 h-3 rounded-full bg-status-completed" />
                       <div>
                         <div className="font-medium text-white">API Server</div>
                         <div className="text-sm text-surface-400">
@@ -738,7 +738,7 @@ export default function Settings() {
                 <div className="p-4 bg-surface-900 rounded-lg">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
-                      <div className={`w-3 h-3 rounded-full ${systemStatus?.worker.running ? 'bg-green-400' : 'bg-yellow-400'}`} />
+                      <div className={`w-3 h-3 rounded-full ${systemStatus?.worker.running ? 'bg-status-completed' : 'bg-status-pending'}`} />
                       <div>
                         <div className="font-medium text-white">Worker</div>
                         <div className="text-sm text-surface-400">
@@ -758,7 +758,7 @@ export default function Settings() {
                 <div className="p-4 bg-surface-900 rounded-lg">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
-                      <div className={`w-3 h-3 rounded-full ${systemStatus?.watcher.running ? 'bg-green-400' : 'bg-yellow-400'}`} />
+                      <div className={`w-3 h-3 rounded-full ${systemStatus?.watcher.running ? 'bg-status-completed' : 'bg-status-pending'}`} />
                       <div>
                         <div className="font-medium text-white">Transcript Watcher</div>
                         <div className="text-sm text-surface-400">

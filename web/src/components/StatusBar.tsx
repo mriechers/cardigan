@@ -49,10 +49,10 @@ export default function StatusBar() {
         >
           <div
             className={`w-1.5 h-1.5 rounded-full ${
-              error ? 'bg-red-500 animate-pulse' : 'bg-green-500'
+              error ? 'bg-status-failed animate-pulse' : 'bg-status-completed'
             }`}
           />
-          <span className={error ? 'text-red-400' : 'text-surface-300'}>
+          <span className={error ? 'text-status-failed' : 'text-surface-300'}>
             {error ? 'Offline' : 'Connected'}
           </span>
         </Link>
@@ -64,10 +64,10 @@ export default function StatusBar() {
             className="flex items-center space-x-1.5 text-surface-400 hover:bg-surface-800 px-2 py-1 rounded transition-colors"
             title={`${health.queue.pending} pending, ${health.queue.in_progress} processing`}
           >
-            <span className="text-yellow-400 font-medium">{queueTotal}</span>
+            <span className="text-status-pending font-medium">{queueTotal}</span>
             <span>in queue</span>
             {health.queue.in_progress > 0 && (
-              <span className="text-pbs-400 animate-pulse">●</span>
+              <span className="text-status-processing animate-pulse">●</span>
             )}
           </Link>
         )}
