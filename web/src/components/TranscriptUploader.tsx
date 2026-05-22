@@ -197,9 +197,9 @@ export default function TranscriptUploader({ onUploadComplete }: TranscriptUploa
       return <span className="text-pbs-400 animate-spin">⟳</span>
     }
     if (status.success) {
-      return <span className="text-green-400">✓</span>
+      return <span className="text-status-completed">✓</span>
     }
-    return <span className="text-red-400">✗</span>
+    return <span className="text-status-failed">✗</span>
   }
 
   return (
@@ -283,14 +283,14 @@ export default function TranscriptUploader({ onUploadComplete }: TranscriptUploa
                       </a>
                     )}
                     {status?.error && (
-                      <span className="text-red-400 text-xs max-w-xs truncate" title={status.error}>
+                      <span className="text-status-failed text-xs max-w-xs truncate" title={status.error}>
                         {status.error}
                       </span>
                     )}
                     {!isUploading && !status && (
                       <button
                         onClick={() => removeFile(idx)}
-                        className="text-surface-400 hover:text-red-400 transition-colors"
+                        className="text-surface-400 hover:text-status-failed transition-colors"
                         aria-label="Remove file"
                       >
                         ✕
@@ -309,7 +309,7 @@ export default function TranscriptUploader({ onUploadComplete }: TranscriptUploa
         <>
           {estimatedCost !== null && (
             <p className="text-sm text-surface-400 text-center">
-              Estimated cost: <span className="text-green-400 font-mono">~${estimatedCost.toFixed(2)}</span>
+              Estimated cost: <span className="text-status-completed font-mono">~${estimatedCost.toFixed(2)}</span>
               <span className="text-surface-500 ml-1">(based on file size)</span>
             </p>
           )}
@@ -320,7 +320,7 @@ export default function TranscriptUploader({ onUploadComplete }: TranscriptUploa
               w-full py-2 px-4 rounded-lg font-medium transition-colors
               ${isUploading
                 ? 'bg-surface-700 text-surface-400 cursor-not-allowed'
-                : 'bg-green-600 hover:bg-green-500 text-white'
+                : 'bg-pbs-500 hover:bg-pbs-400 text-white'
               }
             `}
           >

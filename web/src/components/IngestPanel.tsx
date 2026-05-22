@@ -229,8 +229,8 @@ export default function IngestPanel() {
 
       {/* Error Message */}
       {error && (
-        <div role="alert" aria-live="assertive" className="bg-red-900/20 border border-red-500/30 rounded-lg p-4">
-          <p className="text-red-400">{error}</p>
+        <div role="alert" aria-live="assertive" className="bg-status-failed/15 border border-status-failed/30 rounded-lg p-4">
+          <p className="text-status-failed">{error}</p>
         </div>
       )}
 
@@ -243,7 +243,7 @@ export default function IngestPanel() {
             </span>
             <button
               onClick={handleQueueSelected}
-              className="px-3 py-1.5 text-sm bg-green-600 hover:bg-green-500 text-white rounded-md transition-colors"
+              className="px-3 py-1.5 text-sm bg-pbs-500 hover:bg-pbs-400 text-white rounded-md transition-colors"
               aria-label={`Queue ${selectedFileIds.size} selected files`}
             >
               Queue Selected
@@ -318,7 +318,7 @@ export default function IngestPanel() {
                   )}
 
                   {!file.sst_record && file.media_id && (
-                    <div className="text-xs text-yellow-500 mt-0.5">
+                    <div className="text-xs text-status-pending mt-0.5">
                       No SST record found
                     </div>
                   )}
@@ -328,7 +328,7 @@ export default function IngestPanel() {
               <div className="flex items-center space-x-2 ml-4">
                 <button
                   onClick={() => handleQueueFile(file.id)}
-                  className="px-3 py-1 text-sm bg-green-600 hover:bg-green-500 text-white rounded transition-colors"
+                  className="px-3 py-1 text-sm bg-pbs-500 hover:bg-pbs-400 text-white rounded transition-colors"
                   aria-label={`Queue ${file.media_id || file.filename} for processing`}
                 >
                   Queue
