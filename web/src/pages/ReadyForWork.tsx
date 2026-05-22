@@ -301,8 +301,8 @@ export default function ReadyForWork() {
 
       {/* Error Message */}
       {error && (
-        <div role="alert" className="bg-red-900/20 border border-red-500/30 rounded-lg p-4">
-          <p className="text-red-400">{error}</p>
+        <div role="alert" className="bg-status-failed/15 border border-status-failed/30 rounded-lg p-4">
+          <p className="text-status-failed">{error}</p>
         </div>
       )}
 

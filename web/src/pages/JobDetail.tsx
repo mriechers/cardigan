@@ -704,7 +704,7 @@ export default function JobDetail() {
                       href={sstMetadata.media_manager_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-green-400 hover:text-green-300 text-sm inline-flex items-center"
+                      className="text-pbs-400 hover:text-pbs-300 text-sm inline-flex items-center"
                     >
                       View
                       <svg className="ml-1 w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -777,8 +777,8 @@ export default function JobDetail() {
                     {job.validation_result?.phase_results?.[phase.name] && (
                       <span className={`ml-2 px-2 py-0.5 rounded text-xs font-medium ${
                         job.validation_result.phase_results[phase.name].status === 'pass'
-                          ? 'bg-green-900/30 text-green-400'
-                          : 'bg-red-900/30 text-red-400'
+                          ? 'bg-status-completed/20 text-status-completed'
+                          : 'bg-status-failed/20 text-status-failed'
                       }`}>
                         {job.validation_result.phase_results[phase.name].status === 'pass' ? '\u2713 Pass' : '\u2717 Fail'}
                       </span>
@@ -789,13 +789,13 @@ export default function JobDetail() {
                       </span>
                     )}
                     {phase.attempts && phase.attempts > 1 && (
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-orange-900/50 text-orange-300">
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-status-paused/15 text-status-paused">
                         {phase.attempts} attempts
                       </span>
                     )}
                     {phase.retry_count > 0 && (
                       <span
-                        className="text-xs px-2 py-0.5 rounded-full bg-amber-900/50 text-amber-300"
+                        className="text-xs px-2 py-0.5 rounded-full bg-status-pending/15 text-status-pending"
                         title={`Retried ${phase.retry_count} time${phase.retry_count > 1 ? 's' : ''}`}
                       >
                         &#8635; {phase.retry_count}
@@ -887,7 +887,7 @@ export default function JobDetail() {
                   <button
                     onClick={() => openRetryModal(key, label)}
                     disabled={isRetrying || retryingPhase !== null}
-                    className={`px-2 py-2 bg-surface-600 hover:bg-orange-600 ${driveConfigured ? '' : 'rounded-r-md'} text-sm text-surface-300 hover:text-white transition-colors disabled:opacity-50`}
+                    className={`px-2 py-2 bg-surface-600 hover:bg-pbs-400 ${driveConfigured ? '' : 'rounded-r-md'} text-sm text-surface-300 hover:text-white transition-colors disabled:opacity-50`}
                     aria-label={`Retry ${label}`}
                     title={`Retry this phase`}
                   >

@@ -493,7 +493,7 @@ export default function Settings() {
                       <label htmlFor="concurrent-jobs" className="font-medium text-white">Concurrent Jobs</label>
                       <div className="text-sm text-surface-400">Process multiple jobs simultaneously</div>
                     </div>
-                    <span className="text-2xl font-bold text-cyan-400">{getCurrentWorker().max_concurrent_jobs}</span>
+                    <span className="text-2xl font-bold text-pbs-300">{getCurrentWorker().max_concurrent_jobs}</span>
                   </div>
                   <input
                     id="concurrent-jobs"
@@ -621,7 +621,7 @@ export default function Settings() {
                     <div className="font-medium text-white">Server URL</div>
                     <div className="text-sm text-surface-400">Remote file server location</div>
                   </div>
-                  <code className="block p-2 bg-surface-800 rounded text-cyan-400 text-sm">
+                  <code className="block p-2 bg-surface-800 rounded text-pbs-300 text-sm">
                     {getCurrentIngest().server_url || 'Not configured'}
                   </code>
                 </div>
@@ -678,7 +678,11 @@ export default function Settings() {
             {/* Screengrab Info */}
             <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
               <div className="flex items-start space-x-3">
-                <span className="text-purple-400 text-xl">🖼️</span>
+                <div className="flex-shrink-0 w-10 h-10 bg-pbs-500/20 rounded-full flex items-center justify-center">
+                  <svg className="w-5 h-5 text-pbs-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                </div>
                 <div>
                   <h3 className="text-sm font-medium text-white">Screengrab Attachments</h3>
                   <p className="text-xs text-surface-400 mt-1">
@@ -785,19 +789,19 @@ export default function Settings() {
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between p-3 bg-surface-900 rounded">
                   <span className="text-surface-400">Transcripts (input)</span>
-                  <code className="text-cyan-400">/data/transcripts</code>
+                  <code className="text-pbs-300">/data/transcripts</code>
                 </div>
                 <div className="flex justify-between p-3 bg-surface-900 rounded">
                   <span className="text-surface-400">Output (processed)</span>
-                  <code className="text-cyan-400">/data/output</code>
+                  <code className="text-pbs-300">/data/output</code>
                 </div>
                 <div className="flex justify-between p-3 bg-surface-900 rounded">
                   <span className="text-surface-400">Database</span>
-                  <code className="text-cyan-400">/data/db/dashboard.db</code>
+                  <code className="text-pbs-300">/data/db/dashboard.db</code>
                 </div>
                 <div className="flex justify-between p-3 bg-surface-900 rounded">
                   <span className="text-surface-400">Uploads</span>
-                  <code className="text-cyan-400">/data/uploads</code>
+                  <code className="text-pbs-300">/data/uploads</code>
                 </div>
               </div>
             </div>

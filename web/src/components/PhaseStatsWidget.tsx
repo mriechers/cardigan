@@ -78,17 +78,17 @@ export default function PhaseStatsWidget({ className = '' }: PhaseStatsWidgetPro
   }, [days])
 
   const getSuccessColor = (rate: number) => {
-    if (rate >= 99) return 'text-green-400'
-    if (rate >= 95) return 'text-yellow-400'
-    if (rate >= 90) return 'text-orange-400'
-    return 'text-red-400'
+    if (rate >= 99) return 'text-status-completed'
+    if (rate >= 95) return 'text-status-pending'
+    if (rate >= 90) return 'text-status-paused'
+    return 'text-status-failed'
   }
 
   const getBarColor = (rate: number) => {
-    if (rate >= 99) return 'bg-green-500'
-    if (rate >= 95) return 'bg-yellow-500'
-    if (rate >= 90) return 'bg-orange-500'
-    return 'bg-red-500'
+    if (rate >= 99) return 'bg-status-completed'
+    if (rate >= 95) return 'bg-status-pending'
+    if (rate >= 90) return 'bg-status-paused'
+    return 'bg-status-failed'
   }
 
   const formatCost = (cost: number) => {
@@ -147,7 +147,7 @@ export default function PhaseStatsWidget({ className = '' }: PhaseStatsWidgetPro
       {/* Error state */}
       {error && !loading && (
         <div className="text-center py-4">
-          <p className="text-red-400 text-sm">{error}</p>
+          <p className="text-status-failed text-sm">{error}</p>
           <button
             onClick={fetchStats}
             className="mt-2 text-xs text-pbs-400 hover:text-pbs-300"
@@ -168,7 +168,7 @@ export default function PhaseStatsWidget({ className = '' }: PhaseStatsWidgetPro
                 {stats.total_completions.toLocaleString()} jobs
               </span>
               {stats.total_failures > 0 && (
-                <span className="text-red-400 text-xs ml-2">
+                <span className="text-status-failed text-xs ml-2">
                   ({stats.total_failures} failed)
                 </span>
               )}
@@ -270,8 +270,8 @@ export default function PhaseStatsWidget({ className = '' }: PhaseStatsWidgetPro
 
                         {/* Insights for problematic phases */}
                         {phase.success_rate < 95 && (
-                          <div className="mt-3 p-2 bg-yellow-900/20 border border-yellow-500/30 rounded text-xs">
-                            <p className="text-yellow-400">
+                          <div className="mt-3 p-2 bg-status-pending/20 border border-status-pending/30 rounded text-xs">
+                            <p className="text-status-pending">
                               Low success rate — consider using a more capable base model
                             </p>
                           </div>

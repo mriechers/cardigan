@@ -85,14 +85,14 @@ export default function ModelStatsWidget({ className = '' }: ModelStatsWidgetPro
     const lowerName = name.toLowerCase()
     // Premium models
     if (lowerName.includes('opus') || lowerName.includes('gpt-4') || lowerName.includes('pro')) {
-      return 'bg-purple-500'
+      return 'bg-pbs-300'
     }
     // Free tier
     if (lowerName.includes('free') || lowerName.includes(':free')) {
-      return 'bg-green-500'
+      return 'bg-pbs-500'
     }
     // Default/balanced
-    return 'bg-cyan-500'
+    return 'bg-pbs-500'
   }
 
   return (
@@ -140,7 +140,7 @@ export default function ModelStatsWidget({ className = '' }: ModelStatsWidgetPro
       {/* Error state */}
       {error && !loading && (
         <div className="text-center py-4">
-          <p className="text-red-400 text-sm">{error}</p>
+          <p className="text-status-failed text-sm">{error}</p>
           <button
             onClick={fetchStats}
             className="mt-2 text-xs text-pbs-400 hover:text-pbs-300"
@@ -153,7 +153,7 @@ export default function ModelStatsWidget({ className = '' }: ModelStatsWidgetPro
       {/* Langfuse not available */}
       {stats && !stats.available && (
         <div className="text-center py-4">
-          <p className="text-yellow-400 text-sm">Langfuse not configured</p>
+          <p className="text-status-pending text-sm">Langfuse not configured</p>
           <p className="text-xs text-surface-400 mt-1">{stats.error}</p>
         </div>
       )}
