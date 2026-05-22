@@ -19,7 +19,7 @@ export default {
           100: '#dfe1e9',
           200: '#c0c4d1',
           300: '#9da2b5',
-          400: '#7a8098',
+          400: '#9da2b5',  // bumped for WCAG AA (was #7a8098, 3.35:1 — failed)
           500: '#5c6380',
           600: '#464d68',
           700: '#343a52',
@@ -50,7 +50,7 @@ export default {
           completed:  '#34a86c',  // warm green
           failed:     '#d64545',  // warm red
           paused:     '#d68a45',  // warm orange
-          cancelled:  '#7a8098',  // neutral-400
+          cancelled:  '#9da2b5',  // bumped for WCAG AA (aligned with surface-400)
         },
       },
       fontFamily: {
