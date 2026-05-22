@@ -245,20 +245,20 @@ export default function ReadyForWork() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Ready for Work</h1>
-          <p className="text-gray-400 mt-1">
+          <p className="text-surface-400 mt-1">
             Transcripts from the ingest server ready for processing
           </p>
         </div>
         <div className="flex items-center space-x-3">
           {lastScanAt && (
-            <span className="text-sm text-gray-400" title={new Date(lastScanAt + 'Z').toLocaleString()}>
+            <span className="text-sm text-surface-400" title={new Date(lastScanAt + 'Z').toLocaleString()}>
               Last scan: {formatRelativeTime(lastScanAt + 'Z')}
             </span>
           )}
           <button
             onClick={handleScan}
             disabled={scanning}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg transition-colors font-medium"
+            className="px-4 py-2 bg-pbs-500 hover:bg-pbs-400 disabled:opacity-50 text-white rounded-lg transition-colors font-medium"
           >
             {scanning ? 'Checking...' : 'Check for New Files'}
           </button>
@@ -275,7 +275,7 @@ export default function ReadyForWork() {
             placeholder="Search by filename or Media ID..."
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500"
+            className="w-full px-4 py-2 bg-surface-800 border border-surface-700 rounded-lg text-white placeholder-surface-400 focus:outline-none focus:border-pbs-500"
           />
         </div>
         <label htmlFor="days" className="sr-only">Date Range</label>
@@ -283,7 +283,7 @@ export default function ReadyForWork() {
           id="days"
           value={days}
           onChange={(e) => updateFilters(search, parseInt(e.target.value, 10))}
-          className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
+          className="px-3 py-2 bg-surface-800 border border-surface-700 rounded-lg text-white text-sm focus:outline-none focus:border-pbs-500"
         >
           {DATE_RANGE_OPTIONS.map(opt => (
             <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -292,7 +292,7 @@ export default function ReadyForWork() {
         {hasActiveFilters && (
           <button
             onClick={clearFilters}
-            className="text-sm text-gray-400 hover:text-white transition-colors"
+            className="text-sm text-surface-400 hover:text-white transition-colors"
           >
             Clear
           </button>
@@ -308,15 +308,15 @@ export default function ReadyForWork() {
 
       {/* Bulk Actions */}
       {selectedFileIds.size > 0 && (
-        <div className="bg-blue-900/20 border border-blue-500/30 rounded-lg p-4">
+        <div className="bg-pbs-900/20 border border-pbs-500/30 rounded-lg p-4">
           <div className="flex items-center justify-between">
-            <span className="text-blue-400">
+            <span className="text-pbs-400">
               {selectedFileIds.size} file{selectedFileIds.size !== 1 ? 's' : ''} selected
             </span>
             <div className="flex items-center space-x-3">
               <button
                 onClick={() => setSelectedFileIds(new Set())}
-                className="px-3 py-1.5 text-sm text-gray-400 hover:text-white transition-colors"
+                className="px-3 py-1.5 text-sm text-surface-400 hover:text-white transition-colors"
               >
                 Clear selection
               </button>
@@ -332,9 +332,9 @@ export default function ReadyForWork() {
       )}
 
       {/* Results Card */}
-      <div className="bg-gray-800 rounded-lg border border-gray-700">
+      <div className="bg-surface-800 rounded-lg border border-surface-700">
         {/* Results Header */}
-        <div className="px-6 py-4 border-b border-gray-700">
+        <div className="px-6 py-4 border-b border-surface-700">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-white">
               {loading ? 'Loading...' : `${files.length} transcript${files.length !== 1 ? 's' : ''}`}
@@ -345,24 +345,24 @@ export default function ReadyForWork() {
                   type="checkbox"
                   checked={selectedFileIds.size === files.length && files.length > 0}
                   onChange={toggleSelectAll}
-                  className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500"
+                  className="w-4 h-4 rounded border-surface-600 bg-surface-700 text-pbs-500 focus:ring-pbs-400"
                 />
-                <span className="text-sm text-gray-400">Select all</span>
+                <span className="text-sm text-surface-400">Select all</span>
               </label>
             )}
           </div>
         </div>
 
         {/* File List */}
-        <div className="divide-y divide-gray-700">
+        <div className="divide-y divide-surface-700">
           {loading ? (
             <div className="py-12 text-center">
-              <p className="text-gray-400 animate-pulse">Loading available files...</p>
+              <p className="text-surface-400 animate-pulse">Loading available files...</p>
             </div>
           ) : files.length === 0 ? (
             <div className="py-12 text-center">
-              <p className="text-gray-400">No transcript files match your filters</p>
-              <p className="text-sm text-gray-500 mt-1">
+              <p className="text-surface-400">No transcript files match your filters</p>
+              <p className="text-sm text-surface-400 mt-1">
                 {hasActiveFilters
                   ? 'Try adjusting your search or date range'
                   : 'Click "Check for New Files" to scan for new transcripts'}
@@ -372,14 +372,14 @@ export default function ReadyForWork() {
             files.map((file) => (
               <div
                 key={file.id}
-                className="flex items-center justify-between px-6 py-4 hover:bg-gray-750 transition-colors"
+                className="flex items-center justify-between px-6 py-4 hover:bg-surface-800 transition-colors"
               >
                 <div className="flex items-center space-x-4 flex-1 min-w-0">
                   <input
                     type="checkbox"
                     checked={selectedFileIds.has(file.id)}
                     onChange={() => toggleFileSelection(file.id)}
-                    className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500"
+                    className="w-4 h-4 rounded border-surface-600 bg-surface-700 text-pbs-500 focus:ring-pbs-400"
                   />
 
                   <div className="flex-1 min-w-0">
@@ -387,14 +387,14 @@ export default function ReadyForWork() {
                       {file.media_id ? (
                         <span className="font-medium text-white font-mono">{file.media_id}</span>
                       ) : (
-                        <span className="font-medium text-gray-300 truncate">{file.filename}</span>
+                        <span className="font-medium text-surface-300 truncate">{file.filename}</span>
                       )}
                     </div>
-                    <div className="text-sm text-gray-400 mt-0.5">
+                    <div className="text-sm text-surface-400 mt-0.5">
                       {formatTimestamp(
                         file.remote_modified_at || file.first_seen_at
                       )}
-                      <span className="text-gray-500 ml-2">
+                      <span className="text-surface-400 ml-2">
                         ({formatRelativeTime(
                           file.remote_modified_at || file.first_seen_at
                         )})
@@ -412,7 +412,7 @@ export default function ReadyForWork() {
                   </button>
                   <button
                     onClick={() => handleIgnoreFile(file.id)}
-                    className="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-md transition-colors"
+                    className="px-3 py-1.5 text-sm bg-surface-700 hover:bg-surface-600 text-surface-300 rounded-md transition-colors"
                   >
                     Ignore
                   </button>

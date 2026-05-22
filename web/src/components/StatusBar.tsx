@@ -37,12 +37,12 @@ export default function StatusBar() {
     : 0
 
   return (
-    <div className="bg-gray-950 border-b border-gray-800 px-4 py-1.5">
+    <div className="bg-surface-950 border-b border-surface-800 px-4 py-1.5">
       <div className="max-w-7xl mx-auto flex items-center justify-between text-xs">
         {/* Left: Connection Status */}
         <Link
           to="/settings"
-          className="flex items-center space-x-2 hover:bg-gray-800 px-2 py-1 rounded transition-colors"
+          className="flex items-center space-x-2 hover:bg-surface-800 px-2 py-1 rounded transition-colors"
           title="View system settings"
           role="status"
           aria-live="polite"
@@ -52,7 +52,7 @@ export default function StatusBar() {
               error ? 'bg-red-500 animate-pulse' : 'bg-green-500'
             }`}
           />
-          <span className={error ? 'text-red-400' : 'text-gray-400'}>
+          <span className={error ? 'text-red-400' : 'text-surface-300'}>
             {error ? 'Offline' : 'Connected'}
           </span>
         </Link>
@@ -61,13 +61,13 @@ export default function StatusBar() {
         {health?.queue && queueTotal > 0 && (
           <Link
             to="/queue"
-            className="flex items-center space-x-1.5 text-gray-400 hover:bg-gray-800 px-2 py-1 rounded transition-colors"
+            className="flex items-center space-x-1.5 text-surface-400 hover:bg-surface-800 px-2 py-1 rounded transition-colors"
             title={`${health.queue.pending} pending, ${health.queue.in_progress} processing`}
           >
             <span className="text-yellow-400 font-medium">{queueTotal}</span>
             <span>in queue</span>
             {health.queue.in_progress > 0 && (
-              <span className="text-blue-400 animate-pulse">●</span>
+              <span className="text-pbs-400 animate-pulse">●</span>
             )}
           </Link>
         )}

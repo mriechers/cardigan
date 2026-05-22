@@ -469,13 +469,13 @@ export default function JobDetail() {
       case 'completed':
         return <span className="text-green-400">&#10003;</span>
       case 'in_progress':
-        return <span className="text-blue-400 animate-pulse">&#9679;</span>
+        return <span className="text-pbs-400 animate-pulse">&#9679;</span>
       case 'failed':
         return <span className="text-red-400">&#10007;</span>
       case 'skipped':
-        return <span className="text-gray-400">&#8212;</span>
+        return <span className="text-surface-400">&#8212;</span>
       default:
-        return <span className="text-gray-400">&#9675;</span>
+        return <span className="text-surface-400">&#9675;</span>
     }
   }
 
@@ -484,7 +484,7 @@ export default function JobDetail() {
       <div className="space-y-6" aria-label="Loading job details" role="status">
         <Skeleton className="h-8 w-64" />
         <Skeleton className="h-5 w-96" />
-        <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
+        <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
           <Skeleton className="h-6 w-48 mb-4" />
           <div className="space-y-3">
             {[1, 2, 3].map((i) => (
@@ -505,7 +505,7 @@ export default function JobDetail() {
         <div role="alert" aria-live="assertive" className="text-red-400 mb-4">{error || 'Job not found'}</div>
         <button
           onClick={() => navigate(-1)}
-          className="text-blue-400 hover:text-blue-300"
+          className="text-pbs-400 hover:text-pbs-300"
         >
           Go back
         </button>
@@ -520,7 +520,7 @@ export default function JobDetail() {
         <div>
           <button
             onClick={() => navigate(-1)}
-            className="text-sm text-gray-400 hover:text-white mb-2 inline-block transition-colors"
+            className="text-sm text-surface-400 hover:text-white mb-2 inline-block transition-colors"
             aria-label="Go back to previous page"
           >
             &#8592; Back
@@ -549,10 +549,10 @@ export default function JobDetail() {
               </span>
             )}
           </div>
-          <p className="text-gray-400">
+          <p className="text-surface-400">
             Job #{job.id}
             {job.current_phase && job.status === 'in_progress' && (
-              <span className="ml-2 text-blue-400 animate-pulse">
+              <span className="ml-2 text-pbs-400 animate-pulse">
                 • Processing {job.current_phase}...
               </span>
             )}
@@ -572,7 +572,7 @@ export default function JobDetail() {
           {job.status === 'paused' && !job.error_message?.includes('TRUNCATION') && (
             <button
               onClick={() => handleAction('resume')}
-              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-sm"
+              className="px-3 py-1.5 bg-pbs-500 hover:bg-pbs-400 text-white rounded-md text-sm"
             >
               Resume
             </button>
@@ -610,7 +610,7 @@ export default function JobDetail() {
 
       {/* AirTable Metadata Panel */}
       {(job.airtable_url || job.media_id || sstMetadata) && (
-        <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
+        <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-medium text-white">AirTable Metadata</h2>
             {job.airtable_url && (
@@ -618,7 +618,7 @@ export default function JobDetail() {
                 href={job.airtable_url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center text-sm text-blue-400 hover:text-blue-300 transition-colors"
+                className="inline-flex items-center text-sm text-pbs-400 hover:text-pbs-300 transition-colors"
               >
                 <span>Open in AirTable</span>
                 <svg
@@ -639,13 +639,13 @@ export default function JobDetail() {
           </div>
 
           {sstLoading ? (
-            <div className="text-gray-400 text-sm">Loading metadata...</div>
+            <div className="text-surface-400 text-sm">Loading metadata...</div>
           ) : (
             <div className="space-y-4">
               {/* Release Title */}
               {sstMetadata?.release_title && (
                 <div>
-                  <div className="text-xs text-gray-400 uppercase tracking-wide mb-1">
+                  <div className="text-xs text-surface-400 uppercase tracking-wide mb-1">
                     Release Title
                   </div>
                   <div className="text-white">{sstMetadata.release_title}</div>
@@ -655,9 +655,9 @@ export default function JobDetail() {
               {/* Short Description */}
               {sstMetadata?.short_description && (
                 <div>
-                  <div className="text-xs text-gray-400 uppercase tracking-wide mb-1">
+                  <div className="text-xs text-surface-400 uppercase tracking-wide mb-1">
                     Short Description
-                    <span className="ml-2 text-gray-500">
+                    <span className="ml-2 text-surface-400">
                       ({sstMetadata.short_description.length}/90 chars)
                     </span>
                   </div>
@@ -666,10 +666,10 @@ export default function JobDetail() {
               )}
 
               {/* Media ID & Links Row */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-2 border-t border-gray-700">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-2 border-t border-surface-700">
                 {job.media_id && (
                   <div>
-                    <div className="text-xs text-gray-400 uppercase tracking-wide mb-1">
+                    <div className="text-xs text-surface-400 uppercase tracking-wide mb-1">
                       Media ID
                     </div>
                     <div className="text-white font-mono text-sm">{job.media_id}</div>
@@ -678,7 +678,7 @@ export default function JobDetail() {
 
                 {sstMetadata?.youtube_url && (
                   <div>
-                    <div className="text-xs text-gray-400 uppercase tracking-wide mb-1">
+                    <div className="text-xs text-surface-400 uppercase tracking-wide mb-1">
                       YouTube
                     </div>
                     <a
@@ -697,7 +697,7 @@ export default function JobDetail() {
 
                 {sstMetadata?.media_manager_url && (
                   <div>
-                    <div className="text-xs text-gray-400 uppercase tracking-wide mb-1">
+                    <div className="text-xs text-surface-400 uppercase tracking-wide mb-1">
                       Website
                     </div>
                     <a
@@ -716,10 +716,10 @@ export default function JobDetail() {
 
                 {job.airtable_record_id && (
                   <div>
-                    <div className="text-xs text-gray-400 uppercase tracking-wide mb-1">
+                    <div className="text-xs text-surface-400 uppercase tracking-wide mb-1">
                       Record ID
                     </div>
-                    <div className="text-gray-500 font-mono text-xs truncate" title={job.airtable_record_id}>
+                    <div className="text-surface-400 font-mono text-xs truncate" title={job.airtable_record_id}>
                       {job.airtable_record_id}
                     </div>
                   </div>
@@ -732,16 +732,16 @@ export default function JobDetail() {
 
       {/* Progress Bar for in_progress jobs */}
       {job.status === 'in_progress' && job.phases && (
-        <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
+        <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-gray-400">Processing Progress</span>
+            <span className="text-sm text-surface-400">Processing Progress</span>
             <span className="text-sm text-white">
               {job.phases.filter(p => p.status === 'completed').length} / {job.phases.length} phases
             </span>
           </div>
-          <div className="w-full bg-gray-700 rounded-full h-2.5">
+          <div className="w-full bg-surface-700 rounded-full h-2.5">
             <div
-              className="bg-blue-500 h-2.5 rounded-full transition-all duration-500"
+              className="bg-pbs-400 h-2.5 rounded-full transition-all duration-500"
               style={{
                 width: `${(job.phases.filter(p => p.status === 'completed').length / job.phases.length) * 100}%`
               }}
@@ -760,7 +760,7 @@ export default function JobDetail() {
 
       {/* Phases */}
       {job.phases && job.phases.length > 0 && (
-        <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
+        <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
           <h2 className="text-lg font-medium text-white mb-4">
             Processing Phases
           </h2>
@@ -768,7 +768,7 @@ export default function JobDetail() {
             {job.phases.map((phase, idx) => (
               <div
                 key={idx}
-                className="py-3 border-b border-gray-700 last:border-0"
+                className="py-3 border-b border-surface-700 last:border-0"
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-3">
@@ -784,7 +784,7 @@ export default function JobDetail() {
                       </span>
                     )}
                     {phase.model && (
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-gray-700 text-gray-300 font-mono">
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-surface-700 text-surface-300 font-mono">
                         {phase.model}
                       </span>
                     )}
@@ -802,7 +802,7 @@ export default function JobDetail() {
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center space-x-4 text-sm text-gray-400">
+                  <div className="flex items-center space-x-4 text-sm text-surface-400">
                     {phase.cost !== undefined && (
                       <span>${phase.cost.toFixed(4)}</span>
                     )}
@@ -812,12 +812,12 @@ export default function JobDetail() {
                   </div>
                 </div>
                 {phase.previous_runs && phase.previous_runs.length > 0 && (
-                  <div className="mt-1.5 ml-8 text-xs text-gray-500">
-                    <div className="text-gray-600 mb-1">Previous runs:</div>
+                  <div className="mt-1.5 ml-8 text-xs text-surface-400">
+                    <div className="text-surface-600 mb-1">Previous runs:</div>
                     {phase.previous_runs.map((run, i) => (
-                      <div key={i} className="flex items-center gap-2 text-gray-500 ml-2">
-                        <span className="text-gray-600">#{i + 1}</span>
-                        {run.model && <span className="font-mono text-gray-400">{run.model}</span>}
+                      <div key={i} className="flex items-center gap-2 text-surface-400 ml-2">
+                        <span className="text-surface-600">#{i + 1}</span>
+                        {run.model && <span className="font-mono text-surface-400">{run.model}</span>}
                         <span>${(run.cost || 0).toFixed(4)}</span>
                       </div>
                     ))}
@@ -847,7 +847,7 @@ export default function JobDetail() {
 
       {/* Outputs */}
       {job.outputs && Object.keys(job.outputs).length > 0 && (
-        <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
+        <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
           <h2 className="text-lg font-medium text-white mb-4">
             Output Files
           </h2>
@@ -867,7 +867,7 @@ export default function JobDetail() {
                   <button
                     onClick={(e) => handleViewOutput(key, actualFilename, e)}
                     disabled={loadingOutput}
-                    className="flex-1 flex items-center justify-center px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-l-md text-sm text-white transition-colors disabled:opacity-50"
+                    className="flex-1 flex items-center justify-center px-3 py-2 bg-surface-700 hover:bg-surface-600 rounded-l-md text-sm text-white transition-colors disabled:opacity-50"
                     aria-label={`View ${label}`}
                   >
                     <span className="mr-2">&#128196;</span>
@@ -876,7 +876,7 @@ export default function JobDetail() {
                   <a
                     href={`/api/jobs/${id}/outputs/${actualFilename}?download=true`}
                     download={actualFilename}
-                    className="px-2 py-2 bg-gray-600 hover:bg-blue-600 text-gray-300 hover:text-white transition-colors"
+                    className="px-2 py-2 bg-surface-600 hover:bg-pbs-500 text-surface-300 hover:text-white transition-colors"
                     aria-label={`Download ${label}`}
                     title={`Download ${label}`}
                   >
@@ -887,7 +887,7 @@ export default function JobDetail() {
                   <button
                     onClick={() => openRetryModal(key, label)}
                     disabled={isRetrying || retryingPhase !== null}
-                    className={`px-2 py-2 bg-gray-600 hover:bg-orange-600 ${driveConfigured ? '' : 'rounded-r-md'} text-sm text-gray-300 hover:text-white transition-colors disabled:opacity-50`}
+                    className={`px-2 py-2 bg-surface-600 hover:bg-orange-600 ${driveConfigured ? '' : 'rounded-r-md'} text-sm text-surface-300 hover:text-white transition-colors disabled:opacity-50`}
                     aria-label={`Retry ${label}`}
                     title={`Retry this phase`}
                   >
@@ -923,9 +923,9 @@ export default function JobDetail() {
 
       {/* Keyword Report Upload — shown when reports exist or job is completed */}
       {(keywordReports.length > 0 || job.status === 'completed') && (
-        <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
+        <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-medium text-gray-400">SEMRush Keyword Report</h2>
+            <h2 className="text-sm font-medium text-surface-400">SEMRush Keyword Report</h2>
             <div className="flex items-center gap-2">
               <input
                 ref={keywordInputRef}
@@ -940,7 +940,7 @@ export default function JobDetail() {
               />
               <label
                 htmlFor="keyword-report-input"
-                className={`px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-md text-sm cursor-pointer transition-colors ${keywordUploading ? 'opacity-50 pointer-events-none' : ''}`}
+                className={`px-3 py-1.5 bg-surface-700 hover:bg-surface-600 text-surface-300 rounded-md text-sm cursor-pointer transition-colors ${keywordUploading ? 'opacity-50 pointer-events-none' : ''}`}
               >
                 {keywordUploading ? 'Uploading...' : 'Upload'}
               </label>
@@ -950,9 +950,9 @@ export default function JobDetail() {
             <ul className="mt-2 space-y-1">
               {keywordReports.map((report) => (
                 <li key={report.filename} className="flex items-center justify-between text-sm">
-                  <span className="text-gray-300 font-mono">{report.filename}</span>
+                  <span className="text-surface-300 font-mono">{report.filename}</span>
                   {report.uploaded_at && (
-                    <span className="text-gray-500 text-xs">{report.uploaded_at}</span>
+                    <span className="text-surface-500 text-xs">{report.uploaded_at}</span>
                   )}
                 </li>
               ))}
@@ -1008,18 +1008,18 @@ export default function JobDetail() {
       )}
 
       {/* Timestamps */}
-      <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
+      <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
         <h2 className="text-lg font-medium text-white mb-4">Timeline</h2>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
-            <span className="text-gray-400">Queued:</span>
+            <span className="text-surface-400">Queued:</span>
             <span className="ml-2 text-white" title={formatTimestamp(job.queued_at)}>
               {formatRelativeTime(job.queued_at)}
             </span>
           </div>
           {job.started_at && (
             <div>
-              <span className="text-gray-400">Started:</span>
+              <span className="text-surface-400">Started:</span>
               <span className="ml-2 text-white" title={formatTimestamp(job.started_at)}>
                 {formatRelativeTime(job.started_at)}
               </span>
@@ -1027,7 +1027,7 @@ export default function JobDetail() {
           )}
           {job.completed_at && (
             <div>
-              <span className="text-gray-400">Completed:</span>
+              <span className="text-surface-400">Completed:</span>
               <span className="ml-2 text-white" title={formatTimestamp(job.completed_at)}>
                 {formatRelativeTime(job.completed_at)}
               </span>
@@ -1035,7 +1035,7 @@ export default function JobDetail() {
           )}
           {job.started_at && job.completed_at && (
             <div>
-              <span className="text-gray-400">Duration:</span>
+              <span className="text-surface-400">Duration:</span>
               <span className="ml-2 text-white">
                 {formatDuration(job.started_at, job.completed_at)}
               </span>
@@ -1043,7 +1043,7 @@ export default function JobDetail() {
           )}
           {job.last_heartbeat && job.status === 'in_progress' && (
             <div>
-              <span className="text-gray-400">Last heartbeat:</span>
+              <span className="text-surface-400">Last heartbeat:</span>
               <span className="ml-2 text-white" title={formatTimestamp(job.last_heartbeat)}>
                 {formatRelativeTime(job.last_heartbeat)}
               </span>
@@ -1054,7 +1054,7 @@ export default function JobDetail() {
             const totalRetries = retriedPhases.reduce((sum, p) => sum + (p.retry_count || 0), 0);
             return (
               <div>
-                <span className="text-gray-400">Retries:</span>
+                <span className="text-surface-400">Retries:</span>
                 <span className="ml-2 text-white">
                   {totalRetries === 0
                     ? 'None'
@@ -1073,19 +1073,19 @@ export default function JobDetail() {
           onClick={() => setRetryModal(null)}
         >
           <div
-            className="bg-gray-900 rounded-lg border border-gray-700 w-full max-w-md"
+            className="bg-surface-900 rounded-lg border border-surface-700 w-full max-w-md"
             role="dialog"
             aria-modal="true"
             aria-labelledby="retry-modal-title"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-surface-700">
               <h3 id="retry-modal-title" className="text-base font-medium text-white">
                 Retry: {retryModal.label}
               </h3>
               <button
                 onClick={() => setRetryModal(null)}
-                className="text-gray-400 hover:text-white text-2xl leading-none"
+                className="text-surface-400 hover:text-white text-2xl leading-none"
                 aria-label="Close retry dialog"
               >
                 &times;
@@ -1093,14 +1093,14 @@ export default function JobDetail() {
             </div>
             <div className="p-4 space-y-4">
               <div>
-                <label htmlFor="retry-model" className="block text-sm text-gray-300 mb-1">
+                <label htmlFor="retry-model" className="block text-sm text-surface-300 mb-1">
                   Model
                 </label>
                 <select
                   id="retry-model"
                   value={retryModel}
                   onChange={(e) => setRetryModel(e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 pr-8 text-sm text-white focus:outline-none focus:border-blue-500"
+                  className="w-full bg-surface-800 border border-surface-600 rounded px-3 py-2 pr-8 text-sm text-white focus:outline-none focus:border-pbs-500"
                 >
                   <option value="">Phase default</option>
                   {availableModels.map(m => (
@@ -1122,8 +1122,8 @@ export default function JobDetail() {
                 )
               })()}
               <div>
-                <label htmlFor="retry-feedback" className="block text-sm text-gray-300 mb-1">
-                  Editorial feedback <span className="text-gray-500">(optional)</span>
+                <label htmlFor="retry-feedback" className="block text-sm text-surface-300 mb-1">
+                  Editorial feedback <span className="text-surface-400">(optional)</span>
                 </label>
                 <textarea
                   id="retry-feedback"
@@ -1131,13 +1131,13 @@ export default function JobDetail() {
                   onChange={(e) => setRetryFeedback(e.target.value)}
                   placeholder="Optional: describe what to change..."
                   rows={4}
-                  className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 resize-y"
+                  className="w-full bg-surface-800 border border-surface-600 rounded px-3 py-2 text-sm text-white placeholder-surface-400 focus:outline-none focus:border-pbs-500 resize-y"
                 />
               </div>
               <div className="flex gap-3 justify-end pt-1">
                 <button
                   onClick={() => setRetryModal(null)}
-                  className="px-4 py-2 text-sm text-gray-300 hover:text-white transition-colors"
+                  className="px-4 py-2 text-sm text-surface-300 hover:text-white transition-colors"
                 >
                   Cancel
                 </button>
@@ -1161,20 +1161,20 @@ export default function JobDetail() {
         >
           <div
             ref={modalRef}
-            className="bg-gray-900 rounded-lg border border-gray-700 w-full max-w-4xl max-h-[90vh] flex flex-col"
+            className="bg-surface-900 rounded-lg border border-surface-700 w-full max-w-4xl max-h-[90vh] flex flex-col"
             role="dialog"
             aria-modal="true"
             aria-labelledby="output-modal-title"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-surface-700">
               <h3 id="output-modal-title" className="text-lg font-medium text-white">
                 {viewingOutput.label}
               </h3>
               <button
                 onClick={closeModal}
-                className="text-gray-400 hover:text-white text-2xl leading-none"
+                className="text-surface-400 hover:text-white text-2xl leading-none"
                 aria-label="Close output viewer"
               >
                 &times;
@@ -1183,7 +1183,7 @@ export default function JobDetail() {
             {/* Modal Content */}
             <div className="flex-1 overflow-auto p-4">
               {viewingOutput.isJson ? (
-                <pre className="text-sm text-gray-300 whitespace-pre-wrap font-mono">
+                <pre className="text-sm text-surface-300 whitespace-pre-wrap font-mono">
                   {viewingOutput.content}
                 </pre>
               ) : (
@@ -1196,7 +1196,7 @@ export default function JobDetail() {
 
       {/* Screengrab Slideout */}
       {showScreengrabs && job?.media_id && (
-        <div className="fixed right-0 top-0 h-full w-1/3 min-w-[350px] bg-gray-900 border-l border-gray-700 z-40 shadow-xl">
+        <div className="fixed right-0 top-0 h-full w-1/3 min-w-[350px] bg-surface-900 border-l border-surface-700 z-40 shadow-xl">
           <ScreengrabSlideout
             mediaId={job.media_id}
             onClose={() => setShowScreengrabs(false)}
@@ -1222,16 +1222,16 @@ function CopyEditorHandoff({ projectName }: { projectName: string }) {
   }
 
   return (
-    <div className="flex items-center justify-between py-3 px-4 bg-gray-800 rounded-lg border border-gray-700">
+    <div className="flex items-center justify-between py-3 px-4 bg-surface-800 rounded-lg border border-surface-700">
       <div className="flex items-center gap-3 min-w-0">
-        <span className="text-sm text-gray-400">Copy editing prompt:</span>
+        <span className="text-sm text-surface-400">Copy editing prompt:</span>
         <code className="text-sm text-white select-all cursor-text truncate">
           {promptText}
         </code>
       </div>
       <button
         onClick={handleCopy}
-        className="ml-4 flex-shrink-0 px-3 py-1 text-sm text-gray-300 hover:text-white bg-gray-700 hover:bg-gray-600 rounded transition-colors"
+        className="ml-4 flex-shrink-0 px-3 py-1 text-sm text-surface-300 hover:text-white bg-surface-700 hover:bg-surface-600 rounded transition-colors"
         aria-label="Copy prompt to clipboard"
       >
         {copied ? 'Copied' : 'Copy'}

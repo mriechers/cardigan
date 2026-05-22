@@ -315,8 +315,8 @@ export default function Settings() {
     return (
       <div className="space-y-6">
         <h1 className="text-2xl font-bold text-white">Settings</h1>
-        <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
-          <p className="text-gray-400 animate-pulse">Loading configuration...</p>
+        <div className="bg-surface-800 rounded-lg border border-surface-700 p-6">
+          <p className="text-surface-400 animate-pulse">Loading configuration...</p>
         </div>
       </div>
     )
@@ -330,7 +330,7 @@ export default function Settings() {
       aria-checked={checked}
       aria-label={label}
       className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-        checked ? 'bg-blue-600' : 'bg-gray-600'
+        checked ? 'bg-pbs-500' : 'bg-surface-600'
       }`}
     >
       <span
@@ -351,14 +351,14 @@ export default function Settings() {
           <div className="flex items-center space-x-3">
             <button
               onClick={handleReset}
-              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-md text-sm transition-colors"
+              className="px-4 py-2 bg-surface-700 hover:bg-surface-600 text-white rounded-md text-sm transition-colors"
             >
               Reset
             </button>
             <button
               onClick={handleSave}
               disabled={saving}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-md text-sm transition-colors"
+              className="px-4 py-2 bg-pbs-500 hover:bg-pbs-400 disabled:opacity-50 text-white rounded-md text-sm transition-colors"
             >
               {saving ? 'Saving...' : 'Save Changes'}
             </button>
@@ -379,7 +379,7 @@ export default function Settings() {
       )}
 
       {/* Tab Navigation */}
-      <div className="border-b border-gray-700">
+      <div className="border-b border-surface-700">
         <nav className="flex space-x-1" role="tablist" aria-label="Settings sections">
           {TABS.map((tab) => (
             <button
@@ -391,8 +391,8 @@ export default function Settings() {
               onClick={() => setActiveTab(tab.id)}
               className={`px-4 py-3 text-sm font-medium rounded-t-lg transition-colors ${
                 activeTab === tab.id
-                  ? 'bg-gray-800 text-white border-b-2 border-blue-500'
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'
+                  ? 'bg-surface-800 text-white border-b-2 border-pbs-500'
+                  : 'text-surface-400 hover:text-surface-200 hover:bg-surface-800/50'
               }`}
             >
               <span className="mr-2">{tab.icon}</span>
@@ -408,20 +408,20 @@ export default function Settings() {
         {activeTab === 'agents' && (
           <div className="space-y-6">
             {/* Agent Model Assignment */}
-            <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+            <div className="bg-surface-800 rounded-lg border border-surface-700 p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold text-white">Agent Models</h2>
                 <button
                   onClick={handleRefreshModels}
                   disabled={refreshingModels}
-                  className="text-xs text-gray-400 hover:text-white transition-colors disabled:opacity-50"
+                  className="text-xs text-surface-400 hover:text-white transition-colors disabled:opacity-50"
                   title="Fetch latest models from OpenRouter"
                   aria-label="Refresh available models from OpenRouter"
                 >
                   {refreshingModels ? 'Refreshing…' : '↻ Refresh models'}
                 </button>
               </div>
-              <p className="text-sm text-gray-400 mb-6">
+              <p className="text-sm text-surface-400 mb-6">
                 Choose which model runs each agent phase.
               </p>
 
@@ -437,7 +437,7 @@ export default function Settings() {
                   )
 
                   return (
-                    <div key={agent.id} className="p-4 bg-gray-900 rounded-lg space-y-2">
+                    <div key={agent.id} className="p-4 bg-surface-900 rounded-lg space-y-2">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-3">
                           <span className="text-lg">{agent.icon}</span>
@@ -451,17 +451,17 @@ export default function Settings() {
                           id={`model-${agent.id}`}
                           value={currentModel}
                           onChange={(e) => handlePhaseModelChange(agent.id, e.target.value)}
-                          className="pl-3 pr-8 py-2 rounded-md border text-sm font-medium bg-gray-800 border-gray-600 text-gray-200"
+                          className="pl-3 pr-8 py-2 rounded-md border text-sm font-medium bg-surface-800 border-surface-600 text-surface-200"
                           aria-label={`Select model for ${agent.name} agent`}
                         >
                           {sortedModels.map(m => (
-                            <option key={m.id} value={m.id} className="bg-gray-800 text-white">
+                            <option key={m.id} value={m.id} className="bg-surface-800 text-white">
                               {m.name}
                             </option>
                           ))}
                         </select>
                       </div>
-                      <p className="text-sm text-gray-400 pl-8 max-w-prose">{agent.description}</p>
+                      <p className="text-sm text-surface-400 pl-8 max-w-prose">{agent.description}</p>
                     </div>
                   )
                 })}
@@ -479,19 +479,19 @@ export default function Settings() {
         {/* WORKER TAB */}
         {activeTab === 'worker' && (
           <div className="space-y-6">
-            <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+            <div className="bg-surface-800 rounded-lg border border-surface-700 p-6">
               <h2 className="text-lg font-semibold text-white mb-4">Worker Settings</h2>
-              <p className="text-sm text-gray-400 mb-6">
+              <p className="text-sm text-surface-400 mb-6">
                 Configure job processing concurrency. Changes require worker restart.
               </p>
 
               <div className="space-y-4">
                 {/* Concurrent Jobs */}
-                <div className="p-4 bg-gray-900 rounded-lg">
+                <div className="p-4 bg-surface-900 rounded-lg">
                   <div className="flex items-center justify-between mb-2">
                     <div>
                       <label htmlFor="concurrent-jobs" className="font-medium text-white">Concurrent Jobs</label>
-                      <div className="text-sm text-gray-400">Process multiple jobs simultaneously</div>
+                      <div className="text-sm text-surface-400">Process multiple jobs simultaneously</div>
                     </div>
                     <span className="text-2xl font-bold text-cyan-400">{getCurrentWorker().max_concurrent_jobs}</span>
                   </div>
@@ -503,12 +503,12 @@ export default function Settings() {
                     step="1"
                     value={getCurrentWorker().max_concurrent_jobs}
                     onChange={(e) => handleWorkerChange('max_concurrent_jobs', parseInt(e.target.value))}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                    className="w-full h-2 bg-surface-700 rounded-lg appearance-none cursor-pointer"
                     aria-valuemin={1}
                     aria-valuemax={5}
                     aria-valuenow={getCurrentWorker().max_concurrent_jobs}
                   />
-                  <div className="flex justify-between text-xs text-gray-400 mt-1">
+                  <div className="flex justify-between text-xs text-surface-400 mt-1">
                     <span>1 (safe)</span>
                     <span>3 (default)</span>
                     <span>5 (max)</span>
@@ -516,13 +516,13 @@ export default function Settings() {
                 </div>
 
                 {/* Poll Interval */}
-                <div className="p-4 bg-gray-900 rounded-lg">
+                <div className="p-4 bg-surface-900 rounded-lg">
                   <div className="flex items-center justify-between mb-2">
                     <div>
                       <label htmlFor="poll-interval" className="font-medium text-white">Poll Interval</label>
-                      <div className="text-sm text-gray-400">Seconds between queue checks</div>
+                      <div className="text-sm text-surface-400">Seconds between queue checks</div>
                     </div>
-                    <span className="text-gray-300">{getCurrentWorker().poll_interval_seconds}s</span>
+                    <span className="text-surface-300">{getCurrentWorker().poll_interval_seconds}s</span>
                   </div>
                   <input
                     id="poll-interval"
@@ -532,12 +532,12 @@ export default function Settings() {
                     step="1"
                     value={getCurrentWorker().poll_interval_seconds}
                     onChange={(e) => handleWorkerChange('poll_interval_seconds', parseInt(e.target.value))}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                    className="w-full h-2 bg-surface-700 rounded-lg appearance-none cursor-pointer"
                     aria-valuemin={1}
                     aria-valuemax={30}
                     aria-valuenow={getCurrentWorker().poll_interval_seconds}
                   />
-                  <div className="flex justify-between text-xs text-gray-400 mt-1">
+                  <div className="flex justify-between text-xs text-surface-400 mt-1">
                     <span>1s</span>
                     <span>15s</span>
                     <span>30s</span>
@@ -551,18 +551,18 @@ export default function Settings() {
         {/* INGEST TAB */}
         {activeTab === 'ingest' && (
           <div className="space-y-6">
-            <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+            <div className="bg-surface-800 rounded-lg border border-surface-700 p-6">
               <h2 className="text-lg font-semibold text-white mb-4">Ingest Scanner</h2>
-              <p className="text-sm text-gray-400 mb-6">
+              <p className="text-sm text-surface-400 mb-6">
                 Automatically scan network locations for new transcript files and add them to the processing queue.
               </p>
 
               <div className="space-y-4">
                 {/* Enable Toggle */}
-                <div className="flex items-center justify-between p-4 bg-gray-900 rounded-lg">
+                <div className="flex items-center justify-between p-4 bg-surface-900 rounded-lg">
                   <div>
                     <div className="font-medium text-white">Enable Scanner</div>
-                    <div className="text-sm text-gray-400">Automatically discover and ingest new transcripts</div>
+                    <div className="text-sm text-surface-400">Automatically discover and ingest new transcripts</div>
                   </div>
                   <Toggle
                     checked={getCurrentIngest().enabled}
@@ -572,13 +572,13 @@ export default function Settings() {
                 </div>
 
                 {/* Scan Interval */}
-                <div className="p-4 bg-gray-900 rounded-lg">
+                <div className="p-4 bg-surface-900 rounded-lg">
                   <div className="flex items-center justify-between mb-2">
                     <div>
                       <label htmlFor="scan-interval" className="font-medium text-white">Scan Interval</label>
-                      <div className="text-sm text-gray-400">Hours between automatic scans</div>
+                      <div className="text-sm text-surface-400">Hours between automatic scans</div>
                     </div>
-                    <span className="text-gray-300">{getCurrentIngest().scan_interval_hours}h</span>
+                    <span className="text-surface-300">{getCurrentIngest().scan_interval_hours}h</span>
                   </div>
                   <input
                     id="scan-interval"
@@ -588,12 +588,12 @@ export default function Settings() {
                     step="1"
                     value={getCurrentIngest().scan_interval_hours}
                     onChange={(e) => handleIngestChange('scan_interval_hours', parseInt(e.target.value))}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                    className="w-full h-2 bg-surface-700 rounded-lg appearance-none cursor-pointer"
                     aria-valuemin={1}
                     aria-valuemax={168}
                     aria-valuenow={getCurrentIngest().scan_interval_hours}
                   />
-                  <div className="flex justify-between text-xs text-gray-400 mt-1">
+                  <div className="flex justify-between text-xs text-surface-400 mt-1">
                     <span>1h</span>
                     <span>24h (daily)</span>
                     <span>168h (weekly)</span>
@@ -601,34 +601,34 @@ export default function Settings() {
                 </div>
 
                 {/* Scan Time */}
-                <div className="p-4 bg-gray-900 rounded-lg">
+                <div className="p-4 bg-surface-900 rounded-lg">
                   <div className="mb-2">
                     <label htmlFor="scan-time" className="font-medium text-white block">Preferred Scan Time</label>
-                    <div className="text-sm text-gray-400">Daily time to run scheduled scans (24-hour format)</div>
+                    <div className="text-sm text-surface-400">Daily time to run scheduled scans (24-hour format)</div>
                   </div>
                   <input
                     id="scan-time"
                     type="time"
                     value={getCurrentIngest().scan_time}
                     onChange={(e) => handleIngestChange('scan_time', e.target.value)}
-                    className="px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:border-blue-500 focus:outline-none"
+                    className="px-3 py-2 bg-surface-800 border border-surface-600 rounded-md text-white focus:border-pbs-500 focus:outline-none"
                   />
                 </div>
 
                 {/* Server URL (read-only) */}
-                <div className="p-4 bg-gray-900 rounded-lg">
+                <div className="p-4 bg-surface-900 rounded-lg">
                   <div className="mb-2">
                     <div className="font-medium text-white">Server URL</div>
-                    <div className="text-sm text-gray-400">Remote file server location</div>
+                    <div className="text-sm text-surface-400">Remote file server location</div>
                   </div>
-                  <code className="block p-2 bg-gray-800 rounded text-cyan-400 text-sm">
+                  <code className="block p-2 bg-surface-800 rounded text-cyan-400 text-sm">
                     {getCurrentIngest().server_url || 'Not configured'}
                   </code>
                 </div>
 
                 {/* Last Scan Info */}
                 {getCurrentIngest().last_scan_at && (
-                  <div className="p-4 bg-gray-900 rounded-lg">
+                  <div className="p-4 bg-surface-900 rounded-lg">
                     <div className="flex items-center justify-between mb-2">
                       <div className="font-medium text-white">Last Scan</div>
                       <span className={`px-2 py-1 rounded text-xs font-medium ${
@@ -639,7 +639,7 @@ export default function Settings() {
                         {getCurrentIngest().last_scan_success ? 'Success' : 'Failed'}
                       </span>
                     </div>
-                    <div className="text-sm text-gray-400">
+                    <div className="text-sm text-surface-400">
                       {formatDateTime(getCurrentIngest().last_scan_at)}
                     </div>
                   </div>
@@ -647,9 +647,9 @@ export default function Settings() {
 
                 {/* Next Scheduled Scan */}
                 {getCurrentIngest().next_scan_at && (
-                  <div className="p-4 bg-gray-900 rounded-lg">
+                  <div className="p-4 bg-surface-900 rounded-lg">
                     <div className="font-medium text-white mb-2">Next Scheduled Scan</div>
-                    <div className="text-sm text-gray-400">
+                    <div className="text-sm text-surface-400">
                       {formatDateTime(getCurrentIngest().next_scan_at)}
                     </div>
                   </div>
@@ -658,17 +658,17 @@ export default function Settings() {
             </div>
 
             {/* Link to Ready for Work page */}
-            <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
+            <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-sm font-medium text-white">Ready for Work</h3>
-                  <p className="text-xs text-gray-400 mt-1">
+                  <p className="text-xs text-surface-400 mt-1">
                     View and queue transcripts from the ingest server.
                   </p>
                 </div>
                 <Link
                   to="/ready"
-                  className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
+                  className="text-sm text-pbs-400 hover:text-pbs-300 transition-colors"
                 >
                   Open →
                 </Link>
@@ -676,12 +676,12 @@ export default function Settings() {
             </div>
 
             {/* Screengrab Info */}
-            <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
+            <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
               <div className="flex items-start space-x-3">
                 <span className="text-purple-400 text-xl">🖼️</span>
                 <div>
                   <h3 className="text-sm font-medium text-white">Screengrab Attachments</h3>
-                  <p className="text-xs text-gray-400 mt-1">
+                  <p className="text-xs text-surface-400 mt-1">
                     Screengrabs are attached from the job detail page. Completed jobs with matching
                     screengrabs show an "Attach Screengrabs" button in the job header.
                   </p>
@@ -690,12 +690,12 @@ export default function Settings() {
             </div>
 
             {/* Configuration Note */}
-            <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
+            <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
               <div className="flex items-start space-x-3">
                 <span className="text-yellow-400 text-xl">💡</span>
                 <div>
                   <h3 className="text-sm font-medium text-white">Server Configuration</h3>
-                  <p className="text-xs text-gray-400 mt-1">
+                  <p className="text-xs text-surface-400 mt-1">
                     Network paths and credentials are managed in server environment variables.
                     Contact your system administrator to modify the server URL or monitored directories.
                   </p>
@@ -709,66 +709,66 @@ export default function Settings() {
         {activeTab === 'system' && (
           <div className="space-y-6">
             {/* Component Status */}
-            <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+            <div className="bg-surface-800 rounded-lg border border-surface-700 p-6">
               <h2 className="text-lg font-semibold text-white mb-4">System Components</h2>
-              <p className="text-sm text-gray-400 mb-6">
+              <p className="text-sm text-surface-400 mb-6">
                 Monitor the containerized services that power The Metadata Neighborhood. Components are managed by Docker Compose.
               </p>
 
               <div className="space-y-4">
                 {/* API Server */}
-                <div className="p-4 bg-gray-900 rounded-lg">
+                <div className="p-4 bg-surface-900 rounded-lg">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
                       <div className="w-3 h-3 rounded-full bg-green-400" />
                       <div>
                         <div className="font-medium text-white">API Server</div>
-                        <div className="text-sm text-gray-400">
+                        <div className="text-sm text-surface-400">
                           Running - Managed by Docker
                         </div>
                       </div>
                     </div>
-                    <div className="px-3 py-1 text-xs bg-blue-600/20 text-blue-400 border border-blue-500/30 rounded">
+                    <div className="px-3 py-1 text-xs bg-pbs-500/20 text-pbs-400 border border-pbs-500/30 rounded">
                       Container: cardigan-api
                     </div>
                   </div>
                 </div>
 
                 {/* Worker */}
-                <div className="p-4 bg-gray-900 rounded-lg">
+                <div className="p-4 bg-surface-900 rounded-lg">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
                       <div className={`w-3 h-3 rounded-full ${systemStatus?.worker.running ? 'bg-green-400' : 'bg-yellow-400'}`} />
                       <div>
                         <div className="font-medium text-white">Worker</div>
-                        <div className="text-sm text-gray-400">
+                        <div className="text-sm text-surface-400">
                           {systemStatus?.worker.running
                             ? 'Running - Managed by Docker'
                             : 'Managed by Docker'}
                         </div>
                       </div>
                     </div>
-                    <div className="px-3 py-1 text-xs bg-blue-600/20 text-blue-400 border border-blue-500/30 rounded">
+                    <div className="px-3 py-1 text-xs bg-pbs-500/20 text-pbs-400 border border-pbs-500/30 rounded">
                       Container: cardigan-api
                     </div>
                   </div>
                 </div>
 
                 {/* Watcher */}
-                <div className="p-4 bg-gray-900 rounded-lg">
+                <div className="p-4 bg-surface-900 rounded-lg">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
                       <div className={`w-3 h-3 rounded-full ${systemStatus?.watcher.running ? 'bg-green-400' : 'bg-yellow-400'}`} />
                       <div>
                         <div className="font-medium text-white">Transcript Watcher</div>
-                        <div className="text-sm text-gray-400">
+                        <div className="text-sm text-surface-400">
                           {systemStatus?.watcher.running
                             ? 'Running - Managed by Docker'
                             : 'Managed by Docker'}
                         </div>
                       </div>
                     </div>
-                    <div className="px-3 py-1 text-xs bg-blue-600/20 text-blue-400 border border-blue-500/30 rounded">
+                    <div className="px-3 py-1 text-xs bg-pbs-500/20 text-pbs-400 border border-pbs-500/30 rounded">
                       Container: cardigan-api
                     </div>
                   </div>
@@ -777,55 +777,55 @@ export default function Settings() {
             </div>
 
             {/* Folder Paths */}
-            <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+            <div className="bg-surface-800 rounded-lg border border-surface-700 p-6">
               <h2 className="text-lg font-semibold text-white mb-4">Docker Volume Mounts</h2>
-              <p className="text-sm text-gray-400 mb-4">
+              <p className="text-sm text-surface-400 mb-4">
                 Persistent data volumes mounted in the container
               </p>
               <div className="space-y-3 text-sm">
-                <div className="flex justify-between p-3 bg-gray-900 rounded">
-                  <span className="text-gray-400">Transcripts (input)</span>
+                <div className="flex justify-between p-3 bg-surface-900 rounded">
+                  <span className="text-surface-400">Transcripts (input)</span>
                   <code className="text-cyan-400">/data/transcripts</code>
                 </div>
-                <div className="flex justify-between p-3 bg-gray-900 rounded">
-                  <span className="text-gray-400">Output (processed)</span>
+                <div className="flex justify-between p-3 bg-surface-900 rounded">
+                  <span className="text-surface-400">Output (processed)</span>
                   <code className="text-cyan-400">/data/output</code>
                 </div>
-                <div className="flex justify-between p-3 bg-gray-900 rounded">
-                  <span className="text-gray-400">Database</span>
+                <div className="flex justify-between p-3 bg-surface-900 rounded">
+                  <span className="text-surface-400">Database</span>
                   <code className="text-cyan-400">/data/db/dashboard.db</code>
                 </div>
-                <div className="flex justify-between p-3 bg-gray-900 rounded">
-                  <span className="text-gray-400">Uploads</span>
+                <div className="flex justify-between p-3 bg-surface-900 rounded">
+                  <span className="text-surface-400">Uploads</span>
                   <code className="text-cyan-400">/data/uploads</code>
                 </div>
               </div>
             </div>
 
             {/* Terminal Commands */}
-            <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
+            <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
               <div className="flex items-start space-x-3">
-                <span className="text-blue-400 text-xl">🐳</span>
+                <span className="text-pbs-400 text-xl">🐳</span>
                 <div className="w-full">
                   <h3 className="text-sm font-medium text-white">Docker Commands</h3>
-                  <p className="text-xs text-gray-400 mt-1 mb-3">
+                  <p className="text-xs text-surface-400 mt-1 mb-3">
                     Manage the containerized system via Docker Compose
                   </p>
                   <div className="space-y-2 text-xs">
-                    <div className="p-2 bg-gray-900 rounded">
-                      <div className="text-gray-500 mb-1">Restart all services:</div>
+                    <div className="p-2 bg-surface-900 rounded">
+                      <div className="text-surface-400 mb-1">Restart all services:</div>
                       <code className="text-green-400">docker compose restart</code>
                     </div>
-                    <div className="p-2 bg-gray-900 rounded">
-                      <div className="text-gray-500 mb-1">View logs:</div>
+                    <div className="p-2 bg-surface-900 rounded">
+                      <div className="text-surface-400 mb-1">View logs:</div>
                       <code className="text-green-400">docker compose logs -f</code>
                     </div>
-                    <div className="p-2 bg-gray-900 rounded">
-                      <div className="text-gray-500 mb-1">Stop system:</div>
+                    <div className="p-2 bg-surface-900 rounded">
+                      <div className="text-surface-400 mb-1">Stop system:</div>
                       <code className="text-green-400">docker compose down</code>
                     </div>
-                    <div className="p-2 bg-gray-900 rounded">
-                      <div className="text-gray-500 mb-1">Rebuild and restart:</div>
+                    <div className="p-2 bg-surface-900 rounded">
+                      <div className="text-surface-400 mb-1">Rebuild and restart:</div>
                       <code className="text-green-400">docker compose up --build -d</code>
                     </div>
                   </div>
@@ -898,16 +898,16 @@ export default function Settings() {
         {activeTab === 'accessibility' && (
           <div className="space-y-6">
             {/* Reduce Motion */}
-            <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+            <div className="bg-surface-800 rounded-lg border border-surface-700 p-6">
               <h2 className="text-lg font-semibold text-white mb-4">Motion Preferences</h2>
-              <p className="text-sm text-gray-400 mb-6">
+              <p className="text-sm text-surface-400 mb-6">
                 Control animations and transitions throughout the dashboard.
               </p>
 
-              <div className="flex items-center justify-between p-4 bg-gray-900 rounded-lg">
+              <div className="flex items-center justify-between p-4 bg-surface-900 rounded-lg">
                 <div>
                   <div className="font-medium text-white">Reduce Motion</div>
-                  <div className="text-sm text-gray-400">Minimize or disable animations</div>
+                  <div className="text-sm text-surface-400">Minimize or disable animations</div>
                 </div>
                 <Toggle
                   checked={preferences.reduceMotion}
@@ -918,9 +918,9 @@ export default function Settings() {
             </div>
 
             {/* Text Size */}
-            <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+            <div className="bg-surface-800 rounded-lg border border-surface-700 p-6">
               <h2 className="text-lg font-semibold text-white mb-4">Text Size</h2>
-              <p className="text-sm text-gray-400 mb-6">
+              <p className="text-sm text-surface-400 mb-6">
                 Adjust the base text size for improved readability.
               </p>
 
@@ -931,24 +931,24 @@ export default function Settings() {
                     onClick={() => updatePreferences({ textSize: size })}
                     className={`w-full p-4 rounded-lg border text-left transition-colors ${
                       preferences.textSize === size
-                        ? 'bg-blue-900/20 border-blue-500/30 text-blue-400'
-                        : 'bg-gray-900 border-gray-700 text-gray-300 hover:bg-gray-800'
+                        ? 'bg-pbs-900/20 border-pbs-500/30 text-pbs-400'
+                        : 'bg-surface-900 border-surface-700 text-surface-300 hover:bg-surface-800'
                     }`}
                   >
                     <div className="flex items-center justify-between">
                       <div>
                         <div className="font-medium capitalize">{size}</div>
-                        <div className="text-sm text-gray-400">
+                        <div className="text-sm text-surface-400">
                           {size === 'default' && 'Standard text size (16px base)'}
                           {size === 'large' && 'Larger text size (18px base)'}
                           {size === 'larger' && 'Largest text size (20px base)'}
                         </div>
                       </div>
                       {preferences.textSize === size && (
-                        <span className="text-blue-400">✓</span>
+                        <span className="text-pbs-400">✓</span>
                       )}
                     </div>
-                    <div className="mt-2 text-gray-400" style={{
+                    <div className="mt-2 text-surface-400" style={{
                       fontSize: size === 'default' ? '16px' : size === 'large' ? '18px' : '20px'
                     }}>
                       Sample preview text
@@ -959,16 +959,16 @@ export default function Settings() {
             </div>
 
             {/* High Contrast */}
-            <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+            <div className="bg-surface-800 rounded-lg border border-surface-700 p-6">
               <h2 className="text-lg font-semibold text-white mb-4">Contrast</h2>
-              <p className="text-sm text-gray-400 mb-6">
+              <p className="text-sm text-surface-400 mb-6">
                 Increase contrast between text and backgrounds for better visibility.
               </p>
 
-              <div className="flex items-center justify-between p-4 bg-gray-900 rounded-lg">
+              <div className="flex items-center justify-between p-4 bg-surface-900 rounded-lg">
                 <div>
                   <div className="font-medium text-white">High Contrast Mode</div>
-                  <div className="text-sm text-gray-400">Enhance text and UI element contrast</div>
+                  <div className="text-sm text-surface-400">Enhance text and UI element contrast</div>
                 </div>
                 <Toggle
                   checked={preferences.highContrast}
@@ -979,12 +979,12 @@ export default function Settings() {
             </div>
 
             {/* Preview Note */}
-            <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
+            <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
               <div className="flex items-start space-x-3">
-                <span className="text-blue-400 text-xl">💡</span>
+                <span className="text-pbs-400 text-xl">💡</span>
                 <div>
                   <h3 className="text-sm font-medium text-white">Live Preview</h3>
-                  <p className="text-xs text-gray-400 mt-1">
+                  <p className="text-xs text-surface-400 mt-1">
                     Changes are applied immediately and saved automatically. Navigate to other pages
                     to see how preferences affect the entire dashboard.
                   </p>

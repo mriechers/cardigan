@@ -96,13 +96,13 @@ export default function ModelStatsWidget({ className = '' }: ModelStatsWidgetPro
   }
 
   return (
-    <div className={`bg-gray-800 rounded-lg border border-gray-700 p-4 ${className}`}>
+    <div className={`bg-surface-800 rounded-lg border border-surface-700 p-4 ${className}`}>
       <div className="flex items-center justify-between mb-3">
         <div>
-          <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wide">
+          <h3 className="text-sm font-medium text-surface-400 uppercase tracking-wide">
             Actual Model Usage
           </h3>
-          <p className="text-xs text-gray-500 mt-0.5">
+          <p className="text-xs text-surface-400 mt-0.5">
             From Langfuse analytics
           </p>
         </div>
@@ -110,7 +110,7 @@ export default function ModelStatsWidget({ className = '' }: ModelStatsWidgetPro
           <select
             value={days}
             onChange={(e) => setDays(Number(e.target.value))}
-            className="bg-gray-700 text-gray-300 text-xs rounded px-2 py-1 border border-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="bg-surface-700 text-surface-300 text-xs rounded px-2 py-1 border border-surface-600 focus:outline-none focus:ring-1 focus:ring-pbs-400"
             aria-label="Time period"
           >
             <option value={7}>Last 7 days</option>
@@ -120,7 +120,7 @@ export default function ModelStatsWidget({ className = '' }: ModelStatsWidgetPro
           <button
             onClick={fetchStats}
             disabled={loading}
-            className="text-xs text-gray-400 hover:text-white disabled:opacity-50"
+            className="text-xs text-surface-400 hover:text-white disabled:opacity-50"
             aria-label="Refresh stats"
           >
             {loading ? '...' : 'Refresh'}
@@ -131,9 +131,9 @@ export default function ModelStatsWidget({ className = '' }: ModelStatsWidgetPro
       {/* Loading state */}
       {loading && !stats && (
         <div className="animate-pulse space-y-3">
-          <div className="h-4 bg-gray-700 rounded w-3/4"></div>
-          <div className="h-4 bg-gray-700 rounded w-1/2"></div>
-          <div className="h-4 bg-gray-700 rounded w-2/3"></div>
+          <div className="h-4 bg-surface-700 rounded w-3/4"></div>
+          <div className="h-4 bg-surface-700 rounded w-1/2"></div>
+          <div className="h-4 bg-surface-700 rounded w-2/3"></div>
         </div>
       )}
 
@@ -143,7 +143,7 @@ export default function ModelStatsWidget({ className = '' }: ModelStatsWidgetPro
           <p className="text-red-400 text-sm">{error}</p>
           <button
             onClick={fetchStats}
-            className="mt-2 text-xs text-blue-400 hover:text-blue-300"
+            className="mt-2 text-xs text-pbs-400 hover:text-pbs-300"
           >
             Try again
           </button>
@@ -154,7 +154,7 @@ export default function ModelStatsWidget({ className = '' }: ModelStatsWidgetPro
       {stats && !stats.available && (
         <div className="text-center py-4">
           <p className="text-yellow-400 text-sm">Langfuse not configured</p>
-          <p className="text-xs text-gray-500 mt-1">{stats.error}</p>
+          <p className="text-xs text-surface-400 mt-1">{stats.error}</p>
         </div>
       )}
 
@@ -162,20 +162,20 @@ export default function ModelStatsWidget({ className = '' }: ModelStatsWidgetPro
       {stats && stats.available && (
         <>
           {/* Summary row */}
-          <div className="flex justify-between text-sm mb-4 pb-3 border-b border-gray-700">
+          <div className="flex justify-between text-sm mb-4 pb-3 border-b border-surface-700">
             <div>
-              <span className="text-gray-400">Total Requests:</span>{' '}
+              <span className="text-surface-400">Total Requests:</span>{' '}
               <span className="text-white font-medium">{stats.total_requests.toLocaleString()}</span>
             </div>
             <div>
-              <span className="text-gray-400">Total Cost:</span>{' '}
+              <span className="text-surface-400">Total Cost:</span>{' '}
               <span className="text-white font-medium">{formatCost(stats.total_cost)}</span>
             </div>
           </div>
 
           {/* Model list */}
           {stats.models.length === 0 ? (
-            <p className="text-gray-500 text-sm text-center py-4">
+            <p className="text-surface-400 text-sm text-center py-4">
               No model usage data for this period
             </p>
           ) : (
@@ -199,12 +199,12 @@ export default function ModelStatsWidget({ className = '' }: ModelStatsWidgetPro
                           {formatModelName(model.model_name)}
                         </span>
                         {model.cost_percentage !== null && model.cost_percentage > 0 && (
-                          <span className="text-xs text-gray-500">
+                          <span className="text-xs text-surface-400">
                             {model.cost_percentage.toFixed(0)}%
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center space-x-3 text-xs text-gray-500 mt-0.5">
+                      <div className="flex items-center space-x-3 text-xs text-surface-400 mt-0.5">
                         <span>{model.request_count} requests</span>
                         <span>{model.total_tokens.toLocaleString()} tokens</span>
                         {model.avg_latency_ms && (
@@ -224,8 +224,8 @@ export default function ModelStatsWidget({ className = '' }: ModelStatsWidgetPro
           )}
 
           {/* Footer with link to Langfuse */}
-          <div className="mt-4 pt-3 border-t border-gray-700 flex justify-between items-center">
-            <span className="text-xs text-gray-600">
+          <div className="mt-4 pt-3 border-t border-surface-700 flex justify-between items-center">
+            <span className="text-xs text-surface-600">
               Data from {stats.period_start ? new Date(stats.period_start).toLocaleDateString() : 'N/A'}
               {' - '}
               {stats.period_end ? new Date(stats.period_end).toLocaleDateString() : 'now'}
@@ -234,7 +234,7 @@ export default function ModelStatsWidget({ className = '' }: ModelStatsWidgetPro
               href="https://cloud.langfuse.com"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-blue-400 hover:text-blue-300 flex items-center space-x-1"
+              className="text-xs text-pbs-400 hover:text-pbs-300 flex items-center space-x-1"
             >
               <span>Open Langfuse</span>
               <span>&#8599;</span>

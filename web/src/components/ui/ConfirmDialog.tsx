@@ -75,9 +75,9 @@ export default function ConfirmDialog({
     },
     info: {
       icon: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
-      iconBg: 'bg-blue-900/50',
-      iconColor: 'text-blue-400',
-      confirmBg: 'bg-blue-600 hover:bg-blue-500',
+      iconBg: 'bg-pbs-900/50',
+      iconColor: 'text-pbs-400',
+      confirmBg: 'bg-pbs-500 hover:bg-pbs-400',
     },
   }
 
@@ -101,7 +101,7 @@ export default function ConfirmDialog({
         aria-modal="true"
         aria-labelledby="confirm-dialog-title"
         aria-describedby="confirm-dialog-description"
-        className="relative bg-gray-800 rounded-lg border border-gray-700 shadow-xl max-w-md w-full p-6 motion-reduce:transition-none transform transition-all duration-200"
+        className="relative bg-surface-800 rounded-lg border border-surface-700 shadow-xl max-w-md w-full p-6 motion-reduce:transition-none transform transition-all duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start gap-4">
@@ -123,7 +123,7 @@ export default function ConfirmDialog({
             <h2 id="confirm-dialog-title" className="text-lg font-semibold text-white">
               {title}
             </h2>
-            <div id="confirm-dialog-description" className="mt-2 text-sm text-gray-300">
+            <div id="confirm-dialog-description" className="mt-2 text-sm text-surface-300">
               {message}
             </div>
           </div>
@@ -134,13 +134,13 @@ export default function ConfirmDialog({
           <button
             ref={cancelButtonRef}
             onClick={onCancel}
-            className="px-4 py-2 text-sm font-medium text-gray-300 bg-gray-700 hover:bg-gray-600 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 focus:ring-offset-gray-800"
+            className="px-4 py-2 text-sm font-medium text-surface-300 bg-surface-700 hover:bg-surface-600 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-surface-400 focus:ring-offset-2 focus:ring-offset-surface-800"
           >
             {cancelText}
           </button>
           <button
             onClick={onConfirm}
-            className={`px-4 py-2 text-sm font-medium text-white ${styles.confirmBg} rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800`}
+            className={`px-4 py-2 text-sm font-medium text-white ${styles.confirmBg} rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-surface-800`}
           >
             {confirmText}
           </button>
