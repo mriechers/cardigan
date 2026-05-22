@@ -132,16 +132,16 @@ export default function ScreengrabsBox({ mediaId }: ScreengrabsBoxProps) {
   }
 
   return (
-    <div className="bg-gray-800 rounded-lg border border-gray-700">
+    <div className="bg-surface-800 rounded-lg border border-surface-700">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-surface-700">
         <div className="flex items-center space-x-2">
-          <svg className="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-5 h-5 text-pbs-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>
           <h3 className="text-sm font-medium text-white">Screen Grabs</h3>
           {pendingCount > 0 && (
-            <span className="px-2 py-0.5 text-xs bg-purple-600 text-white rounded-full">
+            <span className="px-2 py-0.5 text-xs bg-pbs-500 text-white rounded-full">
               {pendingCount} available
             </span>
           )}
@@ -151,7 +151,7 @@ export default function ScreengrabsBox({ mediaId }: ScreengrabsBoxProps) {
             href={buildAirtableSstUrl(sstRecordId)}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-gray-400 hover:text-gray-300 text-xs flex items-center space-x-1"
+            className="text-surface-400 hover:text-surface-300 text-xs flex items-center space-x-1"
           >
             <span>View in Airtable</span>
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -165,34 +165,34 @@ export default function ScreengrabsBox({ mediaId }: ScreengrabsBoxProps) {
       <div className="p-4">
         {/* Existing attachments info */}
         {existingAttachments !== null && existingAttachments > 0 && (
-          <div className="mb-3 text-sm text-gray-400">
+          <div className="mb-3 text-sm text-surface-400">
             {existingAttachments} image{existingAttachments !== 1 ? 's' : ''} already attached in Airtable
           </div>
         )}
 
         {error && (
-          <div className="mb-3 p-2 bg-red-900/20 border border-red-500/30 rounded text-red-400 text-sm">
+          <div className="mb-3 p-2 bg-status-failed/15 border border-status-failed/30 rounded text-status-failed text-sm">
             {error}
           </div>
         )}
 
         {loading ? (
           <div className="py-4 text-center">
-            <p className="text-gray-400 text-sm animate-pulse">Loading...</p>
+            <p className="text-surface-400 text-sm animate-pulse">Loading...</p>
           </div>
         ) : screengrabs.length === 0 ? (
           <div className="py-2 text-center">
-            <p className="text-gray-500 text-sm">All screengrabs have been processed</p>
+            <p className="text-surface-400 text-sm">All screengrabs have been processed</p>
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-3">
             {screengrabs.map((screengrab) => (
               <div
                 key={screengrab.id}
-                className="bg-gray-900 rounded-lg overflow-hidden border border-gray-700"
+                className="bg-surface-900 rounded-lg overflow-hidden border border-surface-700"
               >
                 {/* Thumbnail */}
-                <div className="aspect-video bg-gray-950 relative">
+                <div className="aspect-video bg-surface-950 relative">
                   <a
                     href={screengrab.remote_url}
                     target="_blank"
@@ -222,7 +222,7 @@ export default function ScreengrabsBox({ mediaId }: ScreengrabsBoxProps) {
 
                 {/* Info & Actions */}
                 <div className="p-2">
-                  <p className="text-xs text-gray-400 truncate mb-2" title={screengrab.filename}>
+                  <p className="text-xs text-surface-400 truncate mb-2" title={screengrab.filename}>
                     {screengrab.filename}
                   </p>
 
@@ -231,13 +231,13 @@ export default function ScreengrabsBox({ mediaId }: ScreengrabsBoxProps) {
                       <button
                         onClick={() => handleAttach(screengrab.id)}
                         disabled={attaching === screengrab.id}
-                        className="flex-1 px-2 py-1 text-xs bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded transition-colors"
+                        className="flex-1 px-2 py-1 text-xs bg-pbs-500 hover:bg-pbs-400 disabled:opacity-50 text-white rounded transition-colors"
                       >
                         {attaching === screengrab.id ? '...' : 'Attach'}
                       </button>
                       <button
                         onClick={() => handleIgnore(screengrab.id)}
-                        className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors"
+                        className="px-2 py-1 text-xs bg-surface-700 hover:bg-surface-600 text-surface-300 rounded transition-colors"
                       >
                         Ignore
                       </button>

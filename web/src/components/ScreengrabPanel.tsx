@@ -176,8 +176,8 @@ export default function ScreengrabPanel() {
 
   if (loading && screengrabs.length === 0) {
     return (
-      <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
-        <div className="text-gray-300 animate-pulse">Loading screengrabs...</div>
+      <div className="bg-surface-800 rounded-lg border border-surface-700 p-6">
+        <div className="text-surface-300 animate-pulse">Loading screengrabs...</div>
       </div>
     )
   }
@@ -191,7 +191,7 @@ export default function ScreengrabPanel() {
           <button
             onClick={handleAttachAll}
             disabled={batchAttaching || attaching !== null}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg text-sm transition-colors"
+            className="px-4 py-2 bg-pbs-500 hover:bg-pbs-400 disabled:opacity-50 text-white rounded-lg text-sm transition-colors"
             aria-label={`Attach all ${pendingCount} pending screengrabs`}
           >
             {batchAttaching ? 'Attaching...' : `Attach All (${pendingCount})`}
@@ -201,18 +201,18 @@ export default function ScreengrabPanel() {
 
       {/* Status Messages */}
       {error && (
-        <div role="alert" aria-live="assertive" className="bg-red-900/20 border border-red-500/30 rounded-lg p-4">
-          <p className="text-red-400 text-sm">{error}</p>
+        <div role="alert" aria-live="assertive" className="bg-status-failed/15 border border-status-failed/30 rounded-lg p-4">
+          <p className="text-status-failed text-sm">{error}</p>
         </div>
       )}
       {success && (
-        <div role="status" aria-live="polite" className="bg-green-900/20 border border-green-500/30 rounded-lg p-4">
-          <p className="text-green-400 text-sm">{success}</p>
+        <div role="status" aria-live="polite" className="bg-status-completed/15 border border-status-completed/30 rounded-lg p-4">
+          <p className="text-status-completed text-sm">{success}</p>
         </div>
       )}
 
       {/* Filter Tabs */}
-      <div className="border-b border-gray-700">
+      <div className="border-b border-surface-700">
         <nav className="flex space-x-1" role="tablist" aria-label="Screengrab filters">
           <button
             role="tab"
@@ -221,8 +221,8 @@ export default function ScreengrabPanel() {
             onClick={() => setActiveFilter('pending')}
             className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
               activeFilter === 'pending'
-                ? 'bg-gray-700 text-white'
-                : 'text-gray-400 hover:text-white hover:bg-gray-800/50'
+                ? 'bg-surface-700 text-white'
+                : 'text-surface-400 hover:text-white hover:bg-surface-800/50'
             }`}
           >
             Pending {counts.new > 0 && <span className="ml-1">({counts.new})</span>}
@@ -234,8 +234,8 @@ export default function ScreengrabPanel() {
             onClick={() => setActiveFilter('no_match')}
             className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
               activeFilter === 'no_match'
-                ? 'bg-gray-700 text-white'
-                : 'text-gray-400 hover:text-white hover:bg-gray-800/50'
+                ? 'bg-surface-700 text-white'
+                : 'text-surface-400 hover:text-white hover:bg-surface-800/50'
             }`}
           >
             No Match {counts.no_match > 0 && <span className="ml-1">({counts.no_match})</span>}
@@ -247,8 +247,8 @@ export default function ScreengrabPanel() {
             onClick={() => setActiveFilter('all')}
             className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
               activeFilter === 'all'
-                ? 'bg-gray-700 text-white'
-                : 'text-gray-400 hover:text-white hover:bg-gray-800/50'
+                ? 'bg-surface-700 text-white'
+                : 'text-surface-400 hover:text-white hover:bg-surface-800/50'
             }`}
           >
             All
@@ -258,12 +258,12 @@ export default function ScreengrabPanel() {
 
       {/* No Match Explanation */}
       {activeFilter === 'no_match' && counts.no_match > 0 && (
-        <div className="bg-yellow-900/20 border border-yellow-500/30 rounded-lg p-4">
+        <div className="bg-status-pending/15 border border-status-pending/30 rounded-lg p-4">
           <div className="flex items-start space-x-3">
-            <span className="text-yellow-400 text-xl">⚠️</span>
+            <span className="text-status-pending text-xl">⚠️</span>
             <div>
-              <h3 className="text-sm font-medium text-yellow-400">No SST Match Found</h3>
-              <p className="text-xs text-gray-300 mt-1">
+              <h3 className="text-sm font-medium text-status-pending">No SST Match Found</h3>
+              <p className="text-xs text-surface-300 mt-1">
                 These screengrabs could not be automatically matched to a Media ID in the SST.
                 The filename pattern does not match expected formats (e.g., &quot;2WLI...&quot; or &quot;NOLA...&quot;).
                 You may need to manually attach these files or verify the filename.
@@ -278,12 +278,12 @@ export default function ScreengrabPanel() {
         role="tabpanel"
         id={`panel-${activeFilter}`}
         aria-labelledby={activeFilter}
-        className="bg-gray-800 rounded-lg border border-gray-700 p-6"
+        className="bg-surface-800 rounded-lg border border-surface-700 p-6"
       >
         {filteredScreengrabs.length === 0 ? (
           <div className="text-center py-8">
-            <p className="text-gray-300">No {activeFilter === 'pending' ? 'pending' : activeFilter === 'no_match' ? 'unmatched' : ''} screengrabs found.</p>
-            <p className="text-gray-400 text-sm mt-2">
+            <p className="text-surface-300">No {activeFilter === 'pending' ? 'pending' : activeFilter === 'no_match' ? 'unmatched' : ''} screengrabs found.</p>
+            <p className="text-surface-400 text-sm mt-2">
               {activeFilter === 'pending' && 'New screengrabs will appear here when detected.'}
               {activeFilter === 'no_match' && 'Files that cannot be matched to Media IDs will appear here.'}
               {activeFilter === 'all' && 'No screengrabs have been processed yet.'}
@@ -294,14 +294,14 @@ export default function ScreengrabPanel() {
             {filteredScreengrabs.map((screengrab) => (
               <div
                 key={screengrab.id}
-                className="bg-gray-900 rounded-lg p-3 flex items-center gap-4"
+                className="bg-surface-900 rounded-lg p-3 flex items-center gap-4"
               >
                 {/* Thumbnail */}
                 <div className="flex-shrink-0">
                   <img
                     src={screengrab.remote_url}
                     alt={`Thumbnail for ${screengrab.filename}`}
-                    className="w-16 h-12 object-cover rounded border border-gray-700"
+                    className="w-16 h-12 object-cover rounded border border-surface-700"
                     loading="lazy"
                   />
                 </div>
@@ -314,12 +314,12 @@ export default function ScreengrabPanel() {
                         {screengrab.filename}
                       </div>
                       {screengrab.media_id && (
-                        <div className="text-gray-400 text-xs font-mono">
+                        <div className="text-surface-400 text-xs font-mono">
                           Media ID: {screengrab.media_id}
                         </div>
                       )}
                       {screengrab.sst_record_id && (
-                        <div className="text-green-400 text-xs">
+                        <div className="text-status-completed text-xs">
                           SST Match Found
                         </div>
                       )}
@@ -328,17 +328,17 @@ export default function ScreengrabPanel() {
                     {/* Status Badge */}
                     <div>
                       {screengrab.status === 'attached' && (
-                        <span className="inline-flex items-center px-2 py-1 rounded text-xs bg-green-900/30 text-green-400 border border-green-500/30">
+                        <span className="inline-flex items-center px-2 py-1 rounded text-xs bg-status-completed/15 text-status-completed border border-status-completed/30">
                           Attached
                         </span>
                       )}
                       {screengrab.status === 'no_match' && (
-                        <span className="inline-flex items-center px-2 py-1 rounded text-xs bg-yellow-900/30 text-yellow-400 border border-yellow-500/30">
+                        <span className="inline-flex items-center px-2 py-1 rounded text-xs bg-status-pending/15 text-status-pending border border-status-pending/30">
                           No Match
                         </span>
                       )}
                       {screengrab.status === 'ignored' && (
-                        <span className="inline-flex items-center px-2 py-1 rounded text-xs bg-gray-700/30 text-gray-400 border border-gray-600/30">
+                        <span className="inline-flex items-center px-2 py-1 rounded text-xs bg-surface-700/30 text-surface-400 border border-surface-600/30">
                           Ignored
                         </span>
                       )}
@@ -347,12 +347,12 @@ export default function ScreengrabPanel() {
 
                   {/* Timestamp */}
                   {screengrab.attached_at && (
-                    <div className="text-gray-500 text-xs mt-1">
+                    <div className="text-surface-400 text-xs mt-1">
                       Attached: {new Date(screengrab.attached_at).toLocaleString()}
                     </div>
                   )}
                   {!screengrab.attached_at && screengrab.first_seen_at && (
-                    <div className="text-gray-500 text-xs mt-1">
+                    <div className="text-surface-400 text-xs mt-1">
                       Detected: {new Date(screengrab.first_seen_at).toLocaleString()}
                     </div>
                   )}
@@ -364,7 +364,7 @@ export default function ScreengrabPanel() {
                     <button
                       onClick={() => handleAttach(screengrab.id)}
                       disabled={attaching === screengrab.id || batchAttaching}
-                      className="px-3 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded transition-colors"
+                      className="px-3 py-1 bg-pbs-500 hover:bg-pbs-400 disabled:opacity-50 text-white text-sm rounded transition-colors"
                       aria-label={`Attach ${screengrab.filename}`}
                     >
                       {attaching === screengrab.id ? 'Attaching...' : 'Attach'}
@@ -372,7 +372,7 @@ export default function ScreengrabPanel() {
                     <button
                       onClick={() => handleIgnore(screengrab.id)}
                       disabled={attaching === screengrab.id || batchAttaching}
-                      className="px-3 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-gray-300 text-sm rounded transition-colors"
+                      className="px-3 py-1 bg-surface-700 hover:bg-surface-600 disabled:opacity-50 text-surface-300 text-sm rounded transition-colors"
                       aria-label={`Ignore ${screengrab.filename}`}
                     >
                       Ignore
@@ -386,7 +386,7 @@ export default function ScreengrabPanel() {
       </div>
 
       {/* Summary Footer */}
-      <div className="flex items-center justify-between text-sm text-gray-400 px-2">
+      <div className="flex items-center justify-between text-sm text-surface-400 px-2">
         <div>
           Total: {counts.new + counts.attached + counts.no_match} screengrabs
         </div>
