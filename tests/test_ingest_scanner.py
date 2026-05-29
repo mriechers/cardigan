@@ -887,3 +887,128 @@ class TestRecursiveScanning:
         # Scan should succeed despite broken subdirectory
         assert result.success is True
         assert result.total_files_on_server == 2
+
+    @pytest.mark.asyncio
+    async def test_recursive_scan_skips_ancestor_segment_loop(self):
+        """Don't descend into a subdir whose name matches an ancestor segment.
+
+        Regression for mmingest loop where /Education/aka_teacher/Education/
+        mirrored top-level /Education/ content, causing repeated re-traversal.
+        """
+        scanner = IngestScanner(base_url="https://test.com", directories=["/"])
+
+        root_html = """
+        <html><body>
+        <a href="Education/">Education/</a>
+        <a href="root.srt">root.srt</a>
+        </body></html>
+        """
+        education_html = """
+        <html><body>
+        <a href="aka_teacher/">aka_teacher/</a>
+        <a href="ed_file.srt">ed_file.srt</a>
+        </body></html>
+        """
+        aka_teacher_html = """
+        <html><body>
+        <a href="Education/">Education/</a>
+        <a href="aka_file.srt">aka_file.srt</a>
+        </body></html>
+        """
+
+        mock_responses = {
+            "https://test.com/": root_html,
+            "https://test.com/Education/": education_html,
+            "https://test.com/Education/aka_teacher/": aka_teacher_html,
+        }
+
+        scanned_urls = []
+
+        async def mock_get(url, auth=None):
+            scanned_urls.append(url)
+            if "aka_teacher/Education" in url:
+                raise AssertionError(
+                    "Should not descend into Education/ inside an Education ancestor — "
+                    "this is the mmingest loop pattern"
+                )
+            resp = MagicMock()
+            resp.text = mock_responses.get(url, "<html></html>")
+            resp.raise_for_status = MagicMock()
+            return resp
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_instance = AsyncMock()
+            mock_instance.get = mock_get
+            mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_client.return_value = mock_instance
+
+            with patch.object(scanner, "_track_files_batch", return_value=(3, 3, 0)):
+                result = await scanner.scan()
+
+        assert result.success is True
+        assert "https://test.com/Education/aka_teacher/Education/" not in scanned_urls
+
+    @pytest.mark.asyncio
+    async def test_recursive_scan_dedupes_visited_urls(self):
+        """Don't revisit the same URL twice across the crawl.
+
+        Defends against true symlink loops where two distinct paths in the crawl
+        graph resolve to the identical URL.
+        """
+        scanner = IngestScanner(base_url="https://test.com", directories=["/"])
+
+        # Two different parents (a/, b/) each link to the same shared/ URL.
+        root_html = """
+        <html><body>
+        <a href="a/">a/</a>
+        <a href="b/">b/</a>
+        </body></html>
+        """
+        a_html = """
+        <html><body>
+        <a href="https://test.com/shared/">shared/</a>
+        <a href="a_file.srt">a_file.srt</a>
+        </body></html>
+        """
+        b_html = """
+        <html><body>
+        <a href="https://test.com/shared/">shared/</a>
+        <a href="b_file.srt">b_file.srt</a>
+        </body></html>
+        """
+        shared_html = """
+        <html><body>
+        <a href="shared_file.srt">shared_file.srt</a>
+        </body></html>
+        """
+
+        mock_responses = {
+            "https://test.com/": root_html,
+            "https://test.com/a/": a_html,
+            "https://test.com/b/": b_html,
+            "https://test.com/shared/": shared_html,
+        }
+
+        get_call_counts: dict[str, int] = {}
+
+        async def mock_get(url, auth=None):
+            get_call_counts[url] = get_call_counts.get(url, 0) + 1
+            resp = MagicMock()
+            resp.text = mock_responses.get(url, "<html></html>")
+            resp.raise_for_status = MagicMock()
+            return resp
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_instance = AsyncMock()
+            mock_instance.get = mock_get
+            mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_client.return_value = mock_instance
+
+            with patch.object(scanner, "_track_files_batch", return_value=(3, 3, 0)):
+                result = await scanner.scan()
+
+        assert result.success is True
+        # /shared/ is reachable via /a/ AND /b/, but should only be fetched once.
+        assert get_call_counts.get("https://test.com/shared/", 0) == 1
