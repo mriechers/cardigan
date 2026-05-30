@@ -392,7 +392,6 @@ class IngestScanner:
         if canonical_url in visited_urls:
             logger.debug(f"Skipping already-visited URL: {url}")
             return []
-        visited_urls.add(canonical_url)
 
         files: List[RemoteFile] = []
 
@@ -404,6 +403,11 @@ class IngestScanner:
 
             response = await client.get(url, auth=auth)
             response.raise_for_status()
+
+            # Mark visited only after a successful fetch. If a transient failure
+            # stamped the URL pre-fetch, a sibling path linking to the same URL
+            # would silently skip it on retry rather than getting a real chance.
+            visited_urls.add(canonical_url)
 
             # Parse HTML into files and subdirectory links
             found_files, subdirs = self._parse_directory_listing(
@@ -433,10 +437,12 @@ class IngestScanner:
                     logger.debug(f"Skipping ignored directory: {subdir_path}")
                     continue
 
-                # Skip subdirs whose name matches an ancestor segment. Catches the
-                # mmingest loop pattern (/Education/.../Education/) where mirrored
-                # directories return identical listings and would otherwise blow the
-                # request timeout budget. See ingest_scanner issue #161.
+                # Skip subdirs whose name reappears in the ancestor path.
+                # Defends against server-side directory mirroring (bind mounts,
+                # Apache Alias directives, symlinks) where /<X>/.../<X>/ returns
+                # the same listing as /<X>/ and the crawl would otherwise walk
+                # mirrored content until the request timeout fires. Originally
+                # surfaced on mmingest under /Education/.
                 if subdir_name.lower() in ancestor_segments:
                     logger.warning(
                         f"Skipping recursive loop: '{subdir_name}' already in ancestor path {directory_path}"

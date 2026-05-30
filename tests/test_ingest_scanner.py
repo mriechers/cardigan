@@ -1012,3 +1012,107 @@ class TestRecursiveScanning:
         assert result.success is True
         # /shared/ is reachable via /a/ AND /b/, but should only be fetched once.
         assert get_call_counts.get("https://test.com/shared/", 0) == 1
+
+    @pytest.mark.asyncio
+    async def test_ancestor_segment_loop_check_is_case_insensitive(self):
+        """The ancestor-segment guard normalizes case both sides of the compare.
+
+        Pins the lowercase comparison invariant. Mirrors how `ignore_directories`
+        is normalized at __init__ (api/services/ingest_scanner.py line ~99). Both
+        must stay in lockstep — if one drops `.lower()`, the scanner reverts to
+        being vulnerable to the loop on case-mixed servers.
+        """
+        scanner = IngestScanner(base_url="https://test.com", directories=["/"])
+
+        root_html = """
+        <html><body>
+        <a href="Education/">Education/</a>
+        </body></html>
+        """
+        # Ancestor is "Education" (capital E); child is "education" (lowercase).
+        # If the guard didn't lowercase, this would be a fresh descent.
+        education_html = """
+        <html><body>
+        <a href="education/">education/</a>
+        <a href="parent_file.srt">parent_file.srt</a>
+        </body></html>
+        """
+
+        mock_responses = {
+            "https://test.com/": root_html,
+            "https://test.com/Education/": education_html,
+        }
+
+        async def mock_get(url, auth=None):
+            resp = MagicMock()
+            resp.text = mock_responses.get(url, "<html></html>")
+            resp.raise_for_status = MagicMock()
+            return resp
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_instance = AsyncMock()
+            mock_instance.get = mock_get
+            mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_client.return_value = mock_instance
+
+            with patch.object(scanner, "_track_files_batch", return_value=(1, 1, 0)):
+                files = await scanner._scan_directory(
+                    "https://test.com/Education/", "/Education/"
+                )
+
+        # The case-mismatched child should still be recognized as the ancestor.
+        # Only the parent's .srt file should come back; no recursion into education/.
+        assert [f.filename for f in files] == ["parent_file.srt"]
+
+    @pytest.mark.asyncio
+    async def test_loop_guard_applies_to_media_id_entry_point(self):
+        """The loop guard fires from `check_ingest_server_for_media_id` too.
+
+        Pins that the per-media-ID search path threads through the same
+        `_scan_directory` defenses. If a future refactor breaks the threading,
+        scheduled `scan()` runs would stay safe while interactive Media-ID
+        lookups silently regress.
+        """
+        scanner = IngestScanner(base_url="https://test.com", directories=["/Education/"])
+
+        education_html = """
+        <html><body>
+        <a href="2WLI1209HD.srt">2WLI1209HD.srt</a>
+        <a href="aka_teacher/">aka_teacher/</a>
+        </body></html>
+        """
+        aka_teacher_html = """
+        <html><body>
+        <a href="Education/">Education/</a>
+        <a href="2WLI1210HD.srt">2WLI1210HD.srt</a>
+        </body></html>
+        """
+
+        mock_responses = {
+            "https://test.com/Education/": education_html,
+            "https://test.com/Education/aka_teacher/": aka_teacher_html,
+        }
+
+        scanned_urls = []
+
+        async def mock_get(url, auth=None):
+            scanned_urls.append(url)
+            resp = MagicMock()
+            resp.text = mock_responses.get(url, "<html></html>")
+            resp.raise_for_status = MagicMock()
+            return resp
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_instance = AsyncMock()
+            mock_instance.get = mock_get
+            mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_client.return_value = mock_instance
+
+            files = await scanner.check_ingest_server_for_media_id("2WLI1209HD")
+
+        # The loop URL must not be fetched even from this entry point.
+        assert "https://test.com/Education/aka_teacher/Education/" not in scanned_urls
+        # And the legitimate match for the media ID should still come through.
+        assert any(f.filename == "2WLI1209HD.srt" for f in files)
