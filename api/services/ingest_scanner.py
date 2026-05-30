@@ -423,11 +423,7 @@ class IngestScanner:
         if depth < self.MAX_SCAN_DEPTH:
             # Lowercase ancestor segments for case-insensitive loop detection.
             # Mirrors how `ignore_directories` is normalized at init.
-            ancestor_segments = {
-                segment.lower()
-                for segment in directory_path.strip("/").split("/")
-                if segment
-            }
+            ancestor_segments = {segment.lower() for segment in directory_path.strip("/").split("/") if segment}
 
             for subdir_name, subdir_url in subdirs:
                 subdir_path = f"{directory_path.rstrip('/')}/{subdir_name}/"
@@ -450,9 +446,7 @@ class IngestScanner:
                     continue
 
                 try:
-                    sub_files = await self._scan_directory(
-                        subdir_url, subdir_path, depth + 1, visited_urls
-                    )
+                    sub_files = await self._scan_directory(subdir_url, subdir_path, depth + 1, visited_urls)
                     files.extend(sub_files)
                 except Exception as e:
                     logger.warning(f"Failed to scan subdirectory {subdir_path}: {e}")

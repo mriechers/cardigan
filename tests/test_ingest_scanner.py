@@ -1057,9 +1057,7 @@ class TestRecursiveScanning:
             mock_client.return_value = mock_instance
 
             with patch.object(scanner, "_track_files_batch", return_value=(1, 1, 0)):
-                files = await scanner._scan_directory(
-                    "https://test.com/Education/", "/Education/"
-                )
+                files = await scanner._scan_directory("https://test.com/Education/", "/Education/")
 
         # The case-mismatched child should still be recognized as the ancestor.
         # Only the parent's .srt file should come back; no recursion into education/.
