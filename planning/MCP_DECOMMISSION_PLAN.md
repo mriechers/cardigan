@@ -378,7 +378,7 @@ If UW VPN already gates access, cardigan API may not need additional auth — sa
 - Container? Direct deployment? Systemd service?
 - Single-VPS or multi-host (separate API / web / worker)?
 - Database backups — managed PostgreSQL instead of SQLite, or stay on SQLite + cron-snapshot?
-- Migration path from current SQLite schema if a DB switch is needed (Alembic exists in `reporter-tools/`, not yet in cardigan)
+- Migration path from current SQLite schema if a DB switch is needed (cardigan-v4 already uses Alembic — 14 migrations by the time PR 1 lands; existing chain extends naturally to any future SQLite → PostgreSQL switch)
 
 **5. Editor adoption pattern.**
 
