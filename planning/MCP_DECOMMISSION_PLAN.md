@@ -61,6 +61,7 @@ Replace cardigan's MCP server (`mcp_server/server.py`, 2,174 lines + 16 tools + 
 | `api/services/airtable_writer.py` | `AirtableSstWriter` class — PATCH records, post audit comments. Houses `WRITABLE_FIELDS` allowlist (moved from `mcp_server/server.py`). |
 | `api/models/sst.py` | Pydantic models: `ProposeEditRequest`, `ProposedEdit`, `ProposedEditsResponse`, `FieldChange`, `ConflictDetail`, `CommitResponse`. |
 | `api/routers/sst.py` | FastAPI router for `/sst/*` endpoints. |
+| `alembic/versions/014_add_proposed_sst_edits.py` | Alembic migration adding `proposed_sst_edits` + `sst_commit_audit` tables. **Note:** cardigan-v4 already uses Alembic with 13 existing migrations (001-013); follow the same pattern. Migration `008_add_chat_tables.py` is the current `008`, so the new tables get number **014**. |
 | `tests/test_airtable_writer.py` | Unit tests for writer service. |
 | `tests/test_sst_router.py` | Endpoint tests (mocked AirTable). |
 | `tests/test_proposed_edits_db.py` | DB-level tests for the new tables. |
@@ -69,13 +70,15 @@ Replace cardigan's MCP server (`mcp_server/server.py`, 2,174 lines + 16 tools + 
 
 | File | Change |
 |---|---|
-| `api/services/database.py` | Add `proposed_sst_edits_table` + `sst_commit_audit_table` (migration 008). Import `UniqueConstraint` from sqlalchemy. |
+| `api/services/database.py` | Add `proposed_sst_edits_table` + `sst_commit_audit_table` SQLAlchemy Table objects (matches existing pattern — database.py is the ORM-side canonical schema, Alembic migration 014 does the DDL). Import `UniqueConstraint` from sqlalchemy (not currently in the import list at line 15-31). |
 | `api/main.py` | Mount `sst.router` at `/api/sst`. |
 | `mcp_server/server.py` | Replace local `WRITABLE_FIELDS` with `from api.services.airtable_writer import WRITABLE_FIELDS`. This is the ONLY behavior-affecting change in PR 1 — no functional difference (same dict, same source). Prevents drift during PR 1's window. |
 
 ### Endpoint catalog
 
-All under `/api/sst/`. Tailscale provides network-level access control; **no FastAPI auth middleware** on these endpoints (relies on tailnet membership).
+All under `/api/sst/`. Tailscale provides network-level access control.
+
+**Interaction with `APIKeyMiddleware`** (`api/middleware/auth.py`): the existing middleware enforces `X-API-Key` against `CARDIGAN_API_KEY` env var **only when that env var is set** — when unset/empty, it operates in dev mode and lets all requests through. The tailnet deployment **leaves `CARDIGAN_API_KEY` unset**, so the middleware no-ops and the new `/api/sst/*` endpoints need no header from skills. If the API ever gets exposed beyond the tailnet (e.g., a future public deployment) and `CARDIGAN_API_KEY` becomes required, the choice will be either: (a) add `/api/sst/` to `EXEMPT_PREFIXES` (line 17 of `auth.py`), or (b) have the `cardigan-api` skill include the key. Decision deferred to that future deployment.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -86,18 +89,54 @@ All under `/api/sst/`. Tailscale provides network-level access control; **no Fas
 | DELETE | `/{media_id}/proposed-edits` | Clear all staged edits for a media_id |
 | POST | `/{media_id}/proposed-edits/commit` | Apply staged edits with concurrency check + audit comment + audit-log row |
 
-### SQLite schema (migration 008)
+### SQLite schema (Alembic migration 014)
 
-Two tables, additive — no changes to existing tables.
+Two new tables, additive — no changes to existing tables. Add the SQLAlchemy `Table(...)` definitions verbatim to `api/services/database.py` (alongside the existing `jobs_table`, `session_stats_table`, etc.), and write the matching Alembic migration at `alembic/versions/014_add_proposed_sst_edits.py`.
 
-`proposed_sst_edits`:
-- `id` PK, `media_id` (indexed), `airtable_record_id`, `field_key`, `airtable_column`, `current_value_snapshot`, `proposed_value`, `reason`, `staged_at`, `staged_by`, `app_version`
-- `UNIQUE (media_id, field_key)` — re-proposing same field is UPSERT
+**`proposed_sst_edits`:**
 
-`sst_commit_audit`:
-- `id` PK, `media_id` (indexed), `airtable_record_id`, `committed_at`, `committed_by`, `outcome` (`"success"` | `"conflict"` | `"airtable_error"` | `"limit_exceeded"`), `fields_json`, `conflict_details_json`, `airtable_comment_posted`, `error_message`, `app_version`
+```python
+proposed_sst_edits_table = Table(
+    "proposed_sst_edits",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("media_id", Text, nullable=False, index=True),
+    Column("airtable_record_id", Text, nullable=False),
+    Column("field_key", Text, nullable=False),           # e.g. "short_description"
+    Column("airtable_column", Text, nullable=False),     # e.g. "Short Description"
+    Column("current_value_snapshot", Text, nullable=True),  # value at stage time
+    Column("proposed_value", Text, nullable=False),
+    Column("reason", Text, nullable=False),
+    Column("staged_at", DateTime, server_default=func.current_timestamp()),
+    Column("app_version", Text, nullable=True),
+    UniqueConstraint("media_id", "field_key", name="uq_proposed_sst_edits_media_field"),
+)
+```
 
-Full SQLAlchemy `Table(...)` definitions in the design conversation; replicate verbatim into `database.py`.
+**`sst_commit_audit`:**
+
+```python
+sst_commit_audit_table = Table(
+    "sst_commit_audit",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("media_id", Text, nullable=False, index=True),
+    Column("airtable_record_id", Text, nullable=False),
+    Column("committed_at", DateTime, server_default=func.current_timestamp()),
+    Column("outcome", Text, nullable=False),                # "success" | "conflict" | "airtable_error" | "limit_exceeded"
+    Column("fields_json", Text, nullable=False),            # JSON: [{field, column, old, new, reason}, ...]
+    Column("conflict_details_json", Text, nullable=True),   # populated on "conflict"
+    Column("airtable_comment_posted", Boolean, server_default="0"),
+    Column("error_message", Text, nullable=True),
+    Column("app_version", Text, nullable=True),
+)
+```
+
+**Schema decisions worth naming:**
+
+- **No `staged_by` / `committed_by` identity columns** in the initial schema. The architecture has no per-request identity source today — `APIKeyMiddleware` uses a single shared key, Tailscale's device identity doesn't reach the FastAPI request context, and `get_remote_address` only gives an IP. Adding these columns now would populate them with `None` or a static placeholder. Defer until the UW VPS multi-user deployment provides a real identity source; add via a follow-up Alembic migration at that point.
+- **`airtable_record_id` is redundant with `media_id`** at the AirTable level (one media_id → one record). Kept because storing it avoids an extra AirTable lookup at commit time.
+- **`UNIQUE (media_id, field_key)`** enables UPSERT semantics on re-propose (Q1-A).
 
 ### Rate limiting
 
@@ -121,14 +160,18 @@ Justification: even though Tailscale removes the public-endpoint concern, rate l
 
 - [ ] `pytest` passes (including new test files)
 - [ ] `ruff check` clean
-- [ ] Verify via `curl` (with `TAILSCALE` ACL allowing localhost) that:
+- [ ] `alembic upgrade head` applies migration 014 cleanly on a fresh database AND on a copy of the current production SQLite
+- [ ] Confirm `CARDIGAN_API_KEY` is unset in the dev/test environment (or `/api/sst/` calls include the header) — otherwise curl tests will 401 before reaching the handlers
+- [ ] Verify via `curl` that:
   - GET `/api/sst/{known_media_id}/metadata` returns AirTable data
   - POST `/api/sst/{known_media_id}/proposed-edits` with valid body stages an edit and returns 201
   - GET `/api/sst/{known_media_id}/proposed-edits` shows the staged edit
   - Re-POSTing the same field overwrites (Q1-A behavior)
   - POST `/api/sst/{known_media_id}/proposed-edits/commit` writes to AirTable, posts audit comment, returns 200
   - Concurrency conflict path: edit AirTable manually between propose and commit, verify commit returns 409
-- [ ] MCP server still works end-to-end (imports the shared `WRITABLE_FIELDS` correctly)
+- [ ] MCP server still works end-to-end:
+  - Import resolves: `python -c "from api.services.airtable_writer import WRITABLE_FIELDS"` succeeds from the MCP server's start-time venv (if MCP runs from a separate venv than the API, install the API package or share the venv)
+  - Full editor session via Claude Desktop still completes a propose → review → commit cycle
 - [ ] Commit message tags: `[Agent: Main Assistant]` per workspace convention
 
 ---
@@ -223,12 +266,14 @@ These should be documented as concrete patterns in the agent's body, with exampl
 ### Pre-merge checklist
 
 - [ ] All 5 skills have `SKILL.md` files that pass workspace skill conventions (frontmatter + body structure)
+- [ ] `cardigan-api/SKILL.md` reads its base URL from a single source (env var like `CARDIGAN_API_BASE_URL`, with a documented default for the current tailnet hostname). Retargeting to UW VPS later should be a one-line config change, not a skill edit.
+- [ ] `cardigan-edit/SKILL.md` explicitly enforces propose → review → commit ordering with: (a) a numbered step list, (b) a prohibition with reason ("NEVER call commit without first showing the user the output of review_proposed_edits — the API will accept it but the user must see the diff first"), and (c) an example transcript showing the ordering. The MCP tool catalog used to enforce this implicitly via tool names; the skill must enforce it explicitly.
 - [ ] `cardigan-shepherd.md` agent definition validated against `pbswi-auditor`'s structure
 - [ ] Test the cardigan-shepherd agent against a real editing session — at least one full flow: discovery → load → edit → commit
 - [ ] Verify tailnet access works from a 2nd device (collaborator's laptop, if available)
 - [ ] MCP server stops running cleanly (no orphan processes)
 - [ ] All deprecation headers are in place and link correctly
-- [ ] Update `cardigan-v4/CLAUDE.md` and parent `pbswi/CLAUDE.md` to reflect the new architecture (no "9 tools + 6 prompts" references remain)
+- [ ] Update `cardigan-v4/CLAUDE.md` and parent `pbswi/CLAUDE.md` to reflect the new architecture (no "9 tools + 6 prompts" references remain; CLAUDE.md still references `planning/DESIGN_3.5.md` which is now in `planning/archive/` — fix that reference too)
 - [ ] Commit message tags: `[Agent: Main Assistant]`
 
 ---
@@ -242,7 +287,14 @@ After PR 2 merges, dogfood for ~1 week before declaring the migration complete:
 - Check that `sst_commit_audit` table is populating with the expected rows per session
 - File any agent-behavior issues with label `legacy-data` or `agent-discovered` for cross-reference
 
-If serious regressions surface, the deprecated MCP server is one revert away — but the cost of NOT cutting over is "two architectures to maintain," so the bar for reverting is high. Treat it as a real bug fix instead.
+If serious regressions surface, the bar for reverting is high — the cost of NOT cutting over is "two architectures to maintain," so treat regressions as real bug fixes first. But if a revert IS the right call, the path is:
+
+1. `git revert <PR 2 merge commit>` — restores `mcp_server/` to runtime status, removes new skills + agent + deprecation headers, restores `EDITOR_AGENT_INSTRUCTIONS.md` to its undeprecated form. (PR 1's API expansion stays — purely additive.)
+2. Re-enable MCP server startup: revert `docker-compose.yml` and `init.sh` changes if any; re-add the cardigan entry to `cardigan-v4/.mcp.json` if it was removed.
+3. Restart MCP server process. Verify Claude Desktop can connect and the editor workflow completes a propose → review → commit cycle.
+4. File an issue documenting the regression that drove the revert, with reproduction steps from the failed dogfooding session, so the next cutover attempt addresses it specifically.
+
+Migration 014 stays in place across the revert — the new tables are unused but harmless.
 
 ---
 
@@ -250,7 +302,7 @@ If serious regressions surface, the deprecated MCP server is one revert away —
 
 | Risk | Mitigation |
 |---|---|
-| Shepherd agent skips `review_proposed_edits` before commit | Tight skill instructions in `cardigan-edit/SKILL.md`; spell out the requirement and the failure mode. The MCP tool ordering used to enforce this implicitly. |
+| Shepherd agent skips `review_proposed_edits` before commit | `cardigan-edit/SKILL.md` enforces ordering with three mechanisms: (1) a numbered step list in the workflow section; (2) an explicit prohibition with reason — "NEVER call commit without first showing the user the output of `review_proposed_edits` — the API will accept the commit, but the user must see the diff first" (paraphrasing the MCP-era tool description for `commit_sst_edits`); (3) an example transcript demonstrating the correct sequence. The MCP tool catalog used to enforce ordering implicitly via tool names; the skill must enforce it explicitly because nothing at the HTTP layer prevents calling commit without review. Verify during PR 2 pre-merge dogfooding. |
 | Stale-warning not surfaced to user | Skill instructions mandate quoting the warning text from the API response. Verify in dogfooding. |
 | Concurrency conflict path under-tested | PR 1 test suite covers it; verify manually during PR 1 curl checklist. |
 | Tailscale install friction for 2nd/3rd users | Schedule a 15-min onboarding call with each; provide a written cheat-sheet. Not a code problem. |
@@ -334,9 +386,12 @@ If cardigan moves to VPS, the 2-3 collaborators no longer need Tailscale install
 
 ### What this means for the current migration
 
-**Nothing changes in PR 1 or PR 2.** The skill-based architecture is the right substrate for either deployment model. Document this section so the eventual VPS migration starts from clear questions, not blank-slate analysis.
+**Two forward-design hooks are baked into the current PRs** so future VPS migration is a one-line change, not a refactor:
 
-**One thing worth doing during PR 2:** make sure the `cardigan-api` skill's base URL is configured via a single source of truth (env var, skill-level config) so retargeting from homelab tailnet to UW VPS hostname is a one-line change, not a skill-content edit.
+1. **`cardigan-api` skill base URL via env var** (promoted to PR 2 pre-merge checklist). Retargeting from homelab tailnet to UW VPS hostname will be a config change, not a skill edit.
+2. **Schema does NOT include `staged_by` / `committed_by` columns** (see the schema-decisions block in PR 1). When the UW VPS deployment provides a real per-request identity source (Shibboleth, Google Workspace UW, or whatever institutional IdP gets used), add those columns via a follow-up Alembic migration — not now, when they'd only carry `None`.
+
+Otherwise: nothing else changes in PR 1 or PR 2 for VPS readiness. The skill-based architecture is the right substrate for either deployment model.
 
 ---
 
