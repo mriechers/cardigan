@@ -368,6 +368,7 @@ class IngestScanner:
         url: str,
         directory_path: str,
         depth: int = 0,
+        visited_urls: Optional[set] = None,
     ) -> List[RemoteFile]:
         """
         Fetch and parse a directory listing, recursing into subdirectories.
@@ -376,10 +377,22 @@ class IngestScanner:
             url: Full URL to the directory
             directory_path: Path relative to base URL
             depth: Current recursion depth (0 = top-level configured directory)
+            visited_urls: Set of canonical URLs already crawled in THIS scan. Passed
+                through recursion to prevent re-walking the same URL (e.g., when two
+                different parents both link to a shared subdirectory). Initialized to
+                an empty set if None — each top-level caller gets a fresh set.
 
         Returns:
             List of RemoteFile objects (including from subdirectories)
         """
+        if visited_urls is None:
+            visited_urls = set()
+
+        canonical_url = url.rstrip("/")
+        if canonical_url in visited_urls:
+            logger.debug(f"Skipping already-visited URL: {url}")
+            return []
+
         files: List[RemoteFile] = []
 
         async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=True) as client:
@@ -390,6 +403,11 @@ class IngestScanner:
 
             response = await client.get(url, auth=auth)
             response.raise_for_status()
+
+            # Mark visited only after a successful fetch. If a transient failure
+            # stamped the URL pre-fetch, a sibling path linking to the same URL
+            # would silently skip it on retry rather than getting a real chance.
+            visited_urls.add(canonical_url)
 
             # Parse HTML into files and subdirectory links
             found_files, subdirs = self._parse_directory_listing(
@@ -403,16 +421,32 @@ class IngestScanner:
 
         # Recurse into subdirectories if within depth limit
         if depth < self.MAX_SCAN_DEPTH:
+            # Lowercase ancestor segments for case-insensitive loop detection.
+            # Mirrors how `ignore_directories` is normalized at init.
+            ancestor_segments = {segment.lower() for segment in directory_path.strip("/").split("/") if segment}
+
             for subdir_name, subdir_url in subdirs:
                 subdir_path = f"{directory_path.rstrip('/')}/{subdir_name}/"
 
-                # Check against ignore list
+                # Skip ignored directories (configured by name)
                 if subdir_name.lower() in self.ignore_directories:
                     logger.debug(f"Skipping ignored directory: {subdir_path}")
                     continue
 
+                # Skip subdirs whose name reappears in the ancestor path.
+                # Defends against server-side directory mirroring (bind mounts,
+                # Apache Alias directives, symlinks) where /<X>/.../<X>/ returns
+                # the same listing as /<X>/ and the crawl would otherwise walk
+                # mirrored content until the request timeout fires. Originally
+                # surfaced on mmingest under /Education/.
+                if subdir_name.lower() in ancestor_segments:
+                    logger.warning(
+                        f"Skipping recursive loop: '{subdir_name}' already in ancestor path {directory_path}"
+                    )
+                    continue
+
                 try:
-                    sub_files = await self._scan_directory(subdir_url, subdir_path, depth + 1)
+                    sub_files = await self._scan_directory(subdir_url, subdir_path, depth + 1, visited_urls)
                     files.extend(sub_files)
                 except Exception as e:
                     logger.warning(f"Failed to scan subdirectory {subdir_path}: {e}")
