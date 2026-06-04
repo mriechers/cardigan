@@ -22,6 +22,7 @@ from api.services.mmingest.parsers import (
     KNOWN_VARIANT_VOCAB,
     AutoindexParser,
     DirEntry,
+    GroupSelectionResult,
     ParsedFilename,
     ParseError,
     parse_filename,
@@ -460,88 +461,131 @@ class TestSelectPrimary:
 
     def test_single_entry_is_primary(self):
         entry = self._make_parsed("6POL0101.srt")
-        primary, variants, superseded = select_primary([entry])
-        assert primary == entry
-        assert variants == []
-        assert superseded == []
+        results = select_primary([entry])
+        assert len(results) == 1
+        r = results[0]
+        assert r.primary == entry
+        assert r.variants == []
+        assert r.superseded == []
 
-    def test_empty_list_returns_none(self):
-        primary, variants, superseded = select_primary([])
-        assert primary is None
-        assert variants == []
-        assert superseded == []
+    def test_empty_list_returns_empty(self):
+        results = select_primary([])
+        assert results == []
 
     def test_rev_latest_wins(self):
-        """Within a REV group, the latest date wins.
+        """Within a single (media_id, variant_tag) group, latest REV date wins.
 
-        Uses two parseable REV filenames with different dates.  select_primary
-        is agnostic about whether entries share the same media_id — the caller
-        is responsible for grouping; here we supply two REV entries for the
-        same episode to simulate a real supersession scenario.
+        Both entries must share the same media_id so select_primary sees them
+        in the same group.  We use two REV filenames for 6POL0101.
         """
-        # Both are parseable; 0106 REV date (2026-04-23) is older than 0107 (2026-04-30)
-        old = self._make_parsed("6POL0106_REV20260423.srt")
-        new = self._make_parsed("6POL0107_REV20260430.srt")
-        primary, variants, superseded = select_primary([old, new])
-        assert primary is not None
-        # newer revision date wins (lexicographic ISO comparison is chronological)
-        assert primary.revision_date == "2026-04-30"
-        assert old in superseded
-        assert len(superseded) == 1
-        assert variants == []
+        old = self._make_parsed("6POL0101_REV20260423.srt")
+        new = self._make_parsed("6POL0101_REV20260430.srt")
+        results = select_primary([old, new])
+        assert len(results) == 1
+        r = results[0]
+        assert r.primary is not None
+        assert r.primary.revision_date == "2026-04-30"
+        assert old in r.superseded
+        assert len(r.superseded) == 1
+        assert r.variants == []
 
     def test_rev_supersession_correct_order(self):
-        """Older REV ends up in superseded, newer is primary."""
-        older = self._make_parsed("6POL0106_REV20260423.srt")
-        # We need a newer REV for the same show.  Manufacture via direct field overwrite.
-        newer = self._make_parsed("6POL0107_REV20260430.srt")
-        # Force same media_id to simulate a real group (select_primary doesn't check)
-        primary, variants, superseded = select_primary([older, newer])
-        assert primary == newer
-        assert older in superseded
+        """Older REV ends up in superseded, newer is primary — same media_id."""
+        older = self._make_parsed("6POL0101_REV20260423.srt")
+        newer = self._make_parsed("6POL0101_REV20260430.srt")
+        results = select_primary([older, newer])
+        assert len(results) == 1
+        r = results[0]
+        assert r.primary == newer
+        assert older in r.superseded
+
+    def test_different_media_ids_produce_separate_groups(self):
+        """Entries with different media_ids are placed in separate groups."""
+        entry_0106 = self._make_parsed("6POL0106_REV20260423.srt")
+        entry_0107 = self._make_parsed("6POL0107_REV20260430.srt")
+        results = select_primary([entry_0106, entry_0107])
+        # Two distinct media_ids → two groups, each with one primary
+        assert len(results) == 2
+        primaries = [r.primary for r in results]
+        assert entry_0106 in primaries
+        assert entry_0107 in primaries
+        for r in results:
+            assert r.superseded == []
+
+    def test_pledge_group_rev_independent_of_no_variant_group(self):
+        """PLEDGE variant's REV race is independent of the no-variant primary group.
+
+        Scenario: one show (6POL0101) has two REV deliveries of the no-variant
+        primary AND two REV deliveries of the PLEDGE cut.  select_primary must
+        pick the winning REV within each (media_id, variant_tag) group without
+        cross-contamination.
+        """
+        # No-variant group: two REVs
+        primary_old = self._make_parsed("6POL0101_REV20260410.mp4")
+        primary_new = self._make_parsed("6POL0101_REV20260430.mp4")
+        # PLEDGE group: two REVs
+        pledge_old = self._make_parsed("6POL0101_REV20260410_PLEDGE.mp4")
+        pledge_new = self._make_parsed("6POL0101_REV20260430_PLEDGE.mp4")
+
+        results = select_primary([primary_old, primary_new, pledge_old, pledge_new])
+
+        # Expect exactly two groups
+        assert len(results) == 2
+        by_key = {r.group_key: r for r in results}
+
+        # No-variant group (variant_tag=None)
+        no_variant = by_key[("6POL0101", None)]
+        assert no_variant.primary == primary_new
+        assert primary_old in no_variant.superseded
+
+        # PLEDGE group (variant_tag="PLEDGE")
+        pledge_group = by_key[("6POL0101", "PLEDGE")]
+        assert pledge_group.primary == pledge_new
+        assert pledge_old in pledge_group.superseded
 
     def test_known_variant_passes_through(self):
-        """PLEDGE variant is not part of the primary's REV race.
+        """PLEDGE variant is routed to its own group, not mixed with no-variant.
 
-        In real usage, select_primary is called on entries that share the same
-        (media_id, variant_tag) group.  The PLEDGE entry belongs to the PLEDGE
-        group; the no-variant primary belongs to the None-variant group.  They
-        are NOT mixed in the same call.
-
-        This test verifies the no-variant group call returns the primary cleanly.
-        The separate PLEDGE parse is asserted to have variant_tag='PLEDGE' to
-        confirm the vocab lookup works.
+        This test verifies that passing a mix of no-variant and PLEDGE entries
+        for the same media_id produces two separate groups, not a collision.
         """
         primary_entry = self._make_parsed("2WLI0501HD.srt")
-        # Confirm PLEDGE parses correctly (separate group — not mixed into select_primary)
-        pledge_result = parse_filename("2WLI0501HD_PLEDGE.mp4")
-        assert isinstance(pledge_result, ParsedFilename)
-        assert pledge_result.variant_tag == "PLEDGE"
-        # The no-variant group: primary entry stands alone
-        primary, variants, superseded = select_primary([primary_entry])
-        assert primary == primary_entry
-        assert variants == []
+        pledge_entry = self._make_parsed("2WLI0501HD_PLEDGE.mp4")
+        assert pledge_entry.variant_tag == "PLEDGE"
+
+        results = select_primary([primary_entry, pledge_entry])
+        assert len(results) == 2
+        by_key = {r.group_key: r for r in results}
+        assert by_key[("2WLI0501", None)].primary == primary_entry
+        assert by_key[("2WLI0501", "PLEDGE")].primary == pledge_entry
 
     def test_unknown_tag_excluded_from_rev_race(self):
-        """Entries with unknown_tag are returned as variants, not superseded."""
+        """Entries with unknown_tag are returned as variants, not superseded.
+
+        Both entries have the same media_id, so they land in one group.
+        The unknown-tag entry is a bystander and does not participate in the
+        REV race.
+        """
         known = self._make_parsed("6POL0101.srt")
-        unknown_tagged = self._make_parsed("6POL0103_NoBugTest.srt")
-        # unknown_tagged has unknown_tag="NoBugTest"
+        unknown_tagged = self._make_parsed("6POL0101_NoBugTest.srt")
         assert unknown_tagged.unknown_tag is not None
 
-        primary, variants, superseded = select_primary([known, unknown_tagged])
-        # known has no unknown_tag, so it's primary; unknown_tagged is in variants
-        assert primary == known
-        assert unknown_tagged in variants
-        assert superseded == []
+        results = select_primary([known, unknown_tagged])
+        assert len(results) == 1
+        r = results[0]
+        assert r.primary == known
+        assert unknown_tagged in r.variants
+        assert r.superseded == []
 
     def test_no_rev_multiple_entries(self):
         """Without revision dates, first entry wins, rest go to superseded."""
         a = self._make_parsed("6POL0101.srt")
-        b = self._make_parsed("6POL0102.srt")
-        primary, variants, superseded = select_primary([a, b])
-        assert primary == a
-        assert b in superseded
+        b = self._make_parsed("6POL0101.mp4")
+        results = select_primary([a, b])
+        assert len(results) == 1
+        r = results[0]
+        assert r.primary == a
+        assert b in r.superseded
 
 
 # ---------------------------------------------------------------------------

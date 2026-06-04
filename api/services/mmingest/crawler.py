@@ -141,6 +141,166 @@ class TokenBucket:
 
 
 # ---------------------------------------------------------------------------
+# Two-lane work queue
+# ---------------------------------------------------------------------------
+
+
+class TwoLaneWorkQueue:
+    """Bounded async queue with two priority lanes.
+
+    Sidecar items (.srt/.scc — cheap to index, search depends on them) always
+    drain before primary items (.mp4, images, other) when both lanes have work.
+    S2's indexer calls :meth:`get` in a loop; the crawler calls :meth:`put`
+    with items whose ``lane`` field routes them automatically.
+
+    Capacity is shared across both lanes.  When the queue is full, :meth:`put`
+    blocks until a slot opens (asyncio cooperative back-pressure).
+
+    Usage::
+
+        queue = TwoLaneWorkQueue(maxsize=200)
+        await queue.put(work_item)          # routes by item.lane
+        item = await queue.get()            # sidecar-first drain
+        queue.task_done()                   # mirrors asyncio.Queue.task_done()
+    """
+
+    def __init__(self, maxsize: int = 0) -> None:
+        """
+        Args:
+            maxsize: Maximum total items across both lanes.  0 means unbounded.
+        """
+        self._maxsize = maxsize
+        self._sidecar: asyncio.Queue[FileWorkItem] = asyncio.Queue()
+        self._primary: asyncio.Queue[FileWorkItem] = asyncio.Queue()
+        self._total: int = 0
+        self._lock = asyncio.Lock()
+        # Notified whenever an item is placed so waiting get() can wake up
+        self._not_empty = asyncio.Event()
+
+    @property
+    def maxsize(self) -> int:
+        return self._maxsize
+
+    def qsize(self) -> int:
+        """Total items waiting across both lanes."""
+        return self._total
+
+    def empty(self) -> bool:
+        return self._total == 0
+
+    def full(self) -> bool:
+        return self._maxsize > 0 and self._total >= self._maxsize
+
+    async def put(self, item: FileWorkItem) -> None:
+        """Route *item* to its lane and block if the queue is full."""
+        while True:
+            async with self._lock:
+                if not self.full():
+                    self._route(item)
+                    self._total += 1
+                    self._not_empty.set()
+                    return
+            # Queue is full — yield and retry
+            await asyncio.sleep(0)
+
+    def put_nowait(self, item: FileWorkItem) -> None:
+        """Non-blocking put.  Raises ``asyncio.QueueFull`` if at capacity."""
+        if self.full():
+            raise asyncio.QueueFull()
+        self._route(item)
+        self._total += 1
+        self._not_empty.set()
+
+    def _route(self, item: FileWorkItem) -> None:
+        if item.lane == "sidecar":
+            self._sidecar.put_nowait(item)
+        else:
+            self._primary.put_nowait(item)
+
+    async def get(self) -> FileWorkItem:
+        """Return the next item — sidecar lane is always drained first."""
+        while True:
+            async with self._lock:
+                # Try sidecar first
+                if not self._sidecar.empty():
+                    item = self._sidecar.get_nowait()
+                    self._total -= 1
+                    if self._total == 0:
+                        self._not_empty.clear()
+                    return item
+                # Fall back to primary
+                if not self._primary.empty():
+                    item = self._primary.get_nowait()
+                    self._total -= 1
+                    if self._total == 0:
+                        self._not_empty.clear()
+                    return item
+            # Nothing available — wait for a put()
+            self._not_empty.clear()
+            await self._not_empty.wait()
+
+    def get_nowait(self) -> FileWorkItem:
+        """Non-blocking get.  Raises ``asyncio.QueueEmpty`` if empty."""
+        if not self._sidecar.empty():
+            item = self._sidecar.get_nowait()
+            self._total -= 1
+            if self._total == 0:
+                self._not_empty.clear()
+            return item
+        if not self._primary.empty():
+            item = self._primary.get_nowait()
+            self._total -= 1
+            if self._total == 0:
+                self._not_empty.clear()
+            return item
+        raise asyncio.QueueEmpty()
+
+    def task_done(self) -> None:
+        """Not tracked internally; provided for API compatibility with asyncio.Queue."""
+
+    async def join(self) -> None:
+        """Wait until the queue is empty (join semantics without task tracking)."""
+        while not self.empty():
+            await asyncio.sleep(0)
+
+
+# ---------------------------------------------------------------------------
+# Change-detection helpers
+# ---------------------------------------------------------------------------
+
+
+def _triples_match(known: ChangeTriple, current: ChangeTriple) -> bool:
+    """None-tolerant comparison of two HTTP change-detection triples.
+
+    ``current`` is always ``(None, mod_iso, size)`` because directory listings
+    never supply ETags.  ``known`` may have a real ETag if S2 persisted one
+    after a HEAD/GET.  The rule:
+
+    * If *either* side's ETag is None, skip the ETag comparison entirely.
+    * ``last_modified`` must match when both sides have a value; if one side
+      is None treat as "unknown → no mismatch signal from this field alone".
+    * ``content_length`` follows the same rule as ``last_modified``.
+    * A triple is "unchanged" only if no differing field is detected.
+    """
+    k_etag, k_mod, k_size = known
+    c_etag, c_mod, c_size = current
+
+    # ETag: only compare when both sides have one
+    if k_etag is not None and c_etag is not None and k_etag != c_etag:
+        return False
+
+    # last_modified: if both present and different → changed
+    if k_mod is not None and c_mod is not None and k_mod != c_mod:
+        return False
+
+    # content_length: if both present and different → changed
+    if k_size is not None and c_size is not None and k_size != c_size:
+        return False
+
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Main crawler
 # ---------------------------------------------------------------------------
 
@@ -372,14 +532,20 @@ class MmingestCrawler:
         """
         url = entry.url
 
-        # Build the triple from listing metadata
+        # Build the triple from listing metadata.
+        # Directory listings never supply an ETag — we always store None here.
+        # S2 may later upgrade the persisted triple with a real ETag once it
+        # fetches the file; this side must not penalise that upgrade.
         mod_str = entry.modified.isoformat() if entry.modified else None
         current_triple: ChangeTriple = (None, mod_str, entry.size_bytes)
 
-        # Skip if unchanged
-        if url in known and known[url] == current_triple:
-            logger.debug("Unchanged (triple match): %s", url)
-            return None
+        # Skip if unchanged — ETag-tolerant comparison:
+        # * If either side lacks an ETag (None), skip the ETag field entirely.
+        # * last_modified and content_length must match when both sides have them.
+        if url in known:
+            if _triples_match(known[url], current_triple):
+                logger.debug("Unchanged (triple match): %s", url)
+                return None
 
         # Parse filename
         filename = entry.name
