@@ -112,19 +112,34 @@ class DirEntry:
 
 @dataclass
 class ParsedFilename:
-    """Structured parse result for a PBS Wisconsin asset filename."""
+    """Structured parse result for a PBS Wisconsin asset filename.
+
+    Most fields are populated from the standard grammar.  When the grammar
+    fails but the first 4 characters match a registered prefix (e.g. the
+    editor-inserted ``6POLS*`` shorts pattern), a *nonstandard* result is
+    returned instead of a ``ParseError``.  In that case:
+
+    * ``nonstandard`` is ``True``
+    * ``nonstandard_remainder`` holds the raw string after the 4-char prefix
+    * ``media_id``, ``season``, ``episode``, ``hd`` are all ``None``
+    * ``revision_date``, ``variant_tag``, ``unknown_tag`` are all ``None``
+    * ``prefix``, ``prefix_category``, ``show_name`` are resolved normally
+
+    S2 should log nonstandard parses for hygiene reporting rather than dropping
+    them — these files are real assets belonging to a known show.
+    """
 
     # Original stem (filename without extension) as passed to the parser
     stem: str
     # File extension including leading dot, e.g. ".srt", ".mp4"
     file_type: str
 
-    # Core grammar fields
-    media_id: str  # e.g. "6POL0101" (prefix+SSEE, no HD/suffix)
+    # Core grammar fields (None for nonstandard parses)
+    media_id: Optional[str]  # e.g. "6POL0101" (prefix+SSEE, no HD/suffix); None if nonstandard
     prefix: str  # 4-char prefix, e.g. "6POL"
-    season: int
-    episode: int
-    hd: bool
+    season: Optional[int]  # None if nonstandard
+    episode: Optional[int]  # None if nonstandard
+    hd: Optional[bool]  # None if nonstandard
 
     # Revision / variant fields
     revision_date: Optional[str]  # ISO date string "YYYY-MM-DD", or None
@@ -134,6 +149,10 @@ class ParsedFilename:
     # Prefix lookup results
     prefix_category: str  # "broadcast" | "non-broadcast" | "unknown"
     show_name: Optional[str]  # Human-readable show name, or None if prefix unknown
+
+    # Nonstandard parse flag (editor-inserted suffix variants, e.g. 6POLS* shorts)
+    nonstandard: bool = False
+    nonstandard_remainder: Optional[str] = None  # Raw string after the 4-char prefix
 
 
 @dataclass
@@ -373,6 +392,31 @@ def parse_filename(filename: str) -> ParsedFilename | ParseError:
 
     m = _MEDIA_ID_RE.match(stem_upper)
     if m is None:
+        # Grammar failed — check if the first 4 chars are a registered prefix.
+        # If yes, return a nonstandard result rather than a ParseError so that
+        # S2 can index the file under the correct show (e.g. 6POLS* shorts
+        # produced by IWP editors map to Inside Wisconsin Politics).
+        # ParseError is reserved for filenames whose prefix is genuinely unknown.
+        candidate_prefix = stem_upper[:4] if len(stem_upper) >= 4 else ""
+        table = _get_prefix_table()
+        if candidate_prefix and candidate_prefix in table:
+            entry = table[candidate_prefix]
+            return ParsedFilename(
+                stem=stem,
+                file_type=file_type,
+                media_id=None,
+                prefix=candidate_prefix,
+                season=None,
+                episode=None,
+                hd=None,
+                revision_date=None,
+                variant_tag=None,
+                unknown_tag=None,
+                prefix_category=entry["category"],
+                show_name=entry["show"],
+                nonstandard=True,
+                nonstandard_remainder=stem[4:],  # preserve original case
+            )
         return ParseError(
             stem=stem,
             file_type=file_type,

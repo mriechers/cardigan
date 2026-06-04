@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -122,22 +123,32 @@ class TokenBucket:
         self._lock = asyncio.Lock()
 
     async def acquire(self) -> None:
-        """Wait until a token is available, then consume it."""
-        async with self._lock:
-            now = time.monotonic()
-            elapsed = now - self._last_refill
-            self._tokens = min(self._burst, self._tokens + elapsed * self._rate)
-            self._last_refill = now
+        """Wait until a token is available, then consume it.
 
-            if self._tokens >= 1.0:
-                self._tokens -= 1.0
-                return
+        Uses a re-acquire loop to avoid over-issue during the sleep period:
+        after sleeping, we re-enter the lock and re-check — another coroutine
+        may have consumed the token that was refilled during our sleep, so we
+        loop until we can actually decrement.
+        """
+        while True:
+            async with self._lock:
+                now = time.monotonic()
+                elapsed = now - self._last_refill
+                self._tokens = min(self._burst, self._tokens + elapsed * self._rate)
+                self._last_refill = now
 
-            # Need to wait
-            wait_time = (1.0 - self._tokens) / self._rate
-            self._tokens = 0.0
+                if self._tokens >= 1.0:
+                    self._tokens -= 1.0
+                    return
 
-        await asyncio.sleep(wait_time)
+                # Compute sleep and reserve the token speculatively
+                # (set tokens to 0 so concurrent acquires see an empty bucket)
+                wait_time = (1.0 - self._tokens) / self._rate
+                self._tokens = 0.0
+
+            # Sleep outside the lock so other coroutines can run
+            await asyncio.sleep(wait_time)
+            # Re-enter the loop: re-acquire lock and check again
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +229,13 @@ class TwoLaneWorkQueue:
             self._primary.put_nowait(item)
 
     async def get(self) -> FileWorkItem:
-        """Return the next item — sidecar lane is always drained first."""
+        """Return the next item — sidecar lane is always drained first.
+
+        Lost-wakeup safety: the ``_not_empty`` event is cleared INSIDE the lock
+        before we release it and call ``wait()``.  Any ``put()`` that arrives
+        after our clear (but before our ``wait()``) will re-set the event while
+        still holding its own lock turn, so ``wait()`` returns immediately.
+        """
         while True:
             async with self._lock:
                 # Try sidecar first
@@ -235,8 +252,10 @@ class TwoLaneWorkQueue:
                     if self._total == 0:
                         self._not_empty.clear()
                     return item
-            # Nothing available — wait for a put()
-            self._not_empty.clear()
+                # Nothing available — arm the wait INSIDE the lock so we cannot
+                # miss a put() that arrives between lock-release and wait().
+                self._not_empty.clear()
+            # Lock released; a concurrent put() may have already re-set the event.
             await self._not_empty.wait()
 
     def get_nowait(self) -> FileWorkItem:
@@ -390,6 +409,14 @@ class MmingestCrawler:
         # Semaphore enforces the concurrency cap
         semaphore = asyncio.Semaphore(self.max_concurrent)
 
+        # Single shared visited set prevents duplicate crawling when overlapping
+        # roots are supplied (e.g. ["/", "/IWP/"]).  Note: there is a narrow
+        # TOCTOU window — a URL could be checked-not-visited before another
+        # coroutine adds it.  In cooperative asyncio this can only happen at
+        # an ``await`` point inside _walk_directory, which is acceptable for
+        # a polite production server where the worst case is one duplicate fetch.
+        visited: set[str] = set()
+
         async with httpx.AsyncClient(
             timeout=self.timeout,
             follow_redirects=True,
@@ -406,7 +433,7 @@ class MmingestCrawler:
                         path=dir_path,
                         depth=0,
                         known=known,
-                        visited=set(),
+                        visited=visited,
                         ancestor_segments=set(),
                     )
                 )
@@ -622,11 +649,11 @@ class MmingestCrawler:
         Retries on 5xx, ConnectError, TimeoutException.
         Returns None if all retries exhausted or a 4xx is received.
         """
-        import random
-
         backoff = _BACKOFF_BASE
         for attempt in range(max_retries + 1):
-            # Check pause window before each attempt
+            # Check pause window BEFORE consuming a rate-limiter token.
+            # Raising here means we spent no tokens on a suppressed crawl.
+            # The caller (run_delta_walk) catches RuntimeError and logs it.
             self._check_pause_window()
 
             await self._rate_limiter.acquire()
@@ -675,9 +702,19 @@ class MmingestCrawler:
     def _check_pause_window(self) -> None:
         """Raise RuntimeError if currently inside the configured pause window.
 
-        Called before each fetch attempt.  The pause window is intended to
-        suppress crawling during broadcast traffic hours.  Callers higher up
-        the stack (scheduler) should back off gracefully on this error.
+        Called at the top of each fetch-attempt loop, BEFORE acquiring a
+        rate-limiter token.  This prevents token consumption when crawling is
+        suppressed.
+
+        Behaviour when raised:
+          * ``_fetch_with_backoff`` propagates it immediately (no retry).
+          * ``_walk_directory`` surfaces it as an exception result in
+            ``asyncio.gather``, which ``delta_walk`` logs as a walk error.
+          * ``run_delta_walk`` (scheduler) catches it and logs a clean message
+            rather than treating it as an infrastructure failure.
+
+        The pause window is intended to suppress crawling during broadcast
+        traffic hours (production server — treat it gently).
         """
         if self.pause_window is None:
             return

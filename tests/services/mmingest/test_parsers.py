@@ -23,8 +23,8 @@ from api.services.mmingest.parsers import (
     AutoindexParser,
     DirEntry,
     GroupSelectionResult,
-    ParsedFilename,
     ParseError,
+    ParsedFilename,
     parse_filename,
     select_primary,
 )
@@ -331,12 +331,18 @@ class TestParseFilenameVariants:
         A file with a properly underscore-separated unknown tag
         (e.g. '6POL0103_NoBugTest.srt') DOES produce unknown_tag — see
         test_unknown_tag_preserved.
+
+        Update (lenient-parse rule): '6POL' IS a registered prefix, so
+        '6POL0101CLEAN' now returns a nonstandard ParsedFilename rather than
+        a ParseError.  The file is still indexed under Inside Wisconsin
+        Politics; S2 logs it for hygiene reporting.
         """
         result = parse_filename("6POL0101CLEAN.srt")
-        # CLEAN has no '_' separator: grammar mismatch -> ParseError
-        assert isinstance(result, ParseError)
-        assert result.stem == "6POL0101CLEAN"
-        assert ".srt" in result.file_type
+        # 6POL is registered — lenient parse applies; grammar still mismatches
+        assert isinstance(result, ParsedFilename), f"Expected nonstandard ParsedFilename, got: {result}"
+        assert result.nonstandard is True
+        assert result.prefix == "6POL"
+        assert result.nonstandard_remainder == "0101CLEAN"
 
     def test_known_variant_vocab_contents(self):
         """Smoke-check that the vocabulary constants are present."""
@@ -363,12 +369,16 @@ class TestParseFilenameUnparseable:
         result = parse_filename("POL0101.srt")  # 3-char prefix
         assert isinstance(result, ParseError)
 
-    def test_six_char_prefix_returns_parse_error(self):
-        """'6POLS0101NIL' — prefix would be '6POL', then 'S' is not a digit."""
+    def test_six_char_prefix_returns_nonstandard(self):
+        """'6POLS0101NIL' — prefix would be '6POL', then 'S' is not a digit.
+
+        The regex fails (not a grammar match), but '6POL' IS a registered
+        prefix.  Per the lenient-parse rule, this returns a nonstandard
+        ParsedFilename, NOT a ParseError.
+        """
         result = parse_filename("6POLS0101NIL.srt")
-        # 6POLS: 5 chars before the SSEE — the RE requires exactly 4-char prefix
-        # then 2+2 digits.  "6POL" is 4 chars, then "S" is not digit -> no match.
-        assert isinstance(result, ParseError)
+        assert isinstance(result, ParsedFilename), f"Expected nonstandard ParsedFilename, got: {result}"
+        assert result.nonstandard is True
 
     def test_parse_error_has_reason(self):
         result = parse_filename("RANDOM_TEXT.srt")
@@ -625,11 +635,85 @@ class TestFixtureParseFilenames:
         assert result.revision_date == "2026-04-23"
 
     def test_inside_wi_intro_is_parse_error(self):
-        """INSIDE_WI_INTRO_20260409.srt — freeform name, not a Media ID."""
+        """INSIDE_WI_INTRO_20260409.srt — freeform name, prefix not in registry."""
         result = parse_filename("INSIDE_WI_INTRO_20260409.srt")
         assert isinstance(result, ParseError)
 
-    def test_6pols0101nil_is_parse_error(self):
-        """6POLS0101NIL — 5-char-ish thing that doesn't fit 4-char prefix grammar."""
+    def test_6pols0101nil_is_nonstandard(self):
+        """6POLS0101NIL — editor-inserted 'S' short-marker after 6POL prefix.
+
+        6POL is a registered prefix (Inside Wisconsin Politics).  The grammar
+        rejects this because 'S' is not a digit where SSEE expects one.
+        Per the lenient-parse rule, the first 4 chars match the registry, so
+        we return a ParsedFilename with nonstandard=True rather than ParseError.
+        """
         result = parse_filename("6POLS0101NIL.srt")
+        assert isinstance(result, ParsedFilename), f"Expected nonstandard ParsedFilename, got: {result}"
+        assert result.nonstandard is True
+        assert result.prefix == "6POL"
+        assert result.show_name == "Inside Wisconsin Politics"
+        assert result.nonstandard_remainder == "S0101NIL"
+        assert result.media_id is None
+        assert result.season is None
+        assert result.episode is None
+
+
+# ---------------------------------------------------------------------------
+# Nonstandard parse (registered prefix, non-grammar body)
+# ---------------------------------------------------------------------------
+
+
+class TestNonstandardParse:
+    """Verify the lenient-parse fallback for registered-prefix filenames."""
+
+    def test_6pols_series_resolves_to_iwp(self):
+        """All 6POLS* files resolve to Inside Wisconsin Politics, nonstandard=True."""
+        samples = [
+            "6POLS0101NIL.srt",
+            "6POLS0101Retirement.scc",
+            "6POLS0102SupremeCourt.srt",
+            "6POLS0105Retirements_REV20260416.srt",
+        ]
+        for filename in samples:
+            result = parse_filename(filename)
+            assert isinstance(result, ParsedFilename), f"Expected ParsedFilename for {filename}"
+            assert result.nonstandard is True, f"Expected nonstandard=True for {filename}"
+            assert result.prefix == "6POL", f"Expected prefix 6POL for {filename}"
+            assert result.show_name == "Inside Wisconsin Politics", f"Wrong show_name for {filename}"
+
+    def test_nonstandard_remainder_is_raw_case_preserved(self):
+        """nonstandard_remainder preserves original (mixed) case."""
+        result = parse_filename("6POLS0103MailInVoting.scc")
+        assert isinstance(result, ParsedFilename)
+        assert result.nonstandard_remainder == "S0103MailInVoting"
+
+    def test_nonstandard_has_no_media_id_season_episode(self):
+        """Nonstandard results have no parseable structured fields."""
+        result = parse_filename("6POLS0107Governor.srt")
+        assert isinstance(result, ParsedFilename)
+        assert result.media_id is None
+        assert result.season is None
+        assert result.episode is None
+        assert result.hd is None
+        assert result.revision_date is None
+        assert result.variant_tag is None
+        assert result.unknown_tag is None
+
+    def test_nonstandard_prefix_category_is_resolved(self):
+        """Nonstandard results still get correct prefix_category from YAML."""
+        result = parse_filename("6POLS0101NIL.srt")
+        assert isinstance(result, ParsedFilename)
+        # 6POL leading digit 6 → non-broadcast
+        assert result.prefix_category == "non-broadcast"
+
+    def test_unregistered_prefix_is_still_parse_error(self):
+        """A filename whose first 4 chars are NOT in the prefix table → ParseError."""
+        result = parse_filename("INSIDE_WI_INTRO_20260409.srt")
         assert isinstance(result, ParseError)
+
+    def test_standard_parse_nonstandard_is_false(self):
+        """A fully grammar-conforming filename has nonstandard=False."""
+        result = parse_filename("6POL0101_REV20260319.srt")
+        assert isinstance(result, ParsedFilename)
+        assert result.nonstandard is False
+        assert result.nonstandard_remainder is None

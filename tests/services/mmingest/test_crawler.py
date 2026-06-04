@@ -609,6 +609,55 @@ class TestTwoLaneWorkQueue:
             queue.get_nowait()
 
     @pytest.mark.asyncio
+    async def test_concurrent_producer_unblocks_waiting_consumer(self):
+        """Consumer blocked on get() is woken up by a concurrent producer.
+
+        This exercises the lost-wakeup fix: _not_empty is cleared INSIDE the
+        lock before releasing it, so a put() that arrives between lock-release
+        and wait() still re-sets the event and the consumer wakes immediately.
+        Without the fix the consumer would hang indefinitely.
+        """
+        queue = TwoLaneWorkQueue()
+        received: list[FileWorkItem] = []
+
+        async def consumer():
+            # Queue is empty when consumer starts — must block until producer puts
+            item = await queue.get()
+            received.append(item)
+
+        async def producer():
+            # Small delay to ensure consumer reaches the wait() call first
+            await asyncio.sleep(0.02)
+            await queue.put(_make_item("primary", "wakeup.mp4"))
+
+        await asyncio.gather(consumer(), producer())
+        assert len(received) == 1
+        assert received[0].filename == "wakeup.mp4"
+
+    @pytest.mark.asyncio
+    async def test_concurrent_producer_unblocks_multiple_consumers(self):
+        """Multiple consumers waiting on get() are each woken up in turn."""
+        queue = TwoLaneWorkQueue()
+        N = 5
+        received: list[FileWorkItem] = []
+
+        async def consumer():
+            item = await queue.get()
+            received.append(item)
+
+        async def producer():
+            await asyncio.sleep(0.02)
+            for i in range(N):
+                await queue.put(_make_item("sidecar", f"s{i}.srt"))
+                # Yield to let consumers wake between puts
+                await asyncio.sleep(0)
+
+        consumers = [consumer() for _ in range(N)]
+        await asyncio.gather(*consumers, producer())
+        assert len(received) == N
+        assert all(item.lane == "sidecar" for item in received)
+
+    @pytest.mark.asyncio
     async def test_interleaved_streaming_sidecars_always_precede_primaries(self):
         """Sidecars added while the queue already holds primaries jump to the front.
 
@@ -680,6 +729,37 @@ class TestNoDbWrites:
 
         # get_session should not be imported or callable from crawler
         assert not hasattr(crawler_module, "get_session"), "crawler.py imported get_session — it must make NO DB writes"
+
+    @pytest.mark.asyncio
+    async def test_overlapping_roots_no_duplicate_work_items(self):
+        """Overlapping top-level directories must not produce duplicate work items.
+
+        Supplying ["/IWP/", "/IWP/"] (or ["/", "/IWP/"]) would double-crawl
+        the shared subtree without a shared visited set.  The fix: delta_walk
+        creates one shared visited set passed to all top-level tasks.
+        """
+        html = """<html><body>
+        <table>
+        <tr><td><a href="6POL0101.srt">6POL0101.srt</a></td>
+        <td align="right">2026-03-19 17:24  </td>
+        <td align="right"> 34K</td></tr>
+        </table>
+        </body></html>"""
+
+        crawler = MmingestCrawler(
+            base_url="https://test.example.com/",
+            rate_per_second=1000.0,
+        )
+
+        async def mock_fetch(*args, **kwargs):
+            return html
+
+        with patch.object(crawler, "_fetch_with_backoff", side_effect=mock_fetch):
+            # Supply the same directory twice — without the fix this would yield 2 items
+            results = await crawler.delta_walk(directories=["/IWP/", "/IWP/"])
+
+        urls = [r.url for r in results]
+        assert len(urls) == len(set(urls)), f"Duplicate work items: {urls}"
 
 
 # ---------------------------------------------------------------------------
