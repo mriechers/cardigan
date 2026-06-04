@@ -252,3 +252,261 @@ async def test_fts_match_join_returns_display_fields(migrated_engine):
 
     assert len(direct_rows) == 1
     assert "fox" in direct_rows[0][0]
+
+
+# ---------------------------------------------------------------------------
+# Downgrade round-trip
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_downgrade_round_trip():
+    """upgrade head → downgrade 013 removes mmingest tables; available_files
+    loses the four 014 columns; re-upgrade restores everything.
+    """
+    fd, db_path = tempfile.mkstemp(suffix="_downgrade_test.db")
+    os.close(fd)
+
+    repo_root = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..")
+    )
+    env = {**os.environ, "DATABASE_PATH": db_path}
+
+    def alembic(*args: str) -> None:
+        result = subprocess.run(
+            [sys.executable, "-m", "alembic", *args],
+            cwd=repo_root,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, (
+            f"alembic {' '.join(args)} failed:\n{result.stdout}\n{result.stderr}"
+        )
+
+    try:
+        alembic("upgrade", "head")
+
+        engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", echo=False)
+        try:
+            # Confirm mmingest tables exist at head
+            async with engine.connect() as conn:
+                tables_row = await conn.execute(
+                    text("SELECT name FROM sqlite_master WHERE type='table'")
+                )
+                tables_at_head = {r[0] for r in tables_row.fetchall()}
+            assert "mmingest_files" in tables_at_head
+            assert "mmingest_sidecars" in tables_at_head
+            assert "consumer_keys" in tables_at_head
+        finally:
+            await engine.dispose()
+
+        # Downgrade to 013
+        alembic("downgrade", "013")
+
+        engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", echo=False)
+        try:
+            async with engine.connect() as conn:
+                tables_row = await conn.execute(
+                    text("SELECT name FROM sqlite_master WHERE type='table'")
+                )
+                tables_at_013 = {r[0] for r in tables_row.fetchall()}
+
+                # mmingest tables must be gone
+                assert "mmingest_files" not in tables_at_013
+                assert "mmingest_sidecars" not in tables_at_013
+                assert "consumer_keys" not in tables_at_013
+
+                # available_files must still exist (it predates 014)
+                assert "available_files" in tables_at_013
+
+                # The four columns added by 014 must be gone
+                cols_row = await conn.execute(
+                    text("PRAGMA table_info(available_files)")
+                )
+                col_names_at_013 = {r[1] for r in cols_row.fetchall()}
+            for removed_col in ("etag", "content_type", "last_head_at", "probe_status"):
+                assert removed_col not in col_names_at_013, (
+                    f"Column {removed_col!r} should be absent after downgrade to 013"
+                )
+        finally:
+            await engine.dispose()
+
+        # Re-upgrade: everything must come back
+        alembic("upgrade", "head")
+
+        engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", echo=False)
+        try:
+            async with engine.connect() as conn:
+                tables_row = await conn.execute(
+                    text("SELECT name FROM sqlite_master WHERE type='table'")
+                )
+                tables_final = {r[0] for r in tables_row.fetchall()}
+            assert "mmingest_files" in tables_final
+            assert "mmingest_sidecars" in tables_final
+            assert "consumer_keys" in tables_final
+        finally:
+            await engine.dispose()
+
+    finally:
+        try:
+            os.unlink(db_path)
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Delete-trigger parity coverage
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_parity_delta_zero_after_delete(migrated_engine):
+    """INSERT then DELETE via the normal table path keeps delta at 0.
+
+    The AFTER DELETE trigger removes the FTS entry, so the index stays
+    in sync with the base table.
+    """
+    from api.services.mmingest._db import fts_parity_delta
+
+    async with migrated_engine.begin() as conn:
+        await conn.execute(
+            text(
+                """
+                INSERT INTO mmingest_files (remote_url, filename, file_type)
+                VALUES ('http://example.com/delete_test.srt',
+                        'delete_test.srt', 'srt')
+                """
+            )
+        )
+        file_id = (
+            await conn.execute(text("SELECT last_insert_rowid()"))
+        ).scalar_one()
+
+        await conn.execute(
+            text(
+                """
+                INSERT INTO mmingest_sidecars (file_id, kind, body_text)
+                VALUES (:fid, 'srt', 'Content that will be deleted.')
+                """
+            ),
+            {"fid": file_id},
+        )
+        sidecar_id = (
+            await conn.execute(text("SELECT last_insert_rowid()"))
+        ).scalar_one()
+
+    # Confirm delta is 0 after insert
+    async with migrated_engine.connect() as conn:
+        assert await fts_parity_delta(conn) == 0
+
+    # Delete via normal path — AFTER DELETE trigger should clean FTS
+    async with migrated_engine.begin() as conn:
+        await conn.execute(
+            text("DELETE FROM mmingest_sidecars WHERE id = :sid"),
+            {"sid": sidecar_id},
+        )
+
+    async with migrated_engine.connect() as conn:
+        assert await fts_parity_delta(conn) == 0
+
+
+@pytest.mark.asyncio
+async def test_parity_delta_detects_divergence(migrated_engine):
+    """Direct DELETE on the base table that bypasses triggers leaves FTS
+    with a phantom row: delta == -1 (FTS has more rows than base).
+    """
+    from api.services.mmingest._db import fts_parity_delta
+
+    async with migrated_engine.begin() as conn:
+        await conn.execute(
+            text(
+                """
+                INSERT INTO mmingest_files (remote_url, filename, file_type)
+                VALUES ('http://example.com/phantom_test.srt',
+                        'phantom_test.srt', 'srt')
+                """
+            )
+        )
+        file_id = (
+            await conn.execute(text("SELECT last_insert_rowid()"))
+        ).scalar_one()
+
+        await conn.execute(
+            text(
+                """
+                INSERT INTO mmingest_sidecars (file_id, kind, body_text)
+                VALUES (:fid, 'srt', 'Phantom row body text.')
+                """
+            ),
+            {"fid": file_id},
+        )
+        sidecar_id = (
+            await conn.execute(text("SELECT last_insert_rowid()"))
+        ).scalar_one()
+
+    async with migrated_engine.connect() as conn:
+        assert await fts_parity_delta(conn) == 0
+
+    # Bypass triggers: delete from the _docsize shadow table directly to
+    # simulate the base table being pruned without an FTS delete command.
+    # (Mutating the shadow table is the cleanest way to create the
+    # phantom-row scenario without disabling triggers.)
+    async with migrated_engine.begin() as conn:
+        await conn.execute(
+            text("DELETE FROM mmingest_sidecars WHERE id = :sid"),
+            {"sid": sidecar_id},
+        )
+        # Re-insert the _docsize row to simulate a phantom FTS entry that
+        # the trigger somehow missed (trigger disabled / direct DB edit).
+        await conn.execute(
+            text(
+                "INSERT INTO mmingest_sidecars_fts_docsize(id, sz) VALUES (:sid, 4)"
+            ),
+            {"sid": sidecar_id},
+        )
+
+    async with migrated_engine.connect() as conn:
+        delta = await fts_parity_delta(conn)
+    # base=0, fts=1 → delta = 0 - 1 = -1
+    assert delta == -1, f"Expected -1 (phantom FTS row), got {delta}"
+
+
+@pytest.mark.asyncio
+async def test_parity_delta_returns_none_before_migration_016():
+    """fts_parity_delta returns None when called against a DB at 013.
+
+    Simulates the deploy-window scenario: app restarted before migration
+    016 has been applied.
+    """
+    from api.services.mmingest._db import fts_parity_delta
+
+    fd, db_path = tempfile.mkstemp(suffix="_pre016_test.db")
+    os.close(fd)
+
+    repo_root = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..")
+    )
+    env = {**os.environ, "DATABASE_PATH": db_path}
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "013"],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"alembic upgrade 013 failed:\n{result.stdout}\n{result.stderr}"
+    )
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", echo=False)
+    try:
+        async with engine.connect() as conn:
+            result = await fts_parity_delta(conn)
+        assert result is None, (
+            f"Expected None for pre-016 DB, got {result!r}"
+        )
+    finally:
+        await engine.dispose()
+        try:
+            os.unlink(db_path)
+        except Exception:
+            pass

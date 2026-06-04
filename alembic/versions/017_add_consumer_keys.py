@@ -34,7 +34,7 @@ def upgrade() -> None:
     op.create_table(
         "consumer_keys",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column("key_hash", sa.Text(), nullable=False, unique=True),
+        sa.Column("key_hash", sa.Text(), nullable=False),
         sa.Column("label", sa.Text(), nullable=False),
         sa.Column("scopes", sa.Text(), nullable=False, server_default=""),
         sa.Column(
