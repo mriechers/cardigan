@@ -119,6 +119,26 @@ async def test_mmingest_schema_tables_exist(migrated_engine):
 
 
 @pytest.mark.asyncio
+async def test_mmingest_files_columns(migrated_engine):
+    """Migration 015: mmingest_files has all expected columns including variant lineage."""
+    async with migrated_engine.connect() as conn:
+        cols_row = await conn.execute(text("PRAGMA table_info(mmingest_files)"))
+        col_names = {r[1] for r in cols_row.fetchall()}
+
+    for expected in (
+        "id", "remote_url", "directory_path", "filename",
+        "media_id", "prefix", "prefix_category", "show_name",
+        "season", "episode", "hd", "revision_date",
+        "file_type", "file_size_bytes",
+        "etag", "content_type", "remote_modified_at",
+        "first_seen_at", "last_seen_at", "status",
+        "variant_tag", "superseded_by",
+        "airtable_record_id",
+    ):
+        assert expected in col_names, f"mmingest_files missing column: {expected}"
+
+
+@pytest.mark.asyncio
 async def test_available_files_new_columns_exist(migrated_engine):
     """Migration 014 added four columns to available_files."""
     async with migrated_engine.connect() as conn:

@@ -19,6 +19,14 @@ status           workflow states: new | queued | indexed | no_match |
                  ignored | missing | error
 hd               INTEGER treated as boolean (1=HD, 0=SD, NULL=unknown)
 revision_date    ISO date string extracted from the filename, e.g. "2024-01"
+variant_tag      True variant suffix from a known vocabulary (e.g. 'PLEDGE',
+                 'DS').  Populated when the filename ends in _<UPPERCASE_TAG>.
+                 NULL for primary/non-variant assets.  True variants coexist
+                 with the primary asset; they are NOT superseded.
+superseded_by    Self-referential FK → mmingest_files.id.  Older _REV<YYYYMMDD>
+                 iterations of the same asset point at the current (winning)
+                 row within the same (media_id, variant_tag) group.  NULL for
+                 current rows.  Population deferred to the indexer sprint.
 """
 from typing import Sequence, Union
 
@@ -70,6 +78,13 @@ def upgrade() -> None:
 
         # Workflow status
         sa.Column("status", sa.Text(), nullable=False, server_default="new"),
+
+        # Variant / revision lineage
+        # variant_tag: true variant suffix from known vocabulary, e.g. 'PLEDGE', 'DS'
+        sa.Column("variant_tag", sa.Text(), nullable=True),
+        # superseded_by: self-referential FK; older _REV<date> rows point at current row
+        sa.Column("superseded_by", sa.Integer(),
+                  sa.ForeignKey("mmingest_files.id"), nullable=True),
 
         # Linking
         sa.Column("airtable_record_id", sa.Text(), nullable=True),
