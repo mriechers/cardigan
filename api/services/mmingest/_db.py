@@ -53,11 +53,13 @@ async def fts_parity_delta(conn: AsyncConnection) -> int | None:
     # Preflight: check both tables exist in sqlite_master before querying them.
     # Using sqlite_master avoids wrapping OperationalError (which could mask
     # genuine errors such as a corrupt FTS shadow table).
+    # Note: SQLite registers FTS5 shadow tables (e.g. _docsize) with
+    # type='table' — there is no distinct 'shadow' type in sqlite_master.
     exists_row = await conn.execute(
         text(
             """
             SELECT COUNT(*) FROM sqlite_master
-            WHERE type IN ('table', 'shadow')
+            WHERE type = 'table'
               AND name IN ('mmingest_sidecars', 'mmingest_sidecars_fts_docsize')
             """
         )

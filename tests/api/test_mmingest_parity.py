@@ -411,8 +411,13 @@ async def test_parity_delta_zero_after_delete(migrated_engine):
 
 @pytest.mark.asyncio
 async def test_parity_delta_detects_divergence(migrated_engine):
-    """Direct DELETE on the base table that bypasses triggers leaves FTS
-    with a phantom row: delta == -1 (FTS has more rows than base).
+    """Synthetically injected phantom _docsize row produces delta == -1.
+
+    A genuine trigger-bypass (e.g. direct sqlite3 CLI delete) is not
+    cleanly reachable from Python, so this test constructs a numerically
+    identical state: DELETE via the normal trigger path (which cleans FTS
+    correctly), then re-insert the _docsize row to simulate the phantom
+    entry a trigger bypass would have left behind.
     """
     from api.services.mmingest._db import fts_parity_delta
 
@@ -446,17 +451,17 @@ async def test_parity_delta_detects_divergence(migrated_engine):
     async with migrated_engine.connect() as conn:
         assert await fts_parity_delta(conn) == 0
 
-    # Bypass triggers: delete from the _docsize shadow table directly to
-    # simulate the base table being pruned without an FTS delete command.
-    # (Mutating the shadow table is the cleanest way to create the
-    # phantom-row scenario without disabling triggers.)
+    # Delete via the normal trigger path — the AFTER DELETE trigger fires
+    # and removes the _docsize row, leaving delta at 0.  Then synthetically
+    # re-inject the _docsize row to produce the diverged state that a real
+    # trigger bypass (e.g. direct CLI delete without triggers) would leave.
     async with migrated_engine.begin() as conn:
         await conn.execute(
             text("DELETE FROM mmingest_sidecars WHERE id = :sid"),
             {"sid": sidecar_id},
         )
-        # Re-insert the _docsize row to simulate a phantom FTS entry that
-        # the trigger somehow missed (trigger disabled / direct DB edit).
+        # Synthetic phantom: re-insert the _docsize row that the trigger
+        # correctly removed, recreating the "FTS ahead of base" condition.
         await conn.execute(
             text(
                 "INSERT INTO mmingest_sidecars_fts_docsize(id, sz) VALUES (:sid, 4)"
