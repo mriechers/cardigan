@@ -211,3 +211,24 @@ async def test_fts_match_join_returns_display_fields(migrated_engine):
     # rank is a negative float (BM25); just assert it's present and numeric
     assert row._mapping["rank"] is not None
     assert float(row._mapping["rank"]) < 0
+
+    # Discriminating assertion: read body_text DIRECTLY off the FTS virtual
+    # table (no JOIN).  Under the old DDL — which declared phantom UNINDEXED
+    # columns media_id/prefix/show that don't exist on the content table —
+    # this query raises:
+    #   OperationalError: no such column: T.media_id
+    # even when only body_text is selected, because FTS5 resolves ALL declared
+    # columns from the content table when it opens the cursor.
+    # Under the fixed DDL (body_text only) it succeeds.
+    async with migrated_engine.connect() as conn:
+        direct_rows = (
+            await conn.execute(
+                text(
+                    "SELECT body_text FROM mmingest_sidecars_fts"
+                    " WHERE mmingest_sidecars_fts MATCH 'fox'"
+                )
+            )
+        ).fetchall()
+
+    assert len(direct_rows) == 1
+    assert "fox" in direct_rows[0][0]
