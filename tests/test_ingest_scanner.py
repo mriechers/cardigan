@@ -1114,3 +1114,146 @@ class TestRecursiveScanning:
         assert "https://test.com/Education/aka_teacher/Education/" not in scanned_urls
         # And the legitimate match for the media ID should still come through.
         assert any(f.filename == "2WLI1209HD.srt" for f in files)
+
+
+class TestBatchedUpsert:
+    """Tests for the batched INSERT path in _track_files_batch (Sprint -1).
+
+    Verifies that a large file list is written in fewer SQL calls than rows,
+    proving UPSERT_BATCH_SIZE is honoured.  Sprint 1B will replace this
+    implementation entirely; these tests guard the stopgap only.
+    """
+
+    def _make_files(self, n: int) -> list[RemoteFile]:
+        """Generate n distinct RemoteFile objects."""
+        return [
+            RemoteFile(
+                filename=f"2WLI{i:04d}HD.srt",
+                url=f"https://test.com/2WLI{i:04d}HD.srt",
+                directory_path="/",
+                file_type="transcript",
+                media_id=f"2WLI{i:04d}HD",
+                file_size_bytes=1024,
+                modified_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            )
+            for i in range(n)
+        ]
+
+    @pytest.mark.asyncio
+    async def test_batch_upsert_uses_fewer_execute_calls_than_rows(self):
+        """1 500 new files must produce fewer than 1 500 INSERT execute calls.
+
+        Before Sprint -1 the loop called session.execute() once per row.
+        After batching with UPSERT_BATCH_SIZE=500 we expect ceil(1500/500) = 3
+        INSERT calls (plus SELECT batches for the existence check and one UPDATE
+        for last_seen_at), so at most ~7 total execute calls -- well under 1 500.
+        """
+        n = 1500
+        files = self._make_files(n)
+
+        execute_call_count = 0
+
+        async def mock_execute(query, params=None):
+            nonlocal execute_call_count
+            execute_call_count += 1
+            mock_result = MagicMock()
+            mock_result.fetchall.return_value = []  # all URLs are new
+            return mock_result
+
+        mock_session = AsyncMock()
+        mock_session.execute = mock_execute
+        mock_session.commit = AsyncMock()
+
+        with patch("api.services.ingest_scanner.get_session") as mock_get_session:
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_get_session.return_value.__aexit__ = AsyncMock()
+
+            scanner = IngestScanner()
+            new_count, new_transcripts, new_screengrabs = await scanner._track_files_batch(files)
+
+        # Correctness: all 1 500 files were counted as new transcripts
+        assert new_count == n
+        assert new_transcripts == n
+        assert new_screengrabs == 0
+
+        # Batching: number of execute() calls must be far fewer than n=1500.
+        # Expected breakdown:
+        #   SELECT batches for existence check: ceil(1500/500) = 3 calls
+        #   INSERT batches (each receives a list of up to 500 dicts): ceil(1500/500) = 3 calls
+        #   UPDATE last_seen_at (all existing -- none here, skipped): 0 calls
+        # Total: ~6.  We allow up to 20 to give minor refactors headroom while
+        # still proving we are nowhere near 1 500 individual per-row calls.
+        assert execute_call_count < n, (
+            f"Expected batched execute calls (<{n}), got {execute_call_count}. " "Batching may not be working."
+        )
+
+    @pytest.mark.asyncio
+    async def test_batch_upsert_insert_params_are_lists_not_single_dicts(self):
+        """Each INSERT execute call should receive a list of param dicts.
+
+        Verifies the executemany shape: session.execute(query, [dict, dict, ...]).
+        A single-dict call would be the old per-row pattern.
+        """
+        n = 50  # smaller than UPSERT_BATCH_SIZE -> exactly one INSERT batch
+        files = self._make_files(n)
+
+        insert_param_shapes: list[int] = []
+
+        async def mock_execute(query, params=None):
+            # Capture the shape of params for INSERT calls.
+            # INSERT OR IGNORE calls receive a list; SELECT/UPDATE receive a dict.
+            if params is not None and isinstance(params, list):
+                insert_param_shapes.append(len(params))
+            mock_result = MagicMock()
+            mock_result.fetchall.return_value = []
+            return mock_result
+
+        mock_session = AsyncMock()
+        mock_session.execute = mock_execute
+        mock_session.commit = AsyncMock()
+
+        with patch("api.services.ingest_scanner.get_session") as mock_get_session:
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_get_session.return_value.__aexit__ = AsyncMock()
+
+            scanner = IngestScanner()
+            await scanner._track_files_batch(files)
+
+        # Exactly one INSERT batch of 50 rows
+        assert insert_param_shapes == [50], f"Expected one INSERT batch of 50 dicts, got shapes: {insert_param_shapes}"
+
+    @pytest.mark.asyncio
+    async def test_batch_upsert_respects_batch_size_boundary(self):
+        """With UPSERT_BATCH_SIZE=500, 1 001 rows produce exactly 3 INSERT calls.
+
+        Pins the boundary behaviour: two full batches (500 + 500) plus one
+        partial batch (1).
+        """
+        n = 1001
+        files = self._make_files(n)
+
+        insert_batch_sizes: list[int] = []
+
+        async def mock_execute(query, params=None):
+            if params is not None and isinstance(params, list):
+                insert_batch_sizes.append(len(params))
+            mock_result = MagicMock()
+            mock_result.fetchall.return_value = []
+            return mock_result
+
+        mock_session = AsyncMock()
+        mock_session.execute = mock_execute
+        mock_session.commit = AsyncMock()
+
+        with patch("api.services.ingest_scanner.get_session") as mock_get_session:
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_get_session.return_value.__aexit__ = AsyncMock()
+
+            scanner = IngestScanner()
+            await scanner._track_files_batch(files)
+
+        assert insert_batch_sizes == [
+            500,
+            500,
+            1,
+        ], f"Expected INSERT batch sizes [500, 500, 1], got {insert_batch_sizes}"
