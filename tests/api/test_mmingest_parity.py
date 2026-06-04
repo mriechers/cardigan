@@ -140,3 +140,74 @@ async def test_consumer_keys_columns(migrated_engine):
 
     for expected in ("id", "key_hash", "label", "scopes", "created_at", "last_used_at"):
         assert expected in col_names, f"Missing column: {expected}"
+
+
+@pytest.mark.asyncio
+async def test_fts_match_join_returns_display_fields(migrated_engine):
+    """FTS5 MATCH query joined to mmingest_files returns media_id/prefix/show_name.
+
+    This is the read path the search feature uses.  The bug this test guards
+    against: declaring UNINDEXED columns in the FTS5 DDL that don't exist on
+    the content table (mmingest_sidecars) causes OperationalError at read time
+    even though writes succeed.  The fix is to declare only body_text in the
+    FTS5 table and JOIN to mmingest_files for display fields.
+    """
+    async with migrated_engine.begin() as conn:
+        # Insert a parent mmingest_files row with known display fields
+        await conn.execute(
+            text(
+                """
+                INSERT INTO mmingest_files
+                    (remote_url, filename, file_type, media_id, prefix, show_name)
+                VALUES
+                    ('http://example.com/search_test.srt', 'search_test.srt',
+                     'srt', 'WLIA1234', 'wlia', 'Nature Hour')
+                """
+            )
+        )
+        file_id_row = await conn.execute(text("SELECT last_insert_rowid()"))
+        file_id = file_id_row.scalar_one()
+
+        await conn.execute(
+            text(
+                """
+                INSERT INTO mmingest_sidecars (file_id, kind, body_text)
+                VALUES (:file_id, 'srt',
+                        'The red fox jumped over the lazy brown dog.')
+                """
+            ),
+            {"file_id": file_id},
+        )
+
+    # The actual search query shape the downstream consumer will use.
+    # If the FTS5 table still has phantom UNINDEXED columns this raises
+    # OperationalError: no such column: T.media_id
+    async with migrated_engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                text(
+                    """
+                    SELECT s.id,
+                           s.file_id,
+                           mf.media_id,
+                           mf.prefix,
+                           mf.show_name,
+                           fts.rank
+                    FROM   mmingest_sidecars_fts AS fts
+                    JOIN   mmingest_sidecars     AS s   ON s.id  = fts.rowid
+                    JOIN   mmingest_files        AS mf  ON mf.id = s.file_id
+                    WHERE  mmingest_sidecars_fts MATCH 'fox'
+                    ORDER  BY fts.rank
+                    """
+                )
+            )
+        ).fetchall()
+
+    assert len(rows) == 1, f"Expected 1 FTS hit, got {len(rows)}"
+    row = rows[0]
+    assert row._mapping["media_id"] == "WLIA1234"
+    assert row._mapping["prefix"] == "wlia"
+    assert row._mapping["show_name"] == "Nature Hour"
+    # rank is a negative float (BM25); just assert it's present and numeric
+    assert row._mapping["rank"] is not None
+    assert float(row._mapping["rank"]) < 0

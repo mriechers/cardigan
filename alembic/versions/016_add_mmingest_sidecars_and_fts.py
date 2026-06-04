@@ -10,12 +10,24 @@ Creates two objects:
    linked to a mmingest_files row.
 
 2. `mmingest_sidecars_fts` — FTS5 virtual table in external-content mode
-   (content=mmingest_sidecars).  body_text is stored once in the real
-   table; the FTS shadow tables hold only the inverted index.
+   (content=mmingest_sidecars, content_rowid=id).  Only `body_text` is
+   declared; no UNINDEXED display columns are included.
 
-   Unindexed columns (media_id, prefix, show) are carried alongside
-   ranked hits for display/filtering without joining back to the base
-   table.
+   Why no UNINDEXED columns: In external-content mode FTS5 resolves ALL
+   declared column names against the content table at READ time (not write
+   time).  `media_id`, `prefix`, and `show_name` live on `mmingest_files`,
+   not on `mmingest_sidecars`, so declaring them here would cause:
+       OperationalError: no such column: T.media_id
+   on any query that materialises those columns.  Search consumers must
+   JOIN to retrieve display fields:
+
+       SELECT s.id, s.file_id, mf.media_id, mf.prefix, mf.show_name,
+              rank
+       FROM   mmingest_sidecars_fts
+       JOIN   mmingest_sidecars s  ON s.id  = mmingest_sidecars_fts.rowid
+       JOIN   mmingest_files    mf ON mf.id = s.file_id
+       WHERE  mmingest_sidecars_fts MATCH :query
+       ORDER  BY rank;
 
 FTS5 virtual tables and their sync triggers must go through op.execute()
 because SQLAlchemy/Alembic does not model them.
@@ -73,15 +85,17 @@ def upgrade() -> None:
     # content=mmingest_sidecars means SQLite reads body_text from the real
     # table for snippet/highlight/bm25 — it does NOT duplicate the text in
     # the FTS shadow tables.  content_rowid=id maps FTS rowids to the PK.
+    #
+    # Only body_text is declared.  Do NOT declare media_id/prefix/show_name
+    # here: those columns belong to mmingest_files (not mmingest_sidecars),
+    # so FTS5 would fail at read time trying to resolve them from the content
+    # table.  Search queries JOIN to mmingest_files for display fields.
     op.execute(
         """
         CREATE VIRTUAL TABLE mmingest_sidecars_fts
         USING fts5(
             body_text,
-            media_id   UNINDEXED,
-            prefix     UNINDEXED,
-            show       UNINDEXED,
-            content    = 'mmingest_sidecars',
+            content       = 'mmingest_sidecars',
             content_rowid = 'id'
         )
         """
@@ -93,37 +107,20 @@ def upgrade() -> None:
         """
         CREATE TRIGGER trg_mmingest_sidecars_fts_insert
         AFTER INSERT ON mmingest_sidecars BEGIN
-            INSERT INTO mmingest_sidecars_fts(
-                rowid, body_text, media_id, prefix, show
-            )
-            SELECT
-                new.id,
-                new.body_text,
-                mf.media_id,
-                mf.prefix,
-                mf.show_name
-            FROM mmingest_files mf
-            WHERE mf.id = new.file_id;
+            INSERT INTO mmingest_sidecars_fts(rowid, body_text)
+            VALUES (new.id, new.body_text);
         END
         """
     )
 
     # AFTER DELETE: remove the old row from the FTS index.
-    # FTS5 delete uses a sentinel row where the first column is the integer -1.
+    # FTS5 delete uses the special 'delete' command row.
     op.execute(
         """
         CREATE TRIGGER trg_mmingest_sidecars_fts_delete
         AFTER DELETE ON mmingest_sidecars BEGIN
-            INSERT INTO mmingest_sidecars_fts(
-                mmingest_sidecars_fts, rowid, body_text, media_id, prefix, show
-            ) VALUES (
-                'delete',
-                old.id,
-                old.body_text,
-                (SELECT media_id FROM mmingest_files WHERE id = old.file_id),
-                (SELECT prefix   FROM mmingest_files WHERE id = old.file_id),
-                (SELECT show_name FROM mmingest_files WHERE id = old.file_id)
-            );
+            INSERT INTO mmingest_sidecars_fts(mmingest_sidecars_fts, rowid, body_text)
+            VALUES ('delete', old.id, old.body_text);
         END
         """
     )
@@ -133,27 +130,10 @@ def upgrade() -> None:
         """
         CREATE TRIGGER trg_mmingest_sidecars_fts_update
         AFTER UPDATE ON mmingest_sidecars BEGIN
-            INSERT INTO mmingest_sidecars_fts(
-                mmingest_sidecars_fts, rowid, body_text, media_id, prefix, show
-            ) VALUES (
-                'delete',
-                old.id,
-                old.body_text,
-                (SELECT media_id  FROM mmingest_files WHERE id = old.file_id),
-                (SELECT prefix    FROM mmingest_files WHERE id = old.file_id),
-                (SELECT show_name FROM mmingest_files WHERE id = old.file_id)
-            );
-            INSERT INTO mmingest_sidecars_fts(
-                rowid, body_text, media_id, prefix, show
-            )
-            SELECT
-                new.id,
-                new.body_text,
-                mf.media_id,
-                mf.prefix,
-                mf.show_name
-            FROM mmingest_files mf
-            WHERE mf.id = new.file_id;
+            INSERT INTO mmingest_sidecars_fts(mmingest_sidecars_fts, rowid, body_text)
+            VALUES ('delete', old.id, old.body_text);
+            INSERT INTO mmingest_sidecars_fts(rowid, body_text)
+            VALUES (new.id, new.body_text);
         END
         """
     )
