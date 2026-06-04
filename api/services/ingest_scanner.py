@@ -73,6 +73,12 @@ class IngestScanner:
     # Maximum recursion depth for subdirectory scanning
     MAX_SCAN_DEPTH = 3
 
+    # Number of rows per INSERT batch in _track_files_batch.
+    # SQLite's per-statement parameter limit is 32 766 (SQLITE_MAX_VARIABLE_NUMBER).
+    # Our INSERT uses 9 bound params per row, so 500 rows x 9 = 4 500 -- well within
+    # limits.  Sprint 1B will replace this file; tune here only if needed before then.
+    UPSERT_BATCH_SIZE = 500
+
     def __init__(
         self,
         base_url: str = "https://mmingest.pbswi.wisc.edu/",
@@ -317,17 +323,28 @@ class IngestScanner:
                     new_files.append(f)
                     seen_urls.add(f.url)
 
+            # Count by type before batching (order is stable; just need totals)
             for f in new_files:
-                insert_query = text("""
-                    INSERT OR IGNORE INTO available_files
-                    (remote_url, filename, directory_path, file_type, media_id,
-                     file_size_bytes, remote_modified_at, first_seen_at, last_seen_at, status)
-                    VALUES
-                    (:remote_url, :filename, :directory_path, :file_type, :media_id,
-                     :file_size_bytes, :remote_modified_at, :now, :now, 'new')
-                """)
-                await session.execute(
-                    insert_query,
+                new_count += 1
+                if f.file_type == "transcript":
+                    new_transcripts += 1
+                else:
+                    new_screengrabs += 1
+
+            # Batch INSERT: one executemany call per UPSERT_BATCH_SIZE rows instead
+            # of N individual executes.  Reduces SQL round-trips from ~40k to ~80 on
+            # a full scan.  Sprint 1B replaces this file; keep changes surgical.
+            insert_query = text("""
+                INSERT OR IGNORE INTO available_files
+                (remote_url, filename, directory_path, file_type, media_id,
+                 file_size_bytes, remote_modified_at, first_seen_at, last_seen_at, status)
+                VALUES
+                (:remote_url, :filename, :directory_path, :file_type, :media_id,
+                 :file_size_bytes, :remote_modified_at, :now, :now, 'new')
+            """)
+            for batch_start in range(0, len(new_files), self.UPSERT_BATCH_SIZE):
+                batch = new_files[batch_start : batch_start + self.UPSERT_BATCH_SIZE]
+                params_list = [
                     {
                         "remote_url": f.url,
                         "filename": f.filename,
@@ -337,13 +354,10 @@ class IngestScanner:
                         "file_size_bytes": f.file_size_bytes,
                         "remote_modified_at": f.modified_at.isoformat() if f.modified_at else None,
                         "now": now,
-                    },
-                )
-                new_count += 1
-                if f.file_type == "transcript":
-                    new_transcripts += 1
-                else:
-                    new_screengrabs += 1
+                    }
+                    for f in batch
+                ]
+                await session.execute(insert_query, params_list)
 
             # Step 3: Update last_seen_at for existing files (single UPDATE)
             if existing_urls:
