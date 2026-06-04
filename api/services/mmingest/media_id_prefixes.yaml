@@ -1,0 +1,414 @@
+# Vendored copy of the PBS Wisconsin Media ID prefix table.
+#
+# Source of truth: ~/Developer/pbswi/.claude/skills/reference/media-id/media_id_prefixes.yaml
+#   (generated from ~/Developer/pbswi/docs/media-id.md by scripts/sync_prefixes_from_doc.py)
+# Sync date: 2026-06-04
+# Provenance: sprint-0/media-id-resolver branch, commit checked into pbswi repo
+#
+# cardigan-v4 is a standalone deployable that cannot import across the repo
+# boundary at runtime, so this file is vendored here.  When the source YAML
+# changes, re-copy it here and update the sync date above.
+#
+# flagged: true entries carry a trailing '*' in the source doc.
+# The asterisk meaning is undocumented; preserved verbatim until clarified.
+prefixes:
+  - prefix: "9TMM"
+    show: "30-Minute Music Hour"
+    category: "broadcast"
+    flagged: false
+  - prefix: "9FTB"
+    show: "Around the Farm Table"
+    category: "broadcast"
+    flagged: false
+  - prefix: "BSWN"
+    show: "Best of Sewing with Nancy"
+    category: "broadcast"
+    flagged: false
+  - prefix: "2CSS"
+    show: "Candidate Statements"
+    category: "broadcast"
+    flagged: true
+  - prefix: "2CSQ"
+    show: "Concerts on the Square"
+    category: "broadcast"
+    flagged: true
+  - prefix: "9DCU"
+    show: "Director's Cut"
+    category: "broadcast"
+    flagged: false
+  - prefix: "2DCP"
+    show: "Director's Cut Presents"
+    category: "broadcast"
+    flagged: false
+  - prefix: "9DCF"
+    show: "Director's Cut Wisconsin Film Festival Edition"
+    category: "broadcast"
+    flagged: true
+  - prefix: "2KGG"
+    show: "Get Up and Go"
+    category: "broadcast"
+    flagged: true
+  - prefix: "2HNW"
+    show: "Here and Now"
+    category: "broadcast"
+    flagged: false
+  - prefix: "2JRY"
+    show: "Jerry Awards"
+    category: "broadcast"
+    flagged: true
+  - prefix: "2MLK"
+    show: "Martin Luther King Jr. Day Celebration"
+    category: "broadcast"
+    flagged: true
+  - prefix: "OUCC"
+    show: "Once Upon A Christmas Cheery in the Lab of Shakhashiri"
+    category: "broadcast"
+    flagged: false
+  - prefix: "SCIF"
+    show: "Science is Fun"
+    category: "broadcast"
+    flagged: true
+  - prefix: "2SHC"
+    show: "State Honors Concert"
+    category: "broadcast"
+    flagged: true
+  - prefix: "2SOS"
+    show: "State of the State"
+    category: "broadcast"
+    flagged: true
+  - prefix: "9SOT"
+    show: "State of the Tribes"
+    category: "broadcast"
+    flagged: true
+  - prefix: "9UNP"
+    show: "University Place"
+    category: "broadcast"
+    flagged: false
+  - prefix: "2VB2"
+    show: "UW Varsity Band Spring Concert"
+    category: "broadcast"
+    flagged: true
+  - prefix: "2GBA"
+    show: "Wisconsin Budget Address"
+    category: "broadcast"
+    flagged: false
+  - prefix: "2WIF"
+    show: "Wisconsin Foodie"
+    category: "broadcast"
+    flagged: false
+  - prefix: "2WLI"
+    show: "Wisconsin Life"
+    category: "broadcast"
+    flagged: false
+  - prefix: "2YAC"
+    show: "Wisconsin Young Artists Compete: The Final Forte"
+    category: "broadcast"
+    flagged: true
+  - prefix: "6AKA"
+    show: "aka Teacher"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6AMT"
+    show: "American Players Theater"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6AAS"
+    show: "Awake and sing!"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6CHO"
+    show: "Chorus rehearsal"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6CWI"
+    show: "Climate Wisconsin"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6DIP"
+    show: "Drama in Poetry"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6DDD"
+    show: "Dreaming Decolonizing Dinner"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6PLA"
+    show: "Early TV Plays"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6EDS"
+    show: "Education Digital Shorts"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6EDP"
+    show: "Education Promos"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6EEN"
+    show: "Electrical Engineering"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6EXP"
+    show: "Exploring the News"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6FRG"
+    show: "Friendly Giant"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6GLE"
+    show: "Garden Expo"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6GPR"
+    show: "Great Plays in Rehearsal"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6GWQ"
+    show: "Great Wisconsin Quilt Show"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6HNS"
+    show: "Here and Now Digital Shorts"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6DNC"
+    show: "Here and Now DNC"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6HNP"
+    show: "Here and Now Packages"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6RNC"
+    show: "Here and Now RNC"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6HYM"
+    show: "Hometown Stories Youth Media"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6INF"
+    show: "In Focus with Murv Seymour"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6ICT"
+    show: "Indigenous Affairs"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6IFT"
+    show: "Indigenous Food Traditions"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6POL"
+    show: "Inside Wisconsin Politics"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6JWT"
+    show: "Judy Woodruff Talk"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6LGS"
+    show: "Let's Grow Stuff"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6LSM"
+    show: "Live from Mead Witter School of Music"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6MST"
+    show: "Matterport Studio Tour"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6MTL"
+    show: "Meet the Lab"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6HHA"
+    show: "Michael Ford: Hip Hop Architect"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6NWD"
+    show: "Noon Wednesday"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6NHB"
+    show: "PBS Newshour Breaks"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6PEN"
+    show: "Penny for your thoughts"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6PTR"
+    show: "Play Tree"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6PAP"
+    show: "Producing a Play"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6PFP"
+    show: "Programming Fall Preview"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6PRO"
+    show: "Promos [Captioned]"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6PPW"
+    show: "Promoting PBS Wisconsin"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6PDS"
+    show: "Promotions Digital Shorts"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6QFI"
+    show: "Quick Fit with Cassy"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6RES"
+    show: "Re/sound: Songs of Wisconsin"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6RAG"
+    show: "Rhythm and Games"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6SIF"
+    show: "Science is Fun Presentations"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6SEM"
+    show: "Semantics"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6SWF"
+    show: "Sifting, Winnowing and Film Burning"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6JSC"
+    show: "SJMC Journalism Class"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6SOA"
+    show: "Sorum's Alchemy"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6SPE"
+    show: "Speech 160-161"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6STG"
+    show: "Style and Grace"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6TLB"
+    show: "The Look Back"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6MWS"
+    show: "The Man Who Was Sick"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6TWS"
+    show: "The Ways"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6BLD"
+    show: "Treasures of the theatre: Blood wedding"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6TST"
+    show: "TV Storytime"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6REH"
+    show: "University of Wisconsin Orchestra: Rehearsal"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6VOY"
+    show: "Views of youth"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6WPS"
+    show: "Welcome Poets"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6SAT"
+    show: "West Bend, Wisconsin to Paris - Via early bird satellites"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6WSR"
+    show: "Whoopensocker"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6WRM"
+    show: "Why Race Matters"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6WIA"
+    show: "Wisconsin Authors"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6WIB"
+    show: "Wisconsin Biographies"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6WFN"
+    show: "Wisconsin First Nations"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6LPB"
+    show: "Wisconsin Latinx History Collective"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6WLI"
+    show: "Wisconsin Life Digital Shorts"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6LIT"
+    show: "Wisconsin Lighthouses"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6SHU"
+    show: "Wisconsin players: The Shoemaker's house"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6IOO"
+    show: "Wisconsin School of the Air: Instruments of the Orchestra"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6KNG"
+    show: "Wisconsin School of the Air: Kindergarten"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6LTD"
+    show: "Wisconsin School of the Air: Let's Draw"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6PWI"
+    show: "Wisconsin School of the Air: Pioneer Wisconsin"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6RMC"
+    show: "Wisconsin School of the Air: Ranger Mac"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6WWN"
+    show: "Wisconsin School of the Air: Wonderful World of Nature"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6YEX"
+    show: "Wisconsin School of the Air: Young Experimenters"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6WPR"
+    show: "WPR"
+    category: "non-broadcast"
+    flagged: false
+  - prefix: "6CEN"
+    show: "WPR Centennial"
+    category: "non-broadcast"
+    flagged: false
