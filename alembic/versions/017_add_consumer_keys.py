@@ -19,10 +19,12 @@ created_at Populated at INSERT via server_default.
 last_used_at Updated by the application on each successful auth; nullable
              until the key has been used at least once.
 """
+
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision: str = "017"
 down_revision: Union[str, None] = "016"

@@ -38,9 +38,7 @@ async def migrated_engine():
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, (
-        f"alembic upgrade head failed:\n{result.stdout}\n{result.stderr}"
-    )
+    assert result.returncode == 0, f"alembic upgrade head failed:\n{result.stdout}\n{result.stderr}"
 
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", echo=False)
     yield engine
@@ -73,27 +71,21 @@ async def test_parity_delta_zero_after_insert(migrated_engine):
 
     async with migrated_engine.begin() as conn:
         # Insert a parent mmingest_files row first (FK constraint)
-        await conn.execute(
-            text(
-                """
+        await conn.execute(text("""
                 INSERT INTO mmingest_files
                     (remote_url, filename, file_type)
                 VALUES
                     ('http://example.com/test.srt', 'test.srt', 'srt')
-                """
-            )
-        )
+                """))
         file_id_row = await conn.execute(text("SELECT last_insert_rowid()"))
         file_id = file_id_row.scalar_one()
 
         # Insert a sidecar — trigger should update FTS
         await conn.execute(
-            text(
-                """
+            text("""
                 INSERT INTO mmingest_sidecars (file_id, kind, body_text)
                 VALUES (:file_id, 'srt', 'This is a test caption body.')
-                """
-            ),
+                """),
             {"file_id": file_id},
         )
 
@@ -106,9 +98,7 @@ async def test_parity_delta_zero_after_insert(migrated_engine):
 async def test_mmingest_schema_tables_exist(migrated_engine):
     """Smoke-test: all four migration targets are present after upgrade head."""
     async with migrated_engine.connect() as conn:
-        tables_row = await conn.execute(
-            text("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-        )
+        tables_row = await conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"))
         tables = {r[0] for r in tables_row.fetchall()}
 
     assert "mmingest_files" in tables
@@ -126,13 +116,28 @@ async def test_mmingest_files_columns(migrated_engine):
         col_names = {r[1] for r in cols_row.fetchall()}
 
     for expected in (
-        "id", "remote_url", "directory_path", "filename",
-        "media_id", "prefix", "prefix_category", "show_name",
-        "season", "episode", "hd", "revision_date",
-        "file_type", "file_size_bytes",
-        "etag", "content_type", "remote_modified_at",
-        "first_seen_at", "last_seen_at", "status",
-        "variant_tag", "superseded_by",
+        "id",
+        "remote_url",
+        "directory_path",
+        "filename",
+        "media_id",
+        "prefix",
+        "prefix_category",
+        "show_name",
+        "season",
+        "episode",
+        "hd",
+        "revision_date",
+        "file_type",
+        "file_size_bytes",
+        "etag",
+        "content_type",
+        "remote_modified_at",
+        "first_seen_at",
+        "last_seen_at",
+        "status",
+        "variant_tag",
+        "superseded_by",
         "airtable_record_id",
     ):
         assert expected in col_names, f"mmingest_files missing column: {expected}"
@@ -174,28 +179,22 @@ async def test_fts_match_join_returns_display_fields(migrated_engine):
     """
     async with migrated_engine.begin() as conn:
         # Insert a parent mmingest_files row with known display fields
-        await conn.execute(
-            text(
-                """
+        await conn.execute(text("""
                 INSERT INTO mmingest_files
                     (remote_url, filename, file_type, media_id, prefix, show_name)
                 VALUES
                     ('http://example.com/search_test.srt', 'search_test.srt',
                      'srt', 'WLIA1234', 'wlia', 'Nature Hour')
-                """
-            )
-        )
+                """))
         file_id_row = await conn.execute(text("SELECT last_insert_rowid()"))
         file_id = file_id_row.scalar_one()
 
         await conn.execute(
-            text(
-                """
+            text("""
                 INSERT INTO mmingest_sidecars (file_id, kind, body_text)
                 VALUES (:file_id, 'srt',
                         'The red fox jumped over the lazy brown dog.')
-                """
-            ),
+                """),
             {"file_id": file_id},
         )
 
@@ -203,10 +202,7 @@ async def test_fts_match_join_returns_display_fields(migrated_engine):
     # If the FTS5 table still has phantom UNINDEXED columns this raises
     # OperationalError: no such column: T.media_id
     async with migrated_engine.connect() as conn:
-        rows = (
-            await conn.execute(
-                text(
-                    """
+        rows = (await conn.execute(text("""
                     SELECT s.id,
                            s.file_id,
                            mf.media_id,
@@ -218,10 +214,7 @@ async def test_fts_match_join_returns_display_fields(migrated_engine):
                     JOIN   mmingest_files        AS mf  ON mf.id = s.file_id
                     WHERE  mmingest_sidecars_fts MATCH 'fox'
                     ORDER  BY fts.rank
-                    """
-                )
-            )
-        ).fetchall()
+                    """))).fetchall()
 
     assert len(rows) == 1, f"Expected 1 FTS hit, got {len(rows)}"
     row = rows[0]
@@ -243,10 +236,7 @@ async def test_fts_match_join_returns_display_fields(migrated_engine):
     async with migrated_engine.connect() as conn:
         direct_rows = (
             await conn.execute(
-                text(
-                    "SELECT body_text FROM mmingest_sidecars_fts"
-                    " WHERE mmingest_sidecars_fts MATCH 'fox'"
-                )
+                text("SELECT body_text FROM mmingest_sidecars_fts" " WHERE mmingest_sidecars_fts MATCH 'fox'")
             )
         ).fetchall()
 
@@ -258,6 +248,7 @@ async def test_fts_match_join_returns_display_fields(migrated_engine):
 # Downgrade round-trip
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_downgrade_round_trip():
     """upgrade head → downgrade 013 removes mmingest tables; available_files
@@ -266,9 +257,7 @@ async def test_downgrade_round_trip():
     fd, db_path = tempfile.mkstemp(suffix="_downgrade_test.db")
     os.close(fd)
 
-    repo_root = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..")
-    )
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     env = {**os.environ, "DATABASE_PATH": db_path}
 
     def alembic(*args: str) -> None:
@@ -279,9 +268,7 @@ async def test_downgrade_round_trip():
             capture_output=True,
             text=True,
         )
-        assert result.returncode == 0, (
-            f"alembic {' '.join(args)} failed:\n{result.stdout}\n{result.stderr}"
-        )
+        assert result.returncode == 0, f"alembic {' '.join(args)} failed:\n{result.stdout}\n{result.stderr}"
 
     try:
         alembic("upgrade", "head")
@@ -290,9 +277,7 @@ async def test_downgrade_round_trip():
         try:
             # Confirm mmingest tables exist at head
             async with engine.connect() as conn:
-                tables_row = await conn.execute(
-                    text("SELECT name FROM sqlite_master WHERE type='table'")
-                )
+                tables_row = await conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
                 tables_at_head = {r[0] for r in tables_row.fetchall()}
             assert "mmingest_files" in tables_at_head
             assert "mmingest_sidecars" in tables_at_head
@@ -306,9 +291,7 @@ async def test_downgrade_round_trip():
         engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", echo=False)
         try:
             async with engine.connect() as conn:
-                tables_row = await conn.execute(
-                    text("SELECT name FROM sqlite_master WHERE type='table'")
-                )
+                tables_row = await conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
                 tables_at_013 = {r[0] for r in tables_row.fetchall()}
 
                 # mmingest tables must be gone
@@ -320,14 +303,12 @@ async def test_downgrade_round_trip():
                 assert "available_files" in tables_at_013
 
                 # The four columns added by 014 must be gone
-                cols_row = await conn.execute(
-                    text("PRAGMA table_info(available_files)")
-                )
+                cols_row = await conn.execute(text("PRAGMA table_info(available_files)"))
                 col_names_at_013 = {r[1] for r in cols_row.fetchall()}
             for removed_col in ("etag", "content_type", "last_head_at", "probe_status"):
-                assert removed_col not in col_names_at_013, (
-                    f"Column {removed_col!r} should be absent after downgrade to 013"
-                )
+                assert (
+                    removed_col not in col_names_at_013
+                ), f"Column {removed_col!r} should be absent after downgrade to 013"
         finally:
             await engine.dispose()
 
@@ -337,9 +318,7 @@ async def test_downgrade_round_trip():
         engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", echo=False)
         try:
             async with engine.connect() as conn:
-                tables_row = await conn.execute(
-                    text("SELECT name FROM sqlite_master WHERE type='table'")
-                )
+                tables_row = await conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
                 tables_final = {r[0] for r in tables_row.fetchall()}
             assert "mmingest_files" in tables_final
             assert "mmingest_sidecars" in tables_final
@@ -358,6 +337,7 @@ async def test_downgrade_round_trip():
 # Delete-trigger parity coverage
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_parity_delta_zero_after_delete(migrated_engine):
     """INSERT then DELETE via the normal table path keeps delta at 0.
@@ -368,31 +348,21 @@ async def test_parity_delta_zero_after_delete(migrated_engine):
     from api.services.mmingest._db import fts_parity_delta
 
     async with migrated_engine.begin() as conn:
-        await conn.execute(
-            text(
-                """
+        await conn.execute(text("""
                 INSERT INTO mmingest_files (remote_url, filename, file_type)
                 VALUES ('http://example.com/delete_test.srt',
                         'delete_test.srt', 'srt')
-                """
-            )
-        )
-        file_id = (
-            await conn.execute(text("SELECT last_insert_rowid()"))
-        ).scalar_one()
+                """))
+        file_id = (await conn.execute(text("SELECT last_insert_rowid()"))).scalar_one()
 
         await conn.execute(
-            text(
-                """
+            text("""
                 INSERT INTO mmingest_sidecars (file_id, kind, body_text)
                 VALUES (:fid, 'srt', 'Content that will be deleted.')
-                """
-            ),
+                """),
             {"fid": file_id},
         )
-        sidecar_id = (
-            await conn.execute(text("SELECT last_insert_rowid()"))
-        ).scalar_one()
+        sidecar_id = (await conn.execute(text("SELECT last_insert_rowid()"))).scalar_one()
 
     # Confirm delta is 0 after insert
     async with migrated_engine.connect() as conn:
@@ -422,31 +392,21 @@ async def test_parity_delta_detects_divergence(migrated_engine):
     from api.services.mmingest._db import fts_parity_delta
 
     async with migrated_engine.begin() as conn:
-        await conn.execute(
-            text(
-                """
+        await conn.execute(text("""
                 INSERT INTO mmingest_files (remote_url, filename, file_type)
                 VALUES ('http://example.com/phantom_test.srt',
                         'phantom_test.srt', 'srt')
-                """
-            )
-        )
-        file_id = (
-            await conn.execute(text("SELECT last_insert_rowid()"))
-        ).scalar_one()
+                """))
+        file_id = (await conn.execute(text("SELECT last_insert_rowid()"))).scalar_one()
 
         await conn.execute(
-            text(
-                """
+            text("""
                 INSERT INTO mmingest_sidecars (file_id, kind, body_text)
                 VALUES (:fid, 'srt', 'Phantom row body text.')
-                """
-            ),
+                """),
             {"fid": file_id},
         )
-        sidecar_id = (
-            await conn.execute(text("SELECT last_insert_rowid()"))
-        ).scalar_one()
+        sidecar_id = (await conn.execute(text("SELECT last_insert_rowid()"))).scalar_one()
 
     async with migrated_engine.connect() as conn:
         assert await fts_parity_delta(conn) == 0
@@ -463,9 +423,7 @@ async def test_parity_delta_detects_divergence(migrated_engine):
         # Synthetic phantom: re-insert the _docsize row that the trigger
         # correctly removed, recreating the "FTS ahead of base" condition.
         await conn.execute(
-            text(
-                "INSERT INTO mmingest_sidecars_fts_docsize(id, sz) VALUES (:sid, 4)"
-            ),
+            text("INSERT INTO mmingest_sidecars_fts_docsize(id, sz) VALUES (:sid, 4)"),
             {"sid": sidecar_id},
         )
 
@@ -487,9 +445,7 @@ async def test_parity_delta_returns_none_before_migration_016():
     fd, db_path = tempfile.mkstemp(suffix="_pre016_test.db")
     os.close(fd)
 
-    repo_root = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..")
-    )
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     env = {**os.environ, "DATABASE_PATH": db_path}
     result = subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "013"],
@@ -498,17 +454,13 @@ async def test_parity_delta_returns_none_before_migration_016():
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, (
-        f"alembic upgrade 013 failed:\n{result.stdout}\n{result.stderr}"
-    )
+    assert result.returncode == 0, f"alembic upgrade 013 failed:\n{result.stdout}\n{result.stderr}"
 
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", echo=False)
     try:
         async with engine.connect() as conn:
             result = await fts_parity_delta(conn)
-        assert result is None, (
-            f"Expected None for pre-016 DB, got {result!r}"
-        )
+        assert result is None, f"Expected None for pre-016 DB, got {result!r}"
     finally:
         await engine.dispose()
         try:

@@ -28,10 +28,12 @@ superseded_by    Self-referential FK → mmingest_files.id.  Older _REV<YYYYMMDD
                  row within the same (media_id, variant_tag) group.  NULL for
                  current rows.  Population deferred to the indexer sprint.
 """
+
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision: str = "015"
 down_revision: Union[str, None] = "014"
@@ -42,15 +44,12 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     op.create_table(
         "mmingest_files",
-
         # Primary key
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-
         # File location
         sa.Column("remote_url", sa.Text(), nullable=False, unique=True),
         sa.Column("directory_path", sa.Text(), nullable=True),
         sa.Column("filename", sa.Text(), nullable=False),
-
         # Parsed metadata — common fields
         sa.Column("media_id", sa.Text(), nullable=True),
         sa.Column("prefix", sa.Text(), nullable=True),
@@ -60,32 +59,23 @@ def upgrade() -> None:
         sa.Column("episode", sa.Text(), nullable=True),
         sa.Column("hd", sa.Integer(), nullable=True),  # boolean: 1=HD, 0=SD
         sa.Column("revision_date", sa.Text(), nullable=True),
-
         # File type and size
         sa.Column("file_type", sa.Text(), nullable=False),  # mp4 | srt | scc | image | other
         sa.Column("file_size_bytes", sa.Integer(), nullable=True),
-
         # Remote server HTTP metadata
         sa.Column("etag", sa.Text(), nullable=True),
         sa.Column("content_type", sa.Text(), nullable=True),
         sa.Column("remote_modified_at", sa.DateTime(), nullable=True),
-
         # Tracking timestamps
-        sa.Column("first_seen_at", sa.DateTime(), nullable=False,
-                  server_default=sa.func.current_timestamp()),
-        sa.Column("last_seen_at", sa.DateTime(), nullable=False,
-                  server_default=sa.func.current_timestamp()),
-
+        sa.Column("first_seen_at", sa.DateTime(), nullable=False, server_default=sa.func.current_timestamp()),
+        sa.Column("last_seen_at", sa.DateTime(), nullable=False, server_default=sa.func.current_timestamp()),
         # Workflow status
         sa.Column("status", sa.Text(), nullable=False, server_default="new"),
-
         # Variant / revision lineage
         # variant_tag: true variant suffix from known vocabulary, e.g. 'PLEDGE', 'DS'
         sa.Column("variant_tag", sa.Text(), nullable=True),
         # superseded_by: self-referential FK; older _REV<date> rows point at current row
-        sa.Column("superseded_by", sa.Integer(),
-                  sa.ForeignKey("mmingest_files.id"), nullable=True),
-
+        sa.Column("superseded_by", sa.Integer(), sa.ForeignKey("mmingest_files.id"), nullable=True),
         # Linking
         sa.Column("airtable_record_id", sa.Text(), nullable=True),
     )

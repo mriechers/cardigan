@@ -23,10 +23,12 @@ populate during HEAD-probe passes:
 The `available_files` table is retained as-is for back-compat during the
 mmingest transition; it is NOT converted into the mmingest_files table.
 """
+
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision: str = "014"
 down_revision: Union[str, None] = "013"

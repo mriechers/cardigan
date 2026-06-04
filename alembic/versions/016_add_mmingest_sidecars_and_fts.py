@@ -43,10 +43,12 @@ Three AFTER triggers on mmingest_sidecars keep the FTS index in sync:
 
 The downgrade drops triggers, FTS table, and base table in reverse order.
 """
+
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision: str = "016"
 down_revision: Union[str, None] = "015"
@@ -90,44 +92,37 @@ def upgrade() -> None:
     # here: those columns belong to mmingest_files (not mmingest_sidecars),
     # so FTS5 would fail at read time trying to resolve them from the content
     # table.  Search queries JOIN to mmingest_files for display fields.
-    op.execute(
-        """
+    op.execute("""
         CREATE VIRTUAL TABLE mmingest_sidecars_fts
         USING fts5(
             body_text,
             content       = 'mmingest_sidecars',
             content_rowid = 'id'
         )
-        """
-    )
+        """)
 
     # --- FTS sync triggers ---
     # AFTER INSERT: index the new row
-    op.execute(
-        """
+    op.execute("""
         CREATE TRIGGER trg_mmingest_sidecars_fts_insert
         AFTER INSERT ON mmingest_sidecars BEGIN
             INSERT INTO mmingest_sidecars_fts(rowid, body_text)
             VALUES (new.id, new.body_text);
         END
-        """
-    )
+        """)
 
     # AFTER DELETE: remove the old row from the FTS index.
     # FTS5 delete uses the special 'delete' command row.
-    op.execute(
-        """
+    op.execute("""
         CREATE TRIGGER trg_mmingest_sidecars_fts_delete
         AFTER DELETE ON mmingest_sidecars BEGIN
             INSERT INTO mmingest_sidecars_fts(mmingest_sidecars_fts, rowid, body_text)
             VALUES ('delete', old.id, old.body_text);
         END
-        """
-    )
+        """)
 
     # AFTER UPDATE: delete old entry, insert new entry.
-    op.execute(
-        """
+    op.execute("""
         CREATE TRIGGER trg_mmingest_sidecars_fts_update
         AFTER UPDATE ON mmingest_sidecars BEGIN
             INSERT INTO mmingest_sidecars_fts(mmingest_sidecars_fts, rowid, body_text)
@@ -135,8 +130,7 @@ def upgrade() -> None:
             INSERT INTO mmingest_sidecars_fts(rowid, body_text)
             VALUES (new.id, new.body_text);
         END
-        """
-    )
+        """)
 
 
 def downgrade() -> None:

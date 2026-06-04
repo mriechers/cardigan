@@ -55,30 +55,22 @@ async def fts_parity_delta(conn: AsyncConnection) -> int | None:
     # genuine errors such as a corrupt FTS shadow table).
     # Note: SQLite registers FTS5 shadow tables (e.g. _docsize) with
     # type='table' — there is no distinct 'shadow' type in sqlite_master.
-    exists_row = await conn.execute(
-        text(
-            """
+    exists_row = await conn.execute(text("""
             SELECT COUNT(*) FROM sqlite_master
             WHERE type = 'table'
               AND name IN ('mmingest_sidecars', 'mmingest_sidecars_fts_docsize')
-            """
-        )
-    )
+            """))
     if exists_row.scalar_one() < 2:
         return None
 
-    base_count_row = await conn.execute(
-        text("SELECT COUNT(*) FROM mmingest_sidecars")
-    )
+    base_count_row = await conn.execute(text("SELECT COUNT(*) FROM mmingest_sidecars"))
     base_count: int = base_count_row.scalar_one()
 
     # In FTS5 external-content mode the virtual table does NOT create a
     # _content shadow table (the content lives in mmingest_sidecars itself).
     # The _docsize shadow table has exactly one row per document present in
     # the index, making it the right counter for parity checks.
-    fts_count_row = await conn.execute(
-        text("SELECT COUNT(*) FROM mmingest_sidecars_fts_docsize")
-    )
+    fts_count_row = await conn.execute(text("SELECT COUNT(*) FROM mmingest_sidecars_fts_docsize"))
     fts_count: int = fts_count_row.scalar_one()
 
     return base_count - fts_count
