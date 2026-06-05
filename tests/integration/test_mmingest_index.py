@@ -458,6 +458,127 @@ async def test_idempotency_no_writes_on_second_run(migrated_engine):
 
 
 # ---------------------------------------------------------------------------
+# Cross-run temporal sequence: new _REV arrives in a later crawl
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_variant_lineage_cross_run_temporal_sequence(migrated_engine):
+    """New _REV row indexed in Run 2 supersedes the old row from Run 1.
+
+    Simulates the production pattern where the change-detection triple causes
+    unchanged files to be skipped by the crawler.  The older REV row stays in
+    the DB but is absent from Run 2's work-items list — exactly the failure
+    mode fixed by querying the DB for the full group in _apply_variant_lineage.
+
+    Run 1: index 6POL0101_REV20260101 alone.
+           Assert: superseded_by = NULL.
+
+    Run 2: index 6POL0101_REV20260319 alone (older row absent from batch).
+           Assert: older row superseded_by = newer row's id.
+           Assert: newer row superseded_by = NULL.
+
+    Run 3 (idempotency): same input as Run 2.
+           Assert: state unchanged.
+
+    Run 4: index 6POL0101_REV20260601 alone (third, even-newer REV).
+           Assert: both previous rows have superseded_by = Run 4 row's id.
+           Assert: Run 4 row superseded_by = NULL.
+    """
+    url_old = "https://mmingest.pbswi.wisc.edu/IWP/6POL0101_REV20260101.srt"
+    url_mid = "https://mmingest.pbswi.wisc.edu/IWP/6POL0101_REV20260319.srt"
+    url_new = "https://mmingest.pbswi.wisc.edu/IWP/6POL0101_REV20260601.srt"
+
+    old_item = _make_file_work_item(
+        url=url_old,
+        filename="6POL0101_REV20260101.srt",
+        revision_date="2026-01-01",
+    )
+    mid_item = _make_file_work_item(
+        url=url_mid,
+        filename="6POL0101_REV20260319.srt",
+        revision_date="2026-03-19",
+    )
+    new_item = _make_file_work_item(
+        url=url_new,
+        filename="6POL0101_REV20260601.srt",
+        revision_date="2026-06-01",
+    )
+
+    # --- Run 1: index only the old REV ---
+    await _run_indexer_with_mocks(migrated_engine, [old_item], [])
+
+    async with migrated_engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                text("SELECT id, superseded_by FROM mmingest_files WHERE remote_url = :url"),
+                {"url": url_old},
+            )
+        ).fetchall()
+    assert len(rows) == 1, "Run 1: expected 1 row"
+    assert rows[0][1] is None, f"Run 1: superseded_by should be NULL, got {rows[0][1]}"
+
+    # --- Run 2: index only the mid REV (old row not in this batch) ---
+    await _run_indexer_with_mocks(migrated_engine, [mid_item], [])
+
+    async with migrated_engine.connect() as conn:
+        all_rows = (await conn.execute(text("""
+                    SELECT remote_url, id, superseded_by
+                    FROM mmingest_files
+                    WHERE media_id = '6POL0101'
+                    ORDER BY revision_date
+                """))).fetchall()
+    assert len(all_rows) == 2, f"Run 2: expected 2 rows, got {len(all_rows)}"
+
+    by_url = {r[0]: r for r in all_rows}
+    assert url_old in by_url, "Run 2: old row missing from DB"
+    assert url_mid in by_url, "Run 2: mid row missing from DB"
+
+    mid_id = by_url[url_mid][1]
+    assert by_url[url_old][2] == mid_id, (
+        f"Run 2: old row superseded_by={by_url[url_old][2]} " f"should point at mid row id={mid_id}"
+    )
+    assert by_url[url_mid][2] is None, f"Run 2: mid row superseded_by should be NULL, got {by_url[url_mid][2]}"
+
+    # --- Run 3 (idempotency): same input as Run 2 ---
+    await _run_indexer_with_mocks(migrated_engine, [mid_item], [])
+
+    async with migrated_engine.connect() as conn:
+        all_rows3 = (await conn.execute(text("""
+                    SELECT remote_url, id, superseded_by
+                    FROM mmingest_files
+                    WHERE media_id = '6POL0101'
+                    ORDER BY revision_date
+                """))).fetchall()
+    assert len(all_rows3) == 2, f"Run 3 (idempotency): expected 2 rows, got {len(all_rows3)}"
+    by_url3 = {r[0]: r for r in all_rows3}
+    assert by_url3[url_old][2] == mid_id, "Run 3: idempotency violated — old row superseded_by changed"
+    assert by_url3[url_mid][2] is None, "Run 3: idempotency violated — mid row superseded_by non-NULL"
+
+    # --- Run 4: index only the newest REV (both older rows absent from batch) ---
+    await _run_indexer_with_mocks(migrated_engine, [new_item], [])
+
+    async with migrated_engine.connect() as conn:
+        all_rows4 = (await conn.execute(text("""
+                    SELECT remote_url, id, superseded_by
+                    FROM mmingest_files
+                    WHERE media_id = '6POL0101'
+                    ORDER BY revision_date
+                """))).fetchall()
+    assert len(all_rows4) == 3, f"Run 4: expected 3 rows, got {len(all_rows4)}"
+    by_url4 = {r[0]: r for r in all_rows4}
+    new_id = by_url4[url_new][1]
+
+    assert by_url4[url_old][2] == new_id, (
+        f"Run 4: old row superseded_by={by_url4[url_old][2]} " f"should point at new row id={new_id}"
+    )
+    assert by_url4[url_mid][2] == new_id, (
+        f"Run 4: mid row superseded_by={by_url4[url_mid][2]} " f"should point at new row id={new_id}"
+    )
+    assert by_url4[url_new][2] is None, f"Run 4: new row superseded_by should be NULL, got {by_url4[url_new][2]}"
+
+
+# ---------------------------------------------------------------------------
 # Extra: FTS parity maintained after multiple sidecar inserts
 # ---------------------------------------------------------------------------
 

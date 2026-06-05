@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import logging
 import time
-from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
@@ -373,77 +372,125 @@ class MmingestIndexer:
         """Update superseded_by for older _REV rows within each (media_id, variant_tag) group.
 
         Algorithm (per spec):
-          1. Group FileWorkItems by (media_id, variant_tag).
-          2. For each group, call select_primary() to find the winner.
-          3. For each superseded item, UPDATE superseded_by = primary_id.
-          4. Ensure the primary's superseded_by is NULL (idempotency).
+          1. Collect all (media_id, variant_tag) groups touched by the current batch.
+          2. For each group, query the DB for ALL rows in that group (including rows
+             from prior crawl runs that were skipped by the change-detection triple).
+          3. Call select_primary() across the full DB-resident set to find the winner.
+          4. For each superseded row, UPDATE superseded_by = winner_id.
+          5. Ensure the winner row's superseded_by is reset to NULL (idempotency +
+             handles promotion from loser to winner when a newer REV is retracted).
 
         Items with media_id=None cannot participate in variant lineage and are skipped.
-        Items with unknown_tag are treated as primaries within their own group
-        (select_primary() handles this via the ParsedFilename surface).
-        """
-        # Build a ParsedFilename-like view for select_primary.
-        # select_primary() takes list[ParsedFilename]; we synthesise minimal objects
-        # from the FileWorkItem fields rather than re-parsing from filename.
 
-        # Group by (media_id, variant_tag) — items without media_id are skipped
-        groups: dict[tuple, list[FileWorkItem]] = defaultdict(list)
+        Note on unknown_tag: the unknown_tag field is not persisted to the DB schema, so
+        DB-reconstructed rows always have unknown_tag=None.  This means items that
+        originally had an unknown_tag (e.g. _NOVELTAG) will participate in the REV race
+        as no-revision-date candidates.  In practice this is harmless because unknown_tag
+        items never carry a revision_date, so they correctly lose to any _REV-dated row.
+        A future migration could persist unknown_tag to resolve the rare edge case where
+        an unknown_tag item and a clean primary both have no revision_date.
+        """
+        # Determine which (media_id, variant_tag) groups are affected by this batch.
+        # We include ALL groups touched by any item in the batch regardless of whether
+        # the item has a revision_date.  The DB query below handles the single-row case
+        # by skipping groups with fewer than 2 rows, so there is no wasted work.
+        affected_groups: set[tuple[str, Optional[str]]] = set()
         for item in items:
             if item.media_id is None:
                 continue
-            key = (item.media_id, item.variant_tag)
-            groups[key].append(item)
+            affected_groups.add((item.media_id, item.variant_tag))
 
-        if not groups:
+        if not affected_groups:
             return
 
         update_sql = text("""
             UPDATE mmingest_files
             SET superseded_by = :superseded_by
-            WHERE remote_url = :remote_url
+            WHERE id = :row_id
         """)
 
         # Build up all UPDATE params across all groups; apply in one batch
         superseded_params: list[dict] = []
         clear_primary_params: list[dict] = []
 
-        for key, group in groups.items():
-            # Build minimal ParsedFilename objects for select_primary
-            pf_list = [_make_parsed_filename(item) for item in group]
-            primary_pf, variants_pf, superseded_pf = select_primary(pf_list)
+        for media_id, variant_tag in affected_groups:
+            # Query ALL DB rows for this (media_id, variant_tag) group, including
+            # rows from prior runs that were not in the current crawler batch.
+            if variant_tag is None:
+                db_rows = (
+                    await conn.execute(
+                        text("""
+                            SELECT id, remote_url, revision_date, variant_tag
+                            FROM mmingest_files
+                            WHERE media_id = :media_id
+                              AND variant_tag IS NULL
+                        """),
+                        {"media_id": media_id},
+                    )
+                ).fetchall()
+            else:
+                db_rows = (
+                    await conn.execute(
+                        text("""
+                            SELECT id, remote_url, revision_date, variant_tag
+                            FROM mmingest_files
+                            WHERE media_id = :media_id
+                              AND variant_tag = :variant_tag
+                        """),
+                        {"media_id": media_id, "variant_tag": variant_tag},
+                    )
+                ).fetchall()
+
+            if len(db_rows) < 2:
+                # Single row (or none): no lineage to assign
+                continue
+
+            # Build minimal ParsedFilename objects from DB rows for select_primary
+            pf_list = [
+                ParsedFilename(
+                    stem=row[1].rsplit("/", 1)[-1].rsplit(".", 1)[0],
+                    file_type="",
+                    media_id=media_id,
+                    prefix="",
+                    season=0,
+                    episode=0,
+                    hd=False,
+                    revision_date=row[2],
+                    variant_tag=row[3],
+                    # unknown_tag is not persisted; see docstring note above
+                    unknown_tag=None,
+                    prefix_category="unknown",
+                    show_name=None,
+                )
+                for row in db_rows
+            ]
+
+            primary_pf, _variants_pf, superseded_pf = select_primary(pf_list)
 
             if primary_pf is None:
                 continue
 
-            # Find the primary FileWorkItem by its revision_date / unknown_tag match
-            primary_item = _find_item_by_pf(primary_pf, group)
-            if primary_item is None:
-                logger.warning(
-                    "variant_lineage: could not match primary ParsedFilename back to "
-                    "FileWorkItem for group %s — skipping lineage update",
-                    key,
-                )
-                continue
-
-            primary_id = url_to_id.get(primary_item.url)
+            primary_id = _find_db_row_id(primary_pf, db_rows)
             if primary_id is None:
                 logger.warning(
-                    "variant_lineage: primary item %s not in url_to_id map — skipping",
-                    primary_item.url,
+                    "variant_lineage: could not resolve primary DB row for group " "(%s, %r) — skipping lineage update",
+                    media_id,
+                    variant_tag,
                 )
                 continue
 
-            # Primary row must have superseded_by = NULL
-            clear_primary_params.append({"superseded_by": None, "remote_url": primary_item.url})
+            # Winner's superseded_by must be NULL (handles promotion from prior loser)
+            clear_primary_params.append({"superseded_by": None, "row_id": primary_id})
 
-            # Superseded rows point at primary
+            # All other rows in this group point at the winner
             for sup_pf in superseded_pf:
-                sup_item = _find_item_by_pf(sup_pf, group)
-                if sup_item is None:
+                sup_id = _find_db_row_id(sup_pf, db_rows)
+                if sup_id is None:
                     continue
-                superseded_params.append({"superseded_by": primary_id, "remote_url": sup_item.url})
+                superseded_params.append({"superseded_by": primary_id, "row_id": sup_id})
 
-        # Apply in batches
+        # Apply in batches (clear winners first so FK constraints are never violated
+        # in the edge case where a former winner becomes a loser in the same batch)
         all_updates = clear_primary_params + superseded_params
         for batch_start in range(0, len(all_updates), _UPSERT_BATCH_SIZE):
             batch = all_updates[batch_start : batch_start + _UPSERT_BATCH_SIZE]
@@ -581,4 +628,23 @@ def _find_item_by_pf(
             and item.unknown_tag == pf.unknown_tag
         ):
             return item
+    return None
+
+
+def _find_db_row_id(
+    pf: ParsedFilename,
+    db_rows: list,
+) -> Optional[int]:
+    """Find the DB row id matching a ParsedFilename by (revision_date, variant_tag).
+
+    Used by _apply_variant_lineage to map select_primary() results back to DB ids.
+    The (revision_date, variant_tag) pair is unique within a (media_id, variant_tag)
+    group because variant_tag is the same for all rows in the group and revision_date
+    identifies which REV iteration this is.
+
+    db_rows rows are expected to be (id, remote_url, revision_date, variant_tag) tuples.
+    """
+    for row in db_rows:
+        if row[2] == pf.revision_date and row[3] == pf.variant_tag:
+            return row[0]
     return None
