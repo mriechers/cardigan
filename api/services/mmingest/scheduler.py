@@ -1,19 +1,20 @@
-"""mmingest crawler scheduler — Sprint 1B.
+"""mmingest crawler scheduler — Sprint 2.
 
-APScheduler wiring for the mmingest incremental delta crawler.  Follows the
-pattern established by api/services/ingest_scheduler.py.
+APScheduler wiring for the mmingest incremental delta crawler + indexer.
+Follows the pattern established by api/services/ingest_scheduler.py.
 
 Jobs registered here:
-  * ``mmingest_delta_walk`` — hourly directory delta walk; emits FileWorkItem
-    results to be consumed by S2's indexer.
+  * ``mmingest_delta_walk`` — hourly directory delta walk + full index pass
+    via MmingestIndexer.run_once().
 
 Design notes:
-  * The scheduler is REGISTERED but NOT STARTED by this module.  S2 calls
-    ``start_mmingest_scheduler()`` to activate it during app startup.
-  * No DB writes happen here — the crawler outputs in-memory work items.
-    S2 is responsible for wiring those to the indexer.
-  * The continuous sidecar/MP4 enqueue job is stubbed here; S2 fleshes it
-    out once it can supply the list of pending files to fetch.
+  * The scheduler is REGISTERED but NOT STARTED by this module.  The app
+    startup path calls ``start_mmingest_scheduler()`` to activate it.
+  * ``run_delta_walk()`` is the scheduler entry point; it instantiates
+    MmingestIndexer, supplies the DB engine, and calls run_once().
+  * The DB engine is resolved lazily from api.services.database at call
+    time so that the scheduler module can be imported before the engine
+    is created (e.g. in tests that patch the engine).
 """
 
 from __future__ import annotations
@@ -23,8 +24,6 @@ from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-
-from api.services.mmingest.crawler import MmingestCrawler
 
 logger = logging.getLogger(__name__)
 
@@ -49,31 +48,52 @@ def get_mmingest_scheduler() -> AsyncIOScheduler:
 
 
 async def run_delta_walk() -> None:
-    """Execute one incremental delta walk of the mmingest server.
+    """Execute one incremental delta walk + index pass of the mmingest server.
 
-    Called by APScheduler on the configured interval.  Emits work items to
-    the logger (placeholder) — S2 replaces this with real indexer dispatch.
+    Called by APScheduler on the configured interval.  Instantiates
+    MmingestIndexer with the application's async engine and calls run_once()
+    so that discovered files are persisted to mmingest_files and sidecars are
+    written to mmingest_sidecars (FTS5 synced via migration 016 triggers).
+
+    The DB engine is imported lazily to avoid circular-import issues at
+    module load time.
     """
-    logger.info("mmingest delta walk starting")
+    logger.info("mmingest delta walk + index starting")
 
     try:
-        crawler = MmingestCrawler(
+        # Import lazily to avoid circular imports at module load time.
+        # _engine is the module-level singleton created by init_db(); if the
+        # scheduler fires before init_db() completes, the engine will be None
+        # and we log an error rather than crashing.
+        import api.services.database as _db_module
+        from api.services.mmingest.indexer import MmingestIndexer
+
+        engine = _db_module._engine
+        if engine is None:
+            logger.error(
+                "mmingest indexer: DB engine not initialised (init_db() not yet called). " "Skipping this run."
+            )
+            return
+
+        indexer = MmingestIndexer(
+            engine=engine,
             base_url="https://mmingest.pbswi.wisc.edu/",
+            directories=["/"],
             max_concurrent=4,
             rate_per_second=2.0,
         )
 
-        # S2 supplies ``known`` from the database; for now walk returns all files.
-        work_items = await crawler.delta_walk(directories=["/"])
-
-        sidecar_count = sum(1 for wi in work_items if wi.lane == "sidecar")
-        primary_count = sum(1 for wi in work_items if wi.lane == "primary")
+        run = await indexer.run_once()
 
         logger.info(
-            "mmingest delta walk complete: %d work items " "(%d sidecar, %d primary)",
-            len(work_items),
-            sidecar_count,
-            primary_count,
+            "mmingest delta walk complete: files_seen=%d files_new=%d "
+            "sidecars_fetched=%d sidecars_persisted=%d fts_delta=%s elapsed=%.1fs",
+            run.files_seen,
+            run.files_new,
+            run.sidecars_fetched,
+            run.sidecars_persisted,
+            run.fts_parity_delta,
+            run.elapsed_seconds,
         )
 
     except RuntimeError as exc:
@@ -116,13 +136,14 @@ def configure_mmingest_jobs(
         delta_walk_interval_hours,
     )
 
-    # --- Continuous sidecar enqueue (stub — S2 activates) ---
-    # S2 will add a job here that:
-    #   1. Queries mmingest_files for srt/scc with status='new'
-    #   2. Dispatches SidecarFetcher.fetch_many()
-    #   3. Writes results to mmingest_sidecars
-    # Placeholder logged so S2 knows the hook point.
-    logger.debug("mmingest continuous sidecar enqueue: STUB — S2 activates this job")
+    # --- Continuous sidecar enqueue (activated by S2) ---
+    # The mmingest_delta_walk job already fetches sidecars inline during each
+    # run_once() pass (MmingestIndexer._persist_sidecars).  The separate
+    # continuous-enqueue job is not needed in this sprint; the inline path
+    # handles the sidecar backfill correctly.  If future sprints need an
+    # independent retry queue (e.g. for large sidecar backlogs), add a
+    # separate job here following the same pattern.
+    logger.debug("mmingest sidecar enqueue: handled inline by MmingestIndexer.run_once()")
 
 
 async def start_mmingest_scheduler(
