@@ -330,12 +330,18 @@ class TestParseFilenameVariants:
         A file with a properly underscore-separated unknown tag
         (e.g. '6POL0103_NoBugTest.srt') DOES produce unknown_tag — see
         test_unknown_tag_preserved.
+
+        Update (lenient-parse rule): '6POL' IS a registered prefix, so
+        '6POL0101CLEAN' now returns a nonstandard ParsedFilename rather than
+        a ParseError.  The file is still indexed under Inside Wisconsin
+        Politics; S2 logs it for hygiene reporting.
         """
         result = parse_filename("6POL0101CLEAN.srt")
-        # CLEAN has no '_' separator: grammar mismatch -> ParseError
-        assert isinstance(result, ParseError)
-        assert result.stem == "6POL0101CLEAN"
-        assert ".srt" in result.file_type
+        # 6POL is registered — lenient parse applies; grammar still mismatches
+        assert isinstance(result, ParsedFilename), f"Expected nonstandard ParsedFilename, got: {result}"
+        assert result.nonstandard is True
+        assert result.prefix == "6POL"
+        assert result.nonstandard_remainder == "0101CLEAN"
 
     def test_known_variant_vocab_contents(self):
         """Smoke-check that the vocabulary constants are present."""
@@ -362,12 +368,16 @@ class TestParseFilenameUnparseable:
         result = parse_filename("POL0101.srt")  # 3-char prefix
         assert isinstance(result, ParseError)
 
-    def test_six_char_prefix_returns_parse_error(self):
-        """'6POLS0101NIL' — prefix would be '6POL', then 'S' is not a digit."""
+    def test_six_char_prefix_returns_nonstandard(self):
+        """'6POLS0101NIL' — prefix would be '6POL', then 'S' is not a digit.
+
+        The regex fails (not a grammar match), but '6POL' IS a registered
+        prefix.  Per the lenient-parse rule, this returns a nonstandard
+        ParsedFilename, NOT a ParseError.
+        """
         result = parse_filename("6POLS0101NIL.srt")
-        # 6POLS: 5 chars before the SSEE — the RE requires exactly 4-char prefix
-        # then 2+2 digits.  "6POL" is 4 chars, then "S" is not digit -> no match.
-        assert isinstance(result, ParseError)
+        assert isinstance(result, ParsedFilename), f"Expected nonstandard ParsedFilename, got: {result}"
+        assert result.nonstandard is True
 
     def test_parse_error_has_reason(self):
         result = parse_filename("RANDOM_TEXT.srt")
@@ -460,88 +470,131 @@ class TestSelectPrimary:
 
     def test_single_entry_is_primary(self):
         entry = self._make_parsed("6POL0101.srt")
-        primary, variants, superseded = select_primary([entry])
-        assert primary == entry
-        assert variants == []
-        assert superseded == []
+        results = select_primary([entry])
+        assert len(results) == 1
+        r = results[0]
+        assert r.primary == entry
+        assert r.variants == []
+        assert r.superseded == []
 
-    def test_empty_list_returns_none(self):
-        primary, variants, superseded = select_primary([])
-        assert primary is None
-        assert variants == []
-        assert superseded == []
+    def test_empty_list_returns_empty(self):
+        results = select_primary([])
+        assert results == []
 
     def test_rev_latest_wins(self):
-        """Within a REV group, the latest date wins.
+        """Within a single (media_id, variant_tag) group, latest REV date wins.
 
-        Uses two parseable REV filenames with different dates.  select_primary
-        is agnostic about whether entries share the same media_id — the caller
-        is responsible for grouping; here we supply two REV entries for the
-        same episode to simulate a real supersession scenario.
+        Both entries must share the same media_id so select_primary sees them
+        in the same group.  We use two REV filenames for 6POL0101.
         """
-        # Both are parseable; 0106 REV date (2026-04-23) is older than 0107 (2026-04-30)
-        old = self._make_parsed("6POL0106_REV20260423.srt")
-        new = self._make_parsed("6POL0107_REV20260430.srt")
-        primary, variants, superseded = select_primary([old, new])
-        assert primary is not None
-        # newer revision date wins (lexicographic ISO comparison is chronological)
-        assert primary.revision_date == "2026-04-30"
-        assert old in superseded
-        assert len(superseded) == 1
-        assert variants == []
+        old = self._make_parsed("6POL0101_REV20260423.srt")
+        new = self._make_parsed("6POL0101_REV20260430.srt")
+        results = select_primary([old, new])
+        assert len(results) == 1
+        r = results[0]
+        assert r.primary is not None
+        assert r.primary.revision_date == "2026-04-30"
+        assert old in r.superseded
+        assert len(r.superseded) == 1
+        assert r.variants == []
 
     def test_rev_supersession_correct_order(self):
-        """Older REV ends up in superseded, newer is primary."""
-        older = self._make_parsed("6POL0106_REV20260423.srt")
-        # We need a newer REV for the same show.  Manufacture via direct field overwrite.
-        newer = self._make_parsed("6POL0107_REV20260430.srt")
-        # Force same media_id to simulate a real group (select_primary doesn't check)
-        primary, variants, superseded = select_primary([older, newer])
-        assert primary == newer
-        assert older in superseded
+        """Older REV ends up in superseded, newer is primary — same media_id."""
+        older = self._make_parsed("6POL0101_REV20260423.srt")
+        newer = self._make_parsed("6POL0101_REV20260430.srt")
+        results = select_primary([older, newer])
+        assert len(results) == 1
+        r = results[0]
+        assert r.primary == newer
+        assert older in r.superseded
+
+    def test_different_media_ids_produce_separate_groups(self):
+        """Entries with different media_ids are placed in separate groups."""
+        entry_0106 = self._make_parsed("6POL0106_REV20260423.srt")
+        entry_0107 = self._make_parsed("6POL0107_REV20260430.srt")
+        results = select_primary([entry_0106, entry_0107])
+        # Two distinct media_ids → two groups, each with one primary
+        assert len(results) == 2
+        primaries = [r.primary for r in results]
+        assert entry_0106 in primaries
+        assert entry_0107 in primaries
+        for r in results:
+            assert r.superseded == []
+
+    def test_pledge_group_rev_independent_of_no_variant_group(self):
+        """PLEDGE variant's REV race is independent of the no-variant primary group.
+
+        Scenario: one show (6POL0101) has two REV deliveries of the no-variant
+        primary AND two REV deliveries of the PLEDGE cut.  select_primary must
+        pick the winning REV within each (media_id, variant_tag) group without
+        cross-contamination.
+        """
+        # No-variant group: two REVs
+        primary_old = self._make_parsed("6POL0101_REV20260410.mp4")
+        primary_new = self._make_parsed("6POL0101_REV20260430.mp4")
+        # PLEDGE group: two REVs
+        pledge_old = self._make_parsed("6POL0101_REV20260410_PLEDGE.mp4")
+        pledge_new = self._make_parsed("6POL0101_REV20260430_PLEDGE.mp4")
+
+        results = select_primary([primary_old, primary_new, pledge_old, pledge_new])
+
+        # Expect exactly two groups
+        assert len(results) == 2
+        by_key = {r.group_key: r for r in results}
+
+        # No-variant group (variant_tag=None)
+        no_variant = by_key[("6POL0101", None)]
+        assert no_variant.primary == primary_new
+        assert primary_old in no_variant.superseded
+
+        # PLEDGE group (variant_tag="PLEDGE")
+        pledge_group = by_key[("6POL0101", "PLEDGE")]
+        assert pledge_group.primary == pledge_new
+        assert pledge_old in pledge_group.superseded
 
     def test_known_variant_passes_through(self):
-        """PLEDGE variant is not part of the primary's REV race.
+        """PLEDGE variant is routed to its own group, not mixed with no-variant.
 
-        In real usage, select_primary is called on entries that share the same
-        (media_id, variant_tag) group.  The PLEDGE entry belongs to the PLEDGE
-        group; the no-variant primary belongs to the None-variant group.  They
-        are NOT mixed in the same call.
-
-        This test verifies the no-variant group call returns the primary cleanly.
-        The separate PLEDGE parse is asserted to have variant_tag='PLEDGE' to
-        confirm the vocab lookup works.
+        This test verifies that passing a mix of no-variant and PLEDGE entries
+        for the same media_id produces two separate groups, not a collision.
         """
         primary_entry = self._make_parsed("2WLI0501HD.srt")
-        # Confirm PLEDGE parses correctly (separate group — not mixed into select_primary)
-        pledge_result = parse_filename("2WLI0501HD_PLEDGE.mp4")
-        assert isinstance(pledge_result, ParsedFilename)
-        assert pledge_result.variant_tag == "PLEDGE"
-        # The no-variant group: primary entry stands alone
-        primary, variants, superseded = select_primary([primary_entry])
-        assert primary == primary_entry
-        assert variants == []
+        pledge_entry = self._make_parsed("2WLI0501HD_PLEDGE.mp4")
+        assert pledge_entry.variant_tag == "PLEDGE"
+
+        results = select_primary([primary_entry, pledge_entry])
+        assert len(results) == 2
+        by_key = {r.group_key: r for r in results}
+        assert by_key[("2WLI0501", None)].primary == primary_entry
+        assert by_key[("2WLI0501", "PLEDGE")].primary == pledge_entry
 
     def test_unknown_tag_excluded_from_rev_race(self):
-        """Entries with unknown_tag are returned as variants, not superseded."""
+        """Entries with unknown_tag are returned as variants, not superseded.
+
+        Both entries have the same media_id, so they land in one group.
+        The unknown-tag entry is a bystander and does not participate in the
+        REV race.
+        """
         known = self._make_parsed("6POL0101.srt")
-        unknown_tagged = self._make_parsed("6POL0103_NoBugTest.srt")
-        # unknown_tagged has unknown_tag="NoBugTest"
+        unknown_tagged = self._make_parsed("6POL0101_NoBugTest.srt")
         assert unknown_tagged.unknown_tag is not None
 
-        primary, variants, superseded = select_primary([known, unknown_tagged])
-        # known has no unknown_tag, so it's primary; unknown_tagged is in variants
-        assert primary == known
-        assert unknown_tagged in variants
-        assert superseded == []
+        results = select_primary([known, unknown_tagged])
+        assert len(results) == 1
+        r = results[0]
+        assert r.primary == known
+        assert unknown_tagged in r.variants
+        assert r.superseded == []
 
     def test_no_rev_multiple_entries(self):
         """Without revision dates, first entry wins, rest go to superseded."""
         a = self._make_parsed("6POL0101.srt")
-        b = self._make_parsed("6POL0102.srt")
-        primary, variants, superseded = select_primary([a, b])
-        assert primary == a
-        assert b in superseded
+        b = self._make_parsed("6POL0101.mp4")
+        results = select_primary([a, b])
+        assert len(results) == 1
+        r = results[0]
+        assert r.primary == a
+        assert b in r.superseded
 
 
 # ---------------------------------------------------------------------------
@@ -581,11 +634,85 @@ class TestFixtureParseFilenames:
         assert result.revision_date == "2026-04-23"
 
     def test_inside_wi_intro_is_parse_error(self):
-        """INSIDE_WI_INTRO_20260409.srt — freeform name, not a Media ID."""
+        """INSIDE_WI_INTRO_20260409.srt — freeform name, prefix not in registry."""
         result = parse_filename("INSIDE_WI_INTRO_20260409.srt")
         assert isinstance(result, ParseError)
 
-    def test_6pols0101nil_is_parse_error(self):
-        """6POLS0101NIL — 5-char-ish thing that doesn't fit 4-char prefix grammar."""
+    def test_6pols0101nil_is_nonstandard(self):
+        """6POLS0101NIL — editor-inserted 'S' short-marker after 6POL prefix.
+
+        6POL is a registered prefix (Inside Wisconsin Politics).  The grammar
+        rejects this because 'S' is not a digit where SSEE expects one.
+        Per the lenient-parse rule, the first 4 chars match the registry, so
+        we return a ParsedFilename with nonstandard=True rather than ParseError.
+        """
         result = parse_filename("6POLS0101NIL.srt")
+        assert isinstance(result, ParsedFilename), f"Expected nonstandard ParsedFilename, got: {result}"
+        assert result.nonstandard is True
+        assert result.prefix == "6POL"
+        assert result.show_name == "Inside Wisconsin Politics"
+        assert result.nonstandard_remainder == "S0101NIL"
+        assert result.media_id is None
+        assert result.season is None
+        assert result.episode is None
+
+
+# ---------------------------------------------------------------------------
+# Nonstandard parse (registered prefix, non-grammar body)
+# ---------------------------------------------------------------------------
+
+
+class TestNonstandardParse:
+    """Verify the lenient-parse fallback for registered-prefix filenames."""
+
+    def test_6pols_series_resolves_to_iwp(self):
+        """All 6POLS* files resolve to Inside Wisconsin Politics, nonstandard=True."""
+        samples = [
+            "6POLS0101NIL.srt",
+            "6POLS0101Retirement.scc",
+            "6POLS0102SupremeCourt.srt",
+            "6POLS0105Retirements_REV20260416.srt",
+        ]
+        for filename in samples:
+            result = parse_filename(filename)
+            assert isinstance(result, ParsedFilename), f"Expected ParsedFilename for {filename}"
+            assert result.nonstandard is True, f"Expected nonstandard=True for {filename}"
+            assert result.prefix == "6POL", f"Expected prefix 6POL for {filename}"
+            assert result.show_name == "Inside Wisconsin Politics", f"Wrong show_name for {filename}"
+
+    def test_nonstandard_remainder_is_raw_case_preserved(self):
+        """nonstandard_remainder preserves original (mixed) case."""
+        result = parse_filename("6POLS0103MailInVoting.scc")
+        assert isinstance(result, ParsedFilename)
+        assert result.nonstandard_remainder == "S0103MailInVoting"
+
+    def test_nonstandard_has_no_media_id_season_episode(self):
+        """Nonstandard results have no parseable structured fields."""
+        result = parse_filename("6POLS0107Governor.srt")
+        assert isinstance(result, ParsedFilename)
+        assert result.media_id is None
+        assert result.season is None
+        assert result.episode is None
+        assert result.hd is None
+        assert result.revision_date is None
+        assert result.variant_tag is None
+        assert result.unknown_tag is None
+
+    def test_nonstandard_prefix_category_is_resolved(self):
+        """Nonstandard results still get correct prefix_category from YAML."""
+        result = parse_filename("6POLS0101NIL.srt")
+        assert isinstance(result, ParsedFilename)
+        # 6POL leading digit 6 → non-broadcast
+        assert result.prefix_category == "non-broadcast"
+
+    def test_unregistered_prefix_is_still_parse_error(self):
+        """A filename whose first 4 chars are NOT in the prefix table → ParseError."""
+        result = parse_filename("INSIDE_WI_INTRO_20260409.srt")
         assert isinstance(result, ParseError)
+
+    def test_standard_parse_nonstandard_is_false(self):
+        """A fully grammar-conforming filename has nonstandard=False."""
+        result = parse_filename("6POL0101_REV20260319.srt")
+        assert isinstance(result, ParsedFilename)
+        assert result.nonstandard is False
+        assert result.nonstandard_remainder is None

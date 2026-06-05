@@ -112,19 +112,34 @@ class DirEntry:
 
 @dataclass
 class ParsedFilename:
-    """Structured parse result for a PBS Wisconsin asset filename."""
+    """Structured parse result for a PBS Wisconsin asset filename.
+
+    Most fields are populated from the standard grammar.  When the grammar
+    fails but the first 4 characters match a registered prefix (e.g. the
+    editor-inserted ``6POLS*`` shorts pattern), a *nonstandard* result is
+    returned instead of a ``ParseError``.  In that case:
+
+    * ``nonstandard`` is ``True``
+    * ``nonstandard_remainder`` holds the raw string after the 4-char prefix
+    * ``media_id``, ``season``, ``episode``, ``hd`` are all ``None``
+    * ``revision_date``, ``variant_tag``, ``unknown_tag`` are all ``None``
+    * ``prefix``, ``prefix_category``, ``show_name`` are resolved normally
+
+    S2 should log nonstandard parses for hygiene reporting rather than dropping
+    them — these files are real assets belonging to a known show.
+    """
 
     # Original stem (filename without extension) as passed to the parser
     stem: str
     # File extension including leading dot, e.g. ".srt", ".mp4"
     file_type: str
 
-    # Core grammar fields
-    media_id: str  # e.g. "6POL0101" (prefix+SSEE, no HD/suffix)
+    # Core grammar fields (None for nonstandard parses)
+    media_id: Optional[str]  # e.g. "6POL0101" (prefix+SSEE, no HD/suffix); None if nonstandard
     prefix: str  # 4-char prefix, e.g. "6POL"
-    season: int
-    episode: int
-    hd: bool
+    season: Optional[int]  # None if nonstandard
+    episode: Optional[int]  # None if nonstandard
+    hd: Optional[bool]  # None if nonstandard
 
     # Revision / variant fields
     revision_date: Optional[str]  # ISO date string "YYYY-MM-DD", or None
@@ -134,6 +149,10 @@ class ParsedFilename:
     # Prefix lookup results
     prefix_category: str  # "broadcast" | "non-broadcast" | "unknown"
     show_name: Optional[str]  # Human-readable show name, or None if prefix unknown
+
+    # Nonstandard parse flag (editor-inserted suffix variants, e.g. 6POLS* shorts)
+    nonstandard: bool = False
+    nonstandard_remainder: Optional[str] = None  # Raw string after the 4-char prefix
 
 
 @dataclass
@@ -373,6 +392,31 @@ def parse_filename(filename: str) -> ParsedFilename | ParseError:
 
     m = _MEDIA_ID_RE.match(stem_upper)
     if m is None:
+        # Grammar failed — check if the first 4 chars are a registered prefix.
+        # If yes, return a nonstandard result rather than a ParseError so that
+        # S2 can index the file under the correct show (e.g. 6POLS* shorts
+        # produced by IWP editors map to Inside Wisconsin Politics).
+        # ParseError is reserved for filenames whose prefix is genuinely unknown.
+        candidate_prefix = stem_upper[:4] if len(stem_upper) >= 4 else ""
+        table = _get_prefix_table()
+        if candidate_prefix and candidate_prefix in table:
+            entry = table[candidate_prefix]
+            return ParsedFilename(
+                stem=stem,
+                file_type=file_type,
+                media_id=None,
+                prefix=candidate_prefix,
+                season=None,
+                episode=None,
+                hd=None,
+                revision_date=None,
+                variant_tag=None,
+                unknown_tag=None,
+                prefix_category=entry["category"],
+                show_name=entry["show"],
+                nonstandard=True,
+                nonstandard_remainder=stem[4:],  # preserve original case
+            )
         return ParseError(
             stem=stem,
             file_type=file_type,
@@ -447,60 +491,123 @@ def parse_filename(filename: str) -> ParsedFilename | ParseError:
 # ---------------------------------------------------------------------------
 
 
+@dataclass
+class GroupSelectionResult:
+    """Result for a single ``(media_id, variant_tag)`` group.
+
+    Attributes:
+        group_key  — ``(media_id, variant_tag)`` that identifies this group.
+        primary    — the winning ParsedFilename, or None if the group is empty.
+        superseded — older REV entries that lost to primary within this group.
+        variants   — entries with ``unknown_tag`` (not part of the REV race);
+                     S2 should route these to their own group rather than
+                     treating them as superseded.
+    """
+
+    group_key: tuple[Optional[str], Optional[str]]
+    primary: Optional[ParsedFilename]
+    superseded: list[ParsedFilename]
+    variants: list[ParsedFilename]
+
+
 def select_primary(
     entries: list[ParsedFilename],
-) -> tuple[Optional[ParsedFilename], list[ParsedFilename], list[ParsedFilename]]:
-    """Select the primary (winning) entry from a group sharing the same media_id.
+) -> list[GroupSelectionResult]:
+    """Group a flat list of ParsedFilename objects by ``(media_id, variant_tag)``
+    and select the winning REV within each group.
 
-    All entries in ``entries`` must share the same ``(media_id, variant_tag)``
-    group — the caller is responsible for grouping.
+    This function enforces the grouping contract internally — callers supply a
+    flat list and receive one :class:`GroupSelectionResult` per distinct
+    ``(media_id, variant_tag)`` key.
 
-    Rules:
-      * If any entries have a ``revision_date``, the one with the latest date
-        wins; the rest are returned as ``superseded``.
-      * If no entries have a ``revision_date``, the only entry (or the single
-        entry if there's more than one somehow) is returned as primary.
-      * Entries with ``unknown_tag`` set are NOT included in winner selection
-        — they pass through in the variants list for the caller to handle.
+    Grouping rules:
+      * ``(media_id, variant_tag)`` is the group key.  ``media_id`` or
+        ``variant_tag`` may be None (treated as a distinct value).
+      * ``unknown_tag`` entries are NOT part of the REV race within any group;
+        they are collected in ``variants`` for the caller to handle separately.
+
+    REV winner rules (within each group):
+      * If any candidates have a ``revision_date``, the one with the latest
+        ISO date string wins (lexicographic comparison is chronological).
+      * Remaining REV entries go to ``superseded``.
+      * Candidates without a ``revision_date`` that lose to a REV entry are
+        also placed in ``superseded``.
+      * If no candidates have a ``revision_date``, the first candidate (by
+        input order) is primary and the rest go to ``superseded``.
 
     Args:
-        entries: List of ParsedFilename objects sharing the same
-                 ``(media_id, variant_tag)`` group.
+        entries: Flat list of ParsedFilename objects.  May mix multiple
+                 media_ids and/or variant_tags — the function groups them.
 
     Returns:
-        (primary, variants, superseded) where:
-          primary   — the winning ParsedFilename, or None if list is empty
-          variants  — entries with unknown_tag (not part of REV race)
-          superseded — older REV entries that lost to primary
+        One :class:`GroupSelectionResult` per distinct ``(media_id, variant_tag)``
+        key, in the order the key first appears in *entries*.
     """
     if not entries:
-        return None, [], []
+        return []
 
-    # Separate unknown-tag entries from the rev-race candidates
-    unknown_entries = [e for e in entries if e.unknown_tag is not None]
-    candidates = [e for e in entries if e.unknown_tag is None]
+    # Preserve insertion order of group keys
+    groups: dict[tuple[Optional[str], Optional[str]], list[ParsedFilename]] = {}
+    for entry in entries:
+        key: tuple[Optional[str], Optional[str]] = (entry.media_id, entry.variant_tag)
+        groups.setdefault(key, []).append(entry)
 
-    if not candidates:
-        return None, unknown_entries, []
+    results: list[GroupSelectionResult] = []
+    for key, group_entries in groups.items():
+        # Separate unknown-tag entries — they are bystanders in the REV race
+        unknown_entries = [e for e in group_entries if e.unknown_tag is not None]
+        candidates = [e for e in group_entries if e.unknown_tag is None]
 
-    if len(candidates) == 1:
-        return candidates[0], unknown_entries, []
+        if not candidates:
+            results.append(
+                GroupSelectionResult(
+                    group_key=key,
+                    primary=None,
+                    superseded=[],
+                    variants=unknown_entries,
+                )
+            )
+            continue
 
-    # Multiple candidates: pick by revision_date (latest wins)
-    with_rev = [e for e in candidates if e.revision_date is not None]
-    without_rev = [e for e in candidates if e.revision_date is None]
+        if len(candidates) == 1:
+            results.append(
+                GroupSelectionResult(
+                    group_key=key,
+                    primary=candidates[0],
+                    superseded=[],
+                    variants=unknown_entries,
+                )
+            )
+            continue
 
-    if not with_rev:
-        # No revision dates; first entry wins (preserve order)
-        primary = candidates[0]
-        return primary, unknown_entries, candidates[1:]
+        # Multiple candidates: pick by revision_date (latest wins)
+        with_rev = [e for e in candidates if e.revision_date is not None]
+        without_rev = [e for e in candidates if e.revision_date is None]
 
-    # Sort descending by revision_date string (ISO format, lexicographic == chronological)
-    with_rev_sorted = sorted(with_rev, key=lambda e: e.revision_date or "", reverse=True)
-    primary = with_rev_sorted[0]
-    superseded = with_rev_sorted[1:] + without_rev
+        if not with_rev:
+            # No revision dates; first entry wins (preserve input order)
+            results.append(
+                GroupSelectionResult(
+                    group_key=key,
+                    primary=candidates[0],
+                    superseded=candidates[1:],
+                    variants=unknown_entries,
+                )
+            )
+            continue
 
-    return primary, unknown_entries, superseded
+        # Sort descending by revision_date (ISO lexicographic == chronological)
+        with_rev_sorted = sorted(with_rev, key=lambda e: e.revision_date or "", reverse=True)
+        results.append(
+            GroupSelectionResult(
+                group_key=key,
+                primary=with_rev_sorted[0],
+                superseded=with_rev_sorted[1:] + without_rev,
+                variants=unknown_entries,
+            )
+        )
+
+    return results
 
 
 # ---------------------------------------------------------------------------

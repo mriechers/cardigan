@@ -96,6 +96,9 @@ async def run_delta_walk() -> None:
             run.elapsed_seconds,
         )
 
+    except RuntimeError as exc:
+        # Pause-window suppression is a normal operational event, not a failure.
+        logger.info("mmingest delta walk suppressed: %s", exc)
     except Exception:
         logger.exception("mmingest delta walk failed")
 
@@ -170,5 +173,5 @@ async def stop_mmingest_scheduler() -> None:
     """
     scheduler = get_mmingest_scheduler()
     if scheduler.running:
-        scheduler.shutdown(wait=False)
+        scheduler.shutdown(wait=True)
         logger.info("mmingest scheduler stopped")
