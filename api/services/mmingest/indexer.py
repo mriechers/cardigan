@@ -465,7 +465,15 @@ class MmingestIndexer:
                 for row in db_rows
             ]
 
-            primary_pf, _variants_pf, superseded_pf = select_primary(pf_list)
+            # select_primary (post-#186) groups internally and returns one
+            # GroupSelectionResult per (media_id, variant_tag) key. pf_list is
+            # already a single group here (the SQL above filters by both), so
+            # exactly one result comes back.
+            group_results = select_primary(pf_list)
+            if not group_results:
+                continue
+            primary_pf = group_results[0].primary
+            superseded_pf = group_results[0].superseded
 
             if primary_pf is None:
                 continue
