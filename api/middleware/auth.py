@@ -35,12 +35,15 @@ match, no wildcards, CSV column in ``consumer_keys.scopes``.
 """
 
 import asyncio
+import logging
 import os
 from datetime import datetime, timezone
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+
+logger = logging.getLogger(__name__)
 
 # Paths that never require authentication (exact match).
 EXEMPT_PATHS = frozenset({"/", "/api/system/health", "/docs", "/openapi.json"})
@@ -62,7 +65,7 @@ def _required_scope_for(path: str, method: str) -> str:
     This is the single authoritative mapping for Sprint 3A scope vocabulary.
     Sprint 3B routers trust the middleware decision and do NOT re-check.
     """
-    if "stream" in path.split("/"):
+    if path.endswith("/stream"):
         return "mmingest:stream"
     return "mmingest:read"
 
@@ -106,9 +109,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             # as "no consumer key found" — the request will get a 401.  This
             # keeps auth errors non-fatal and handles test environments where
             # the consumer_keys table may not exist yet.
-            import logging as _logging
-
-            _logging.getLogger(__name__).debug(
+            logger.debug(
                 "Consumer key lookup failed (%s) — treating as no match",
                 type(_lookup_exc).__name__,
             )
@@ -142,7 +143,8 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             request.state.consumer_scopes = consumer.scopes
 
             # Fire-and-forget last_used_at update — a small lag is acceptable.
-            asyncio.create_task(touch_last_used(consumer.id))
+            _task = asyncio.create_task(touch_last_used(consumer.id))
+            _task.add_done_callback(_log_task_exception)
 
             return await call_next(request)
 
@@ -153,6 +155,21 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             status_code=401,
             content={"detail": "Invalid or missing API key"},
         )
+
+
+def _log_task_exception(task: asyncio.Task) -> None:
+    """Done-callback for fire-and-forget asyncio tasks.
+
+    Surfaces any exception from the task to the module logger at WARNING
+    level.  Without this, exceptions from ``asyncio.create_task`` are
+    silently discarded (Python logs them only if the task is garbage-collected
+    without the exception being retrieved, and even then only at DEBUG level).
+    """
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc:
+        logger.warning("touch_last_used background task failed", exc_info=exc)
 
 
 async def _fire_audit(
@@ -177,9 +194,7 @@ async def _fire_audit(
         )
     except Exception:
         # Audit log write failure is non-fatal — log but continue.
-        import logging
-
-        logging.getLogger(__name__).warning(
+        logger.warning(
             "Failed to write mmingest audit log entry (path=%s outcome=%s)",
             path,
             outcome,
