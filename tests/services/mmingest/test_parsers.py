@@ -22,9 +22,8 @@ from api.services.mmingest.parsers import (
     KNOWN_VARIANT_VOCAB,
     AutoindexParser,
     DirEntry,
-    GroupSelectionResult,
-    ParseError,
     ParsedFilename,
+    ParseError,
     parse_filename,
     select_primary,
 )
