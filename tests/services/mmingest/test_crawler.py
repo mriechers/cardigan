@@ -398,8 +398,7 @@ class TestTriplesMatch:
     """Unit tests for the None-tolerant triple comparison helper."""
 
     def test_identical_triples_match(self):
-        assert _triples_match((None, "2026-03-19T17:24:00+00:00", 34000),
-                               (None, "2026-03-19T17:24:00+00:00", 34000))
+        assert _triples_match((None, "2026-03-19T17:24:00+00:00", 34000), (None, "2026-03-19T17:24:00+00:00", 34000))
 
     def test_known_with_etag_mod_size_match_skips(self):
         """S2 stored a real ETag; listing has None — mod+size match → skip."""
@@ -682,9 +681,7 @@ class TestTwoLaneWorkQueue:
         got = [queue.get_nowait() for _ in range(5)]
 
         # The late sidecar must have been returned first
-        assert got[0] == late_sidecar, (
-            f"Expected late sidecar first, got: {[i.filename for i in got]}"
-        )
+        assert got[0] == late_sidecar, f"Expected late sidecar first, got: {[i.filename for i in got]}"
         # Everything after the sidecar should be primaries
         assert all(item.lane == "primary" for item in got[1:])
 

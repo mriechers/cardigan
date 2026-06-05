@@ -559,21 +559,25 @@ def select_primary(
         candidates = [e for e in group_entries if e.unknown_tag is None]
 
         if not candidates:
-            results.append(GroupSelectionResult(
-                group_key=key,
-                primary=None,
-                superseded=[],
-                variants=unknown_entries,
-            ))
+            results.append(
+                GroupSelectionResult(
+                    group_key=key,
+                    primary=None,
+                    superseded=[],
+                    variants=unknown_entries,
+                )
+            )
             continue
 
         if len(candidates) == 1:
-            results.append(GroupSelectionResult(
-                group_key=key,
-                primary=candidates[0],
-                superseded=[],
-                variants=unknown_entries,
-            ))
+            results.append(
+                GroupSelectionResult(
+                    group_key=key,
+                    primary=candidates[0],
+                    superseded=[],
+                    variants=unknown_entries,
+                )
+            )
             continue
 
         # Multiple candidates: pick by revision_date (latest wins)
@@ -582,22 +586,26 @@ def select_primary(
 
         if not with_rev:
             # No revision dates; first entry wins (preserve input order)
-            results.append(GroupSelectionResult(
-                group_key=key,
-                primary=candidates[0],
-                superseded=candidates[1:],
-                variants=unknown_entries,
-            ))
+            results.append(
+                GroupSelectionResult(
+                    group_key=key,
+                    primary=candidates[0],
+                    superseded=candidates[1:],
+                    variants=unknown_entries,
+                )
+            )
             continue
 
         # Sort descending by revision_date (ISO lexicographic == chronological)
         with_rev_sorted = sorted(with_rev, key=lambda e: e.revision_date or "", reverse=True)
-        results.append(GroupSelectionResult(
-            group_key=key,
-            primary=with_rev_sorted[0],
-            superseded=with_rev_sorted[1:] + without_rev,
-            variants=unknown_entries,
-        ))
+        results.append(
+            GroupSelectionResult(
+                group_key=key,
+                primary=with_rev_sorted[0],
+                superseded=with_rev_sorted[1:] + without_rev,
+                variants=unknown_entries,
+            )
+        )
 
     return results
 
