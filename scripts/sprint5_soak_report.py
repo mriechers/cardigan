@@ -16,38 +16,39 @@ Usage:
 Optional matplotlib support: if matplotlib is installed, latency/rate plots
 are written to planning/sprint-5-plots/.
 """
+
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import sqlite3
 import sys
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from statistics import mean, median
+from statistics import mean
 from typing import Any
-
 
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--soak-log",       default="/tmp/sprint5-soak-log.jsonl")
-    p.add_argument("--smoke-log",      default="/tmp/sprint5-smoke-log.jsonl")
+    p.add_argument("--soak-log", default="/tmp/sprint5-soak-log.jsonl")
+    p.add_argument("--smoke-log", default="/tmp/sprint5-smoke-log.jsonl")
     p.add_argument("--baseline-count", default="/tmp/sprint5-baseline-count.txt")
-    p.add_argument("--output",         default="planning/sprint-5-soak-report.md")
-    p.add_argument("--db",             default="dashboard.db")
-    p.add_argument("--no-plots",       action="store_true", help="Skip matplotlib plots")
+    p.add_argument("--output", default="planning/sprint-5-soak-report.md")
+    p.add_argument("--db", default="dashboard.db")
+    p.add_argument("--no-plots", action="store_true", help="Skip matplotlib plots")
     return p.parse_args()
 
 
 # ---------------------------------------------------------------------------
 # JSONL loading
 # ---------------------------------------------------------------------------
+
 
 def load_jsonl(path: str) -> list[dict]:
     records: list[dict] = []
@@ -70,6 +71,7 @@ def load_jsonl(path: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Section D criterion evaluators
 # ---------------------------------------------------------------------------
+
 
 # D1: Politeness
 def eval_politeness(soak_records: list[dict]) -> dict[str, Any]:
@@ -122,6 +124,7 @@ def eval_politeness(soak_records: list[dict]) -> dict[str, Any]:
             ts_dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
             t = ts_dt.time()
             from datetime import time as dtime
+
             in_window = dtime(11, 0) <= t <= dtime(15, 0)
             if in_window:
                 pause_violations.append(ts_str)
@@ -148,11 +151,7 @@ def eval_politeness(soak_records: list[dict]) -> dict[str, Any]:
         "pause_events_logged": len(pause_events),
         "sub_criteria": passes,
         "reason": (
-            "All politeness criteria met."
-            if overall else
-            "FAIL: " + "; ".join(
-                k for k, v in passes.items() if not v
-            )
+            "All politeness criteria met." if overall else "FAIL: " + "; ".join(k for k, v in passes.items() if not v)
         ),
     }
 
@@ -182,18 +181,15 @@ def eval_parity(soak_records: list[dict]) -> dict[str, Any]:
         "reason": (
             "All parity checks returned 0 (FTS in sync)."
             if not failures
-            else f"FAIL: {len(failures)} non-zero delta(s): " +
-                 "; ".join(f"ts={d['ts']} delta={d['delta']}" for d in failures[:3])
+            else f"FAIL: {len(failures)} non-zero delta(s): "
+            + "; ".join(f"ts={d['ts']} delta={d['delta']}" for d in failures[:3])
         ),
     }
 
 
 # D3: Latency
 def eval_latency(smoke_records: list[dict]) -> dict[str, Any]:
-    search_calls = [
-        r for r in smoke_records
-        if r.get("event") == "smoke" and "latency_ms" in r
-    ]
+    search_calls = [r for r in smoke_records if r.get("event") == "smoke" and "latency_ms" in r]
 
     if len(search_calls) < 2:
         return {
@@ -232,8 +228,8 @@ def eval_latency(smoke_records: list[dict]) -> dict[str, Any]:
         "mean_ms": round(mean(lats), 1),
         "reason": (
             f"p95={p95}ms < 50ms, p99={p99}ms < 200ms — latency envelope met."
-            if passes else
-            f"FAIL: p95={p95}ms (threshold 50ms), p99={p99}ms (threshold 200ms)"
+            if passes
+            else f"FAIL: p95={p95}ms (threshold 50ms), p99={p99}ms (threshold 200ms)"
         ),
     }
 
@@ -247,8 +243,7 @@ def eval_coverage(soak_records: list[dict], baseline_count: int, db_path: str) -
         try:
             conn = sqlite3.connect(db_path)
             row = conn.execute(
-                "SELECT COUNT(*) FROM mmingest_files "
-                "WHERE prefix LIKE '2WLI%' AND file_type = 'mp4'"
+                "SELECT COUNT(*) FROM mmingest_files " "WHERE prefix LIKE '2WLI%' AND file_type = 'mp4'"
             ).fetchone()
             actual_mp4_count = row[0] if row else 0
             conn.close()
@@ -257,11 +252,7 @@ def eval_coverage(soak_records: list[dict], baseline_count: int, db_path: str) -
 
     if actual_mp4_count is None:
         # Fall back to log
-        wli_counts = [
-            r.get("mmingest_files_count_2wli", 0)
-            for r in soak_records
-            if r.get("event") == "parity_check"
-        ]
+        wli_counts = [r.get("mmingest_files_count_2wli", 0) for r in soak_records if r.get("event") == "parity_check"]
         actual_mp4_count = max(wli_counts, default=0)
 
     if baseline_count == 0:
@@ -283,8 +274,8 @@ def eval_coverage(soak_records: list[dict], baseline_count: int, db_path: str) -
         "reason": (
             f"Coverage {round((actual_mp4_count / baseline_count) * 100, 1)}% "
             f"(actual={actual_mp4_count} baseline={baseline_count} diff={round(diff_pct*100,2)}%)"
-            if passes else
-            f"FAIL: diff={round(diff_pct*100,2)}% > 5% threshold "
+            if passes
+            else f"FAIL: diff={round(diff_pct*100,2)}% > 5% threshold "
             f"(actual={actual_mp4_count} baseline={baseline_count})"
         ),
     }
@@ -321,9 +312,9 @@ def eval_regression(smoke_records: list[dict]) -> dict[str, Any]:
         "endpoints": endpoint_summary,
         "reason": (
             "All legacy endpoints returned 200 throughout the soak."
-            if passes else
-            f"FAIL: {len(failures)} failed regression checks — " +
-            ", ".join(f"{r.get('endpoint')} status={r.get('status')}" for r in failures[:3])
+            if passes
+            else f"FAIL: {len(failures)} failed regression checks — "
+            + ", ".join(f"{r.get('endpoint')} status={r.get('status')}" for r in failures[:3])
         ),
     }
 
@@ -331,6 +322,7 @@ def eval_regression(smoke_records: list[dict]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Tunable defaults snapshot
 # ---------------------------------------------------------------------------
+
 
 def compute_tunables(soak_records: list[dict]) -> dict[str, Any]:
     indexer_runs = [r for r in soak_records if r.get("event") == "indexer_run"]
@@ -353,11 +345,7 @@ def compute_tunables(soak_records: list[dict]) -> dict[str, Any]:
 
     # Recommend rate: 80% of observed max instantaneous rate
     # Use the max single-run req rate as proxy
-    per_run_rates = [
-        r.get("req_total", 0) / r.get("elapsed_s", 1)
-        for r in indexer_runs
-        if r.get("elapsed_s", 0) > 0
-    ]
+    per_run_rates = [r.get("req_total", 0) / r.get("elapsed_s", 1) for r in indexer_runs if r.get("elapsed_s", 0) > 0]
     max_burst_rate = max(per_run_rates, default=0.0)
     recommended_rate = round(min(max_burst_rate * 0.8, 1.0), 2)  # never exceed 1.0 for safety
 
@@ -448,11 +436,11 @@ def build_report(
         "",
         "## Soak Summary",
         "",
-        f"| Field | Value |",
-        f"|-------|-------|",
+        "| Field | Value |",
+        "|-------|-------|",
         f"| Soak started | {soak_start_event.get('ts', 'unknown')} |",
         f"| Soak ended | {soak_end_event.get('ts', 'unknown')} |",
-        f"| Directory crawled | `/wisconsinlife/` depth 1 (prefix `2WLI`) |",
+        "| Directory crawled | `/wisconsinlife/` depth 1 (prefix `2WLI`) |",
         f"| Total indexer runs | {total_indexer_runs} |",
         f"| Total smoke calls | {total_smoke_calls} |",
         f"| Baseline MP4 count | {baseline_count} |",
@@ -536,12 +524,12 @@ def build_report(
         "",
         f"**Result:** {coverage.get('reason', '(no data)')}",
         "",
-        f"| Metric | Value |",
-        f"|--------|-------|",
+        "| Metric | Value |",
+        "|--------|-------|",
         f"| Baseline MP4 count (manual curl) | {coverage.get('baseline_count', '?')} |",
         f"| Observed MP4 count in `mmingest_files` (prefix=2WLI) | {coverage.get('actual_mp4_count', '?')} |",
         f"| Difference | {coverage.get('diff_pct', '?')}% |",
-        f"| Threshold | ≤ 5% |",
+        "| Threshold | ≤ 5% |",
         "",
     ]
 
@@ -558,9 +546,7 @@ def build_report(
             "|----------|--------|----------|-------------|",
         ]
         for ep, data in regression["endpoints"].items():
-            lines.append(
-                f"| `{ep}` | {data['checks']} | {data['failures']} | {data['last_status']} |"
-            )
+            lines.append(f"| `{ep}` | {data['checks']} | {data['failures']} | {data['last_status']} |")
         lines.append("")
 
     # Tunable defaults
@@ -575,9 +561,9 @@ def build_report(
         "|-----------|--------------|---------------------------|",
         f"| `max_concurrent` | {tunables.get('observed_peak_inflight', '?')} | {tunables.get('recommended_max_concurrent', '?')} |",
         f"| `rate_per_second` | {tunables.get('observed_avg_req_rate_s', '?')} avg | {tunables.get('recommended_rate_per_second', '?')} |",
-        f"| `pause_window` (UTC) | 11:00–15:00 | 11:00–15:00 (= 06:00–10:00 CDT broadcast peak) |",
-        f"| `directories` | `['/wisconsinlife/']` | `['/']` (full crawl for production) |",
-        f"| `delta_walk_interval_hours` | 1h (soak) | 1h (keep for prod; mmingest is stable) |",
+        "| `pause_window` (UTC) | 11:00–15:00 | 11:00–15:00 (= 06:00–10:00 CDT broadcast peak) |",
+        "| `directories` | `['/wisconsinlife/']` | `['/']` (full crawl for production) |",
+        "| `delta_walk_interval_hours` | 1h (soak) | 1h (keep for prod; mmingest is stable) |",
         "",
         f"Total requests to mmingest during soak: {tunables.get('total_requests_to_mmingest', '?')}  ",
         f"Total indexer runs: {tunables.get('total_indexer_runs', '?')}",
@@ -609,10 +595,12 @@ def build_report(
             hits = [c.get("hits", 0) for c in calls if c.get("hits", -1) >= 0]
             avg_hits = round(mean(hits), 1) if hits else 0
             lats_s = sorted(lats)
-            p50 = lats_s[len(lats_s)//2] if lats_s else "?"
-            p95 = lats_s[min(int(len(lats_s)*0.95), len(lats_s)-1)] if lats_s else "?"
+            p50 = lats_s[len(lats_s) // 2] if lats_s else "?"
+            p95 = lats_s[min(int(len(lats_s) * 0.95), len(lats_s) - 1)] if lats_s else "?"
             q_display = q[:40] + "..." if len(q) > 40 else q
-            lines.append(f"| `{q_display}` | {len(calls)} | {n_pass} | {n_warn} | {n_fail} | {avg_hits} | {p50} | {p95} |")
+            lines.append(
+                f"| `{q_display}` | {len(calls)} | {n_pass} | {n_warn} | {n_fail} | {avg_hits} | {p50} | {p95} |"
+            )
         lines.append("")
     else:
         lines += ["(No smoke query data found)", ""]
@@ -656,6 +644,7 @@ def build_report(
 # Optional: matplotlib plots
 # ---------------------------------------------------------------------------
 
+
 def generate_plots(
     soak_records: list[dict],
     smoke_records: list[dict],
@@ -664,6 +653,7 @@ def generate_plots(
     """Generate latency and rate plots. Returns list of generated file paths."""
     try:
         import matplotlib  # type: ignore[import]
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt  # type: ignore[import]
     except ImportError:
@@ -674,10 +664,7 @@ def generate_plots(
     generated: list[str] = []
 
     # Plot 1: Smoke search latency over time
-    smoke_calls = [
-        r for r in smoke_records
-        if r.get("event") == "smoke" and r.get("status") == 200 and "ts" in r
-    ]
+    smoke_calls = [r for r in smoke_records if r.get("event") == "smoke" and r.get("status") == 200 and "ts" in r]
     if len(smoke_calls) >= 2:
         try:
             xs = [datetime.fromisoformat(r["ts"].replace("Z", "+00:00")) for r in smoke_calls]
@@ -700,8 +687,7 @@ def generate_plots(
 
     # Plot 2: Request rate per indexer run
     indexer_runs = [
-        r for r in soak_records
-        if r.get("event") == "indexer_run" and "ts" in r and r.get("elapsed_s", 0) > 0
+        r for r in soak_records if r.get("event") == "indexer_run" and "ts" in r and r.get("elapsed_s", 0) > 0
     ]
     if len(indexer_runs) >= 2:
         try:
@@ -727,6 +713,7 @@ def generate_plots(
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     args = parse_args()
@@ -755,24 +742,40 @@ def main() -> None:
     # Evaluate criteria
     print("\nEvaluating acceptance criteria...")
     politeness = eval_politeness(soak_records)
-    parity     = eval_parity(soak_records)
-    latency    = eval_latency(smoke_records)
-    coverage   = eval_coverage(soak_records, baseline_count, args.db)
+    parity = eval_parity(soak_records)
+    latency = eval_latency(smoke_records)
+    coverage = eval_coverage(soak_records, baseline_count, args.db)
     regression = eval_regression(smoke_records)
-    tunables   = compute_tunables(soak_records)
+    tunables = compute_tunables(soak_records)
 
     # Print summary
-    print(f"\nD1 Politeness:  {'PASS' if politeness.get('pass') else ('FAIL' if politeness.get('pass') is False else 'INCOMPLETE')}")
-    print(f"D2 Parity:      {'PASS' if parity.get('pass') else ('FAIL' if parity.get('pass') is False else 'INCOMPLETE')}")
-    print(f"D3 Latency:     {'PASS' if latency.get('pass') else ('FAIL' if latency.get('pass') is False else 'INCOMPLETE')}")
-    print(f"D4 Coverage:    {'PASS' if coverage.get('pass') else ('FAIL' if coverage.get('pass') is False else 'INCOMPLETE')}")
-    print(f"D5 Regression:  {'PASS' if regression.get('pass') else ('FAIL' if regression.get('pass') is False else 'INCOMPLETE')}")
+    print(
+        f"\nD1 Politeness:  {'PASS' if politeness.get('pass') else ('FAIL' if politeness.get('pass') is False else 'INCOMPLETE')}"
+    )
+    print(
+        f"D2 Parity:      {'PASS' if parity.get('pass') else ('FAIL' if parity.get('pass') is False else 'INCOMPLETE')}"
+    )
+    print(
+        f"D3 Latency:     {'PASS' if latency.get('pass') else ('FAIL' if latency.get('pass') is False else 'INCOMPLETE')}"
+    )
+    print(
+        f"D4 Coverage:    {'PASS' if coverage.get('pass') else ('FAIL' if coverage.get('pass') is False else 'INCOMPLETE')}"
+    )
+    print(
+        f"D5 Regression:  {'PASS' if regression.get('pass') else ('FAIL' if regression.get('pass') is False else 'INCOMPLETE')}"
+    )
 
     # Build report
     report = build_report(
-        soak_records, smoke_records,
-        politeness, parity, latency, coverage, regression,
-        tunables, baseline_count,
+        soak_records,
+        smoke_records,
+        politeness,
+        parity,
+        latency,
+        coverage,
+        regression,
+        tunables,
+        baseline_count,
     )
 
     # Write report

@@ -79,7 +79,7 @@ EOF
 ### A4. Configure indexer scope to `/wisconsinlife/` at depth 1
 
 The scheduler instantiates `MmingestIndexer` with `directories=["/"]` by default (see
-`api/services/mmingest/scheduler.py`). For the soak, you want **only** `/wisconsinlist/` at
+`api/services/mmingest/scheduler.py`). For the soak, you want **only** `/wisconsinlife/` at
 depth 1 so crawl load is bounded and results are scoped.
 
 **Option A — environment override (recommended for the soak):**

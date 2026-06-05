@@ -318,7 +318,7 @@ async def run_indexer() -> None:
 
                 if ok_results:
                     async with engine.begin() as conn:
-                        await indexer._persist_sidecars(conn, ok_results)
+                        await indexer._persist_sidecars(conn, ok_results, url_to_id)
 
         # Parity check
         async with engine.connect() as conn:
