@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { StrictMode, useState } from 'react'
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render, act } from '@testing-library/react'
 import { useJobsWebSocket } from '../useWebSocket'
@@ -34,8 +34,10 @@ class MockWebSocket {
   }
 
   close() {
+    // Real browsers do NOT fire onclose synchronously — especially for
+    // CONNECTING sockets, the close event arrives asynchronously (or the
+    // socket simply aborts). Tests drive late events via simulate helpers.
     this.readyState = MockWebSocket.CLOSED
-    this.onclose?.({ code: 1000, reason: '' })
   }
 
   // Test helpers
@@ -132,5 +134,30 @@ describe('useJobsWebSocket', () => {
 
     expect(firstHandler).not.toHaveBeenCalled()
     expect(secondHandler).toHaveBeenCalledWith(42)
+  })
+
+  test('ignores late events from a superseded socket (StrictMode double-mount)', () => {
+    // StrictMode runs effect → cleanup → effect on mount: ws1 is created,
+    // closed by cleanup, then ws2 is created. In real browsers ws1's close
+    // event arrives asynchronously — after ws2 is already live.
+    const { getByRole } = render(
+      <StrictMode>
+        <Harness />
+      </StrictMode>
+    )
+    expect(MockWebSocket.instances).toHaveLength(2)
+    const [ws1, ws2] = MockWebSocket.instances
+
+    act(() => ws2.simulateOpen())
+    expect(getByRole('button').textContent).toContain('connected')
+
+    // ws1's close event finally arrives — it must not corrupt the live
+    // connection's state or schedule a reconnect
+    act(() => ws1.simulateUnexpectedClose())
+    expect(getByRole('button').textContent).toContain('connected')
+    expect(getByRole('button').textContent).not.toContain('disconnected')
+
+    act(() => vi.advanceTimersByTime(10000))
+    expect(MockWebSocket.instances).toHaveLength(2)
   })
 })
