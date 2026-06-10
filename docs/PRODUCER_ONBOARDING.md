@@ -1,91 +1,103 @@
 # Getting Access to Cardigan — Producer Onboarding
 
-Cardigan (a.k.a. *The Metadata Neighborhood*) turns a well-edited transcript into
-SEO-ready metadata — Release Title, Short/Long Description, and Keywords — so you
-don't have to write all of that by hand. It runs as a web dashboard at
-**`https://cardigan.bymarkriechers.com`**.
+Cardigan (a.k.a. *The Metadata Neighborhood*) turns a finished transcript into
+SEO-ready metadata — Release Title, Short/Long Description, Keywords — so you
+don't have to write all of it by hand.
 
-This guide has two parts: **admin steps** (done once per new producer by the
-person who runs the server) and a **producer guide** you can hand straight to a
-colleague.
+> **Access status (2026-06-10):** Cardigan runs on the `cardigan01` homelab
+> container. Today it's reachable only on the home LAN / Tailscale and has **no
+> login**. The producer-facing front door — a **Cloudflare Tunnel + Cloudflare
+> Access** (browser login, nothing to install) — is being stood up; see the
+> infra handoff in
+> `homelab/proxmox-config/containers/cardigan01/planning/2026-06-10-secure-access-handoff.md`.
+> A longer-term option (Cardigan behind **WPM's official VPN**) is under
+> discussion with IT. This doc describes the **Cloudflare Access** experience the
+> near-term setup delivers.
 
 ---
 
 ## Part A — Admin steps (one-time per producer)
 
-Access is gated by **Cloudflare Access** (an email allowlist with magic-link
-login) sitting in front of the Cloudflare Tunnel. No API keys, passwords, or
-config touch the producer's machine — you just add their email.
+Prerequisite (one-time, infra): the Cloudflare Tunnel + Access application for
+`cardigan.<domain>` exist, and the origin API key is set (see "Defense in depth"
+below). Those are tracked in the handoff note above.
 
-1. **Add the producer's email to the allowlist.**
-   In the [Cloudflare Zero Trust dashboard](https://one.dash.cloudflare.com/) →
-   **Access → Applications →** the `cardigan.bymarkriechers.com` application →
-   the "Email allowlist" policy → add their PBS Wisconsin email under the
-   **Emails** include rule. (Same policy described in `docs/REMOTE_ACCESS.md` §5.)
+1. **Add the producer to the Access policy.** Cloudflare Zero Trust → **Access →
+   Applications →** the Cardigan app → the "Email allowlist" policy → add their
+   PBS Wisconsin email. They authenticate at Cloudflare's edge (magic-link /
+   one-time PIN) — unauthenticated traffic never reaches the homelab.
+2. **Send them** the URL + Part B.
+3. **(If they run a local editing agent)** issue them a Cloudflare Access
+   **service token** *and* a scoped Cardigan **consumer key** — see "Agent
+   access" below.
 
-2. **Confirm the tunnel is up.** In production the connector runs as the
-   `tunnel` service in the compose stack:
-   ```bash
-   docker compose -f docker-compose.prod.yml --profile tunnel ps tunnel
-   ```
-   It should be `Up`. (If you run the tunnel via `./scripts/start.sh` on a laptop
-   instead, `./scripts/status.sh` shows it.)
+### Defense in depth — the origin API key
 
-3. **Send the producer** the dashboard URL and Part B below.
-
-> **Heads-up on identity:** today every dashboard user shares one backend API
-> key (injected by the web container's nginx). Cloudflare Access controls *who
-> can get in*, but the app itself doesn't yet attribute actions to individual
-> producers. Per-user identity/audit inside the app is a future enhancement. If
-> you need to revoke someone, remove their email from the Access policy.
+Cloudflare Access is the *edge* gate (who reaches the box). Cardigan also
+enforces an *origin* gate: when `CARDIGAN_API_KEY` is set, every `/api/*` call
+(and the live-updates WebSocket) must carry the key. The web container's nginx
+injects it automatically, so **producers never see or handle it** — the
+dashboard just works. This also closes the current LAN/Tailscale "no auth" hole.
+(Enabling it requires the API image that includes the WS header-auth fix — see
+the handoff note.)
 
 ---
 
 ## Part B — Producer guide (hand this to the new producer)
 
 ### 1. Log in
-Open **`https://cardigan.bymarkriechers.com`**. You'll see a Cloudflare login
-page — enter your PBS Wisconsin email, then click the magic link sent to your
-inbox. You're in for 24 hours before it asks again. Nothing to install.
+Open the Cardigan URL your admin sent you. You'll see a Cloudflare login page —
+enter your PBS Wisconsin email, then click the magic link (or enter the one-time
+code) sent to your inbox. You're in for the session. **Nothing to install.**
 
 ### 2. What Cardigan does for you
-You feed it a finished transcript; it runs a four-phase AI pipeline and hands
-back polished, SEO-optimized metadata for our streaming platforms. Think of it
-as a calm, reliable workstation that does the tedious duplicative writing so you
-can review instead of draft from scratch.
+You feed it a finished transcript; it runs a four-phase AI pipeline and returns
+polished, SEO-optimized metadata for our streaming platforms. Think of it as a
+calm, reliable workstation that does the tedious drafting so you can review.
 
 ### 3. Ready for Work
-The **Ready for Work** page lists transcripts that have shown up on the ingest
-server and are waiting to be processed. Browse the list, pick the episode(s) you
-want, and **queue** them. (The system scans for new arrivals automatically, so
-this list refreshes on its own — but there's a manual "Check for New Files"
-button if you want to force a fresh look.)
+The **Ready for Work** page lists transcripts that have arrived on the ingest
+server and are waiting. Pick the episode(s) you want and **queue** them. The list
+refreshes on its own; there's also a manual "Check for New Files" button.
 
 ### 4. Run & monitor a job
-Once queued, a job runs through four phases. You'll see live status as it
-progresses. If a phase fails, you can **retry** just that phase — you don't have
-to start over. A finished job shows as **completed**.
+A queued job runs through four phases with live status. If a phase fails, you can
+**retry just that phase** — no need to start over. A finished job shows as
+**completed**.
 
 ### 5. Review the output
-Open a completed job to read its generated metadata: Release Title, a short
-description, a long description, and keywords. Read it the way you'd read a
-colleague's first draft — it's good, but you have final say.
+Open a completed job to read its metadata: Release Title, short description, long
+description, keywords. Read it like a colleague's first draft — you have final
+say.
 
 ### 6. Push to AirTable
 When you're happy, Cardigan can write the approved fields back to our AirTable
-Single Source of Truth. It always shows you a **preview of the exact changes**
-first (old value → new value) and waits for your confirmation before writing.
-Only the editorial fields are writable (Release Title, Short/Long Description,
-Keywords, social copy), and every write leaves an audit comment on the record —
-so nothing happens behind your back.
+Single Source of Truth. It always shows a **preview of the exact changes** (old →
+new) and waits for your confirmation. Only the editorial fields are writable
+(Release Title, Short/Long Description, Keywords, social), and every write leaves
+an audit comment on the record.
 
 ### 7. Getting help
-Something looks off, or you can't get in? Ping **Mark Riechers** — include the
-episode/Media ID and a screenshot if you can.
+Can't get in, or something looks off? Ping **Mark Riechers** — include the
+episode / Media ID and a screenshot if you can.
 
 ---
 
-> **Programmatic / MCP access** (consumer API keys with scopes, via
-> `scripts/create_consumer_key.py`) is a separate path for tools and Claude
-> Desktop integrations — not needed for dashboard producers. A future
-> `docs/API_ONBOARDING.md` will cover it.
+## Agent access (for the AI editing workflow)
+
+The agent-driven editing workflow calls the same API the dashboard uses, so a
+local agent on your machine may need API access alongside the GUI. Because that
+traffic isn't a browser, it authenticates differently:
+
+- **Through the Cloudflare front door:** a Cloudflare Access **service token**
+  (a `CF-Access-Client-Id` + `CF-Access-Client-Secret` header pair) gets the
+  agent past the edge without a human login, **plus** a Cardigan **consumer key**
+  (`X-API-Key`, scoped — e.g. `mmingest:read`) for the origin gate. Your admin
+  issues both; treat them as secrets.
+- **On the homelab LAN / Tailscale (operator machines):** no service token needed
+  — reach the API directly (`cardigan01:8100`) with just the consumer key.
+
+> Mint a consumer key with
+> `python scripts/create_consumer_key.py --label <who> --scopes mmingest:read`
+> (prints the key once; `--revoke <id>` to disable). Cloudflare service tokens
+> are created in Zero Trust → Access → Service Auth.

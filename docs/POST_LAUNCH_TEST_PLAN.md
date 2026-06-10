@@ -48,25 +48,41 @@ are `Up`; `api` is `healthy`. The health JSON returns:
 
 ## §2 — Auth & access gate  *(smoke)*
 
-The dashboard is fronted by **Cloudflare Access** (email allowlist, magic-link)
-ahead of the Cloudflare Tunnel. The `web` image's internal nginx injects the
-shared `X-API-Key` toward the API, so the browser never handles a key.
+Two independent gates once access hardening is in place (see
+`PRODUCER_ONBOARDING.md` + the cardigan01 secure-access handoff note):
+**Cloudflare Access** at the edge (who reaches the box) and the **origin API key**
+(`CARDIGAN_API_KEY`) enforced by the app on every `/api/*` call and the WS.
 
+> Status (2026-06-10): the Cloudflare Tunnel + Access front door is being stood
+> up, and `CARDIGAN_API_KEY` is to be enabled once the API image carrying the WS
+> header-auth fix is deployed. Until then the API is reachable **unauthenticated
+> on the LAN/Tailscale** — a finding to close, not a passing state.
+
+**Origin API-key gate (once `CARDIGAN_API_KEY` is set):**
 ```bash
-# From inside the LXC, the API answers directly (no Access in front of localhost):
-curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8100/api/system/health   # 200
+# No key → 401 (proves the origin gate is live):
+curl -s -o /dev/null -w "%{http_code}\n" http://192.168.1.42:8100/api/jobs            # 401
+# With key → 200:
+curl -s -o /dev/null -w "%{http_code}\n" -H "X-API-Key: $CARDIGAN_API_KEY" \
+  http://192.168.1.42:8100/api/jobs                                                   # 200
+# Health stays exempt either way:
+curl -s -o /dev/null -w "%{http_code}\n" http://192.168.1.42:8100/api/system/health   # 200
 ```
 
-Then, from a normal browser **outside** the LXC:
+**Dashboard + live updates:** open the dashboard, confirm it loads **and** that
+job status updates stream without a manual refresh (the WebSocket authenticates
+via the `X-API-Key` header the nginx WS proxy injects — regression-critical after
+enabling the key).
 
-1. Visit `https://cardigan.bymarkriechers.com` with an email **not** on the Access allowlist → expect the Cloudflare login wall to block you.
-2. Visit again with an **allowlisted** email → complete the magic-link → the dashboard loads and live job updates stream (WebSocket connects).
+**Cloudflare Access edge gate (once the tunnel is up):** from a browser outside
+the homelab, an un-allowlisted email is blocked at the Cloudflare login wall; an
+allowlisted email completes the magic-link and reaches the dashboard.
 
 | Check | Result |
 |-------|--------|
-| `localhost:8100` health returns 200 inside the LXC | ☐ |
-| Un-allowlisted email is blocked at the Access wall | ☐ |
-| Allowlisted email reaches the dashboard, WS connects | ☐ |
+| No-key `/api/jobs` → 401; with-key → 200; health → 200 | ☐ |
+| Dashboard loads **and** live updates stream (WS authenticated) | ☐ |
+| Un-allowlisted email blocked at Access; allowlisted reaches dashboard | ☐ |
 
 ---
 
