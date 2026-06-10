@@ -7,12 +7,12 @@ don't have to write all of it by hand.
 > **Access status (2026-06-10):** Cardigan runs on the `cardigan01` homelab
 > container. Today it's reachable only on the home LAN / Tailscale and has **no
 > login**. The producer-facing front door — a **Cloudflare Tunnel + Cloudflare
-> Access** (browser login, nothing to install) — is being stood up; see the
-> infra handoff in
+> Access** (browser login, nothing to install) exposing **only the web
+> dashboard** — is being stood up; see the infra handoff in
 > `homelab/proxmox-config/containers/cardigan01/planning/2026-06-10-secure-access-handoff.md`.
-> A longer-term option (Cardigan behind **WPM's official VPN**) is under
-> discussion with IT. This doc describes the **Cloudflare Access** experience the
-> near-term setup delivers.
+> This doc covers the **web-app** experience, which is all a collaborating
+> producer needs. (A future option — Cardigan behind WPM's official VPN — is a
+> maybe-someday with IT, not something to wait on.)
 
 ---
 
@@ -27,9 +27,11 @@ below). Those are tracked in the handoff note above.
    PBS Wisconsin email. They authenticate at Cloudflare's edge (magic-link /
    one-time PIN) — unauthenticated traffic never reaches the homelab.
 2. **Send them** the URL + Part B.
-3. **(If they run a local editing agent)** issue them a Cloudflare Access
-   **service token** *and* a scoped Cardigan **consumer key** — see "Agent
-   access" below.
+
+That's it — the dashboard is the whole job. Only the web service (`:3100`) is
+exposed through the tunnel; the raw API (`:8100`) stays private (the dashboard
+reaches it internally), so there are no API keys or tokens for the producer to
+handle.
 
 ### Defense in depth — the origin API key
 
@@ -83,21 +85,17 @@ episode / Media ID and a screenshot if you can.
 
 ---
 
-## Agent access (for the AI editing workflow)
+## Operator note — agent / API access (not part of producer onboarding)
 
-The agent-driven editing workflow calls the same API the dashboard uses, so a
-local agent on your machine may need API access alongside the GUI. Because that
-traffic isn't a browser, it authenticates differently:
-
-- **Through the Cloudflare front door:** a Cloudflare Access **service token**
-  (a `CF-Access-Client-Id` + `CF-Access-Client-Secret` header pair) gets the
-  agent past the edge without a human login, **plus** a Cardigan **consumer key**
-  (`X-API-Key`, scoped — e.g. `mmingest:read`) for the origin gate. Your admin
-  issues both; treat them as secrets.
-- **On the homelab LAN / Tailscale (operator machines):** no service token needed
-  — reach the API directly (`cardigan01:8100`) with just the consumer key.
+The producer path above is **web dashboard only**, so the API stays off the
+public internet. The agent-driven editing workflow (operators like Mark) reaches
+the API over **Tailscale** instead — `cardigan01:8100` with a scoped Cardigan
+consumer key, no Cloudflare service token needed:
 
 > Mint a consumer key with
 > `python scripts/create_consumer_key.py --label <who> --scopes mmingest:read`
-> (prints the key once; `--revoke <id>` to disable). Cloudflare service tokens
-> are created in Zero Trust → Access → Service Auth.
+> (prints the key once; `--revoke <id>` to disable).
+
+If a producer ever needs agent/API access from a non-Tailscale machine, *then*
+add a Cloudflare Access service token + expose the API hostname — deferred until
+there's a real need (see the secure-access handoff note).
