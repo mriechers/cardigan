@@ -21,6 +21,7 @@ from api.services.llm import (
     end_run_tracking,
     get_run_tracker,
     start_run_tracking,
+    strip_reasoning,
 )
 
 
@@ -47,6 +48,21 @@ def mock_config(tmp_path):
                 "endpoint": "https://openrouter.ai/api/v1/chat/completions",
                 "api_key_env": "OPENROUTER_API_KEY",
             },
+            "local-dougie": {
+                "type": "openai",
+                "endpoint": "http://localhost:27180/v1/chat/completions",
+                "model": "qwen-local",
+                "strip_reasoning": True,
+                "force_model": True,
+                "cost_per_project": 0.0,
+                "enabled": False,
+            },
+            "openai-plain": {
+                "type": "openai",
+                "endpoint": "https://api.openai.com/v1/chat/completions",
+                "model": "gpt-4o-mini",
+                "api_key_env": "OPENAI_API_KEY",
+            },
         },
         "routing": {
             "phase_base_backends": {
@@ -56,6 +72,7 @@ def mock_config(tmp_path):
                 "validator": "openrouter-cheapskate",
             },
         },
+        "phase_models": {"analyst": "anthropic/claude-haiku-4.5"},
         "safety": {"run_cost_cap": 1.0, "max_cost_per_1k_tokens": 0.05, "model_allowlist": []},
     }
 
@@ -473,3 +490,112 @@ class TestClientManagement:
         assert "active_model" in status
         assert "primary_backend" in status
         assert status["primary_backend"] == "openrouter"
+
+
+class TestStripReasoning:
+    """Tests for stripping Qwen <think> blocks and markdown fences.
+
+    The local MLX (Qwen3.6) backend emits chain-of-thought <think> blocks and
+    often wraps JSON in ```fences. Downstream phases expect clean output, so
+    the local backend opts into stripping (handoff caveats #4/#5).
+    """
+
+    def test_removes_think_block(self):
+        raw = "<think>let me reason about this</think>\nThe answer is 42."
+        assert strip_reasoning(raw) == "The answer is 42."
+
+    def test_removes_outer_json_fence(self):
+        raw = '```json\n{"theme": "rivers"}\n```'
+        assert strip_reasoning(raw) == '{"theme": "rivers"}'
+
+    def test_removes_think_and_fence_together(self):
+        raw = '<think>pick a theme</think>\n```json\n{"theme": "rivers"}\n```'
+        assert strip_reasoning(raw) == '{"theme": "rivers"}'
+
+    def test_leaves_clean_text_unchanged(self):
+        clean = "Just a normal answer with no decorations."
+        assert strip_reasoning(clean) == clean
+
+    def test_multiline_think_block(self):
+        raw = "<think>\nline one\nline two\n</think>\nFinal answer."
+        assert strip_reasoning(raw) == "Final answer."
+
+
+class TestLocalBackendIntegration:
+    """The local-dougie backend seam: response cleaning + forced model id.
+
+    Both behaviors are gated on opt-in backend flags so existing backends are
+    untouched.
+    """
+
+    def _mock_openai_response(self, content):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": content}}],
+            "model": "qwen-local",
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        }
+        return mock_response
+
+    @pytest.mark.asyncio
+    async def test_strips_reasoning_when_backend_opts_in(self, llm_client):
+        start_run_tracking(job_id=901)
+        dirty = '<think>reasoning</think>\n```json\n{"ok": true}\n```'
+        mock_response = self._mock_openai_response(dirty)
+
+        with patch.object(httpx.AsyncClient, "post", return_value=mock_response):
+            with patch("api.services.llm.log_event"):
+                response = await llm_client.chat(
+                    messages=[{"role": "user", "content": "x"}], backend="local-dougie"
+                )
+
+        assert response.content == '{"ok": true}'
+
+    @pytest.mark.asyncio
+    async def test_does_not_strip_when_backend_opts_out(self, llm_client):
+        start_run_tracking(job_id=902)
+        dirty = "<think>reasoning</think>\nplain"
+        mock_response = self._mock_openai_response(dirty)
+
+        with patch.object(httpx.AsyncClient, "post", return_value=mock_response):
+            with patch("api.services.llm.log_event"):
+                response = await llm_client.chat(
+                    messages=[{"role": "user", "content": "x"}], backend="openai-plain"
+                )
+
+        # openai-plain has no strip_reasoning flag -> content passes through raw
+        assert response.content == dirty
+
+    @pytest.mark.asyncio
+    async def test_force_model_overrides_phase_models(self, llm_client):
+        # phase_models.analyst is a cloud model id the MLX server can't serve;
+        # force_model makes the backend's own model id win.
+        start_run_tracking(job_id=903)
+        mock_response = self._mock_openai_response("hi")
+
+        with patch.object(httpx.AsyncClient, "post", return_value=mock_response):
+            with patch("api.services.llm.log_event"):
+                response = await llm_client.chat(
+                    messages=[{"role": "user", "content": "x"}],
+                    backend="local-dougie",
+                    phase="analyst",
+                )
+
+        assert response.model == "qwen-local"
+
+    @pytest.mark.asyncio
+    async def test_phase_models_wins_without_force_model(self, llm_client):
+        # openai-plain does not set force_model -> phase_models.analyst applies.
+        start_run_tracking(job_id=904)
+        mock_response = self._mock_openai_response("hi")
+
+        with patch.object(httpx.AsyncClient, "post", return_value=mock_response):
+            with patch("api.services.llm.log_event"):
+                response = await llm_client.chat(
+                    messages=[{"role": "user", "content": "x"}],
+                    backend="openai-plain",
+                    phase="analyst",
+                )
+
+        assert response.model == "anthropic/claude-haiku-4.5"

@@ -6,6 +6,7 @@ model selection, and event logging.
 
 import json
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -207,6 +208,27 @@ async def end_run_tracking(job_id: Optional[int] = None) -> Optional[Dict[str, A
         _current_run_tracker = None
 
     return summary
+
+
+# Qwen3-family chain-of-thought blocks, emitted by the local MLX backend by
+# default; stripped so downstream phases get clean answers.
+_THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+# A markdown code fence wrapping the entire response (```json ... ```), common
+# when asking for structured output; stripped so results parse directly.
+_FENCE_RE = re.compile(r"\A```[a-zA-Z]*\n(.*?)\n?```\s*\Z", re.DOTALL)
+
+
+def strip_reasoning(text: str) -> str:
+    """Remove Qwen <think> blocks and a whole-response markdown fence.
+
+    Mirrors the-lodge `outsource.py` so the local MLX backend's output matches
+    what cloud backends return. Safe on already-clean text (no-op).
+    """
+    text = _THINK_RE.sub("", text).strip()
+    fence = _FENCE_RE.match(text)
+    if fence:
+        text = fence.group(1).strip()
+    return text
 
 
 def calculate_cost(
@@ -479,10 +501,14 @@ class LLMClient:
         backend_config = self.get_backend_config(backend_name)
 
         # Determine model — priority order:
+        # 0. Backend with force_model (e.g. local-dougie serves one model only —
+        #    its own id must win over a phase_models cloud id the server can't serve)
         # 1. Explicit model param
         # 2. phase_models config (per-phase model assignment from Settings UI)
         # 3. Backend's configured model / fallback_model
-        if model:
+        if backend_config.get("force_model"):
+            model_id = backend_config.get("model")
+        elif model:
             model_id = model
         elif phase:
             phase_models = self.config.get("phase_models", {})
@@ -681,6 +707,11 @@ class LLMClient:
 
         cost = calculate_cost(model, input_tokens, output_tokens)
         content = data["choices"][0]["message"]["content"]
+
+        # Local MLX (Qwen) backends opt into reasoning/fence stripping so their
+        # output matches what cloud backends return.
+        if config.get("strip_reasoning"):
+            content = strip_reasoning(content)
 
         return LLMResponse(
             content=content,

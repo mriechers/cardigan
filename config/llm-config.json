@@ -98,6 +98,16 @@
       "endpoint": "https://openrouter.ai/api/v1/chat/completions",
       "api_key_env": "OPENROUTER_API_KEY",
       "timeout": 300
+    },
+    "local-dougie": {
+      "type": "openai",
+      "endpoint": "http://localhost:27180/v1/chat/completions",
+      "model": "mlx-community/Qwen3.6-35B-A3B-4bit",
+      "strip_reasoning": true,
+      "force_model": true,
+      "timeout": 300,
+      "cost_per_project": 0.0,
+      "enabled": false
     }
   },
   "auto_select": {
