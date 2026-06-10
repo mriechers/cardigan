@@ -66,9 +66,17 @@ runs on the Studio at `:27180`. Two options:
   `llm-config.json`'s `local-dougie.endpoint`. Couples the committed config to the homelab
   network; avoid if the repo is shared.
 
-**Open decision for Mark:** the Studio's stable address reachable from the Cardigan LXC —
-a DNS/mDNS name (`<studio>.local` may not resolve from an LXC) or a static LAN IP. Confirm
-the LXC and the Studio are on routable subnets (firewall/VLAN).
+**Networking decision (use the LAN, not the public name).** The homelab uses `*.riechers.co`
+internal-domain naming, and Cardigan itself is `cardigan.riechers.co` — but prod runs a
+**`cloudflared` tunnel** (see `docker-compose.prod.yml`), so public `*.riechers.co` names go
+out through Cloudflare. **dougie is a local model server on Mark's daily-driver Studio and
+must NOT be exposed through the tunnel.** The LXC→dougie hop stays on the LAN:
+
+- Use the **Studio's static LAN IP**: `DOUGIE_ENDPOINT=http://<studio-lan-ip>:27180/v1/chat/completions`
+  (Mark is confirming the static address). An internal-only split-horizon DNS name is fine
+  too, but NOT a Cloudflare-fronted public hostname.
+- Confirm the Cardigan LXC can reach the Studio on that subnet (no VLAN/firewall block on
+  `:27180`) — quickest check: `curl http://<studio-lan-ip>:27180/health` from inside the LXC.
 
 ### 2. dougie must be reachable off-box (cross-repo — `dougie-local-agent`)
 
