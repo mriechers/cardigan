@@ -39,7 +39,13 @@ KEY_IGNORE_DIRECTORIES = f"{INGEST_PREFIX}ignore_directories"
 
 DEFAULT_CONFIG = IngestConfig(
     enabled=True,
-    scan_interval_hours=24,
+    # Reduced from 24 h → 2 h so the dashboard reflects same-day arrivals without
+    # waiting for the nightly tick.  Per AGENT-FEEDBACK.md (2026-05-07, "Ingest scan
+    # cadence is too low; UI feels stale") and sprint -1 of the mmingest index plan
+    # (public-media-work/pbswi — plan file anyway-the-reason-i-noble-whistle.md).
+    # Sprint 1B will replace ingest_scheduler.py entirely; this is a stopgap.
+    # Override via the config table: PUT /api/ingest/config {scan_interval_hours: N}.
+    scan_interval_hours=2,
     scan_time="07:00",  # 7 AM daily scan
     last_scan_at=None,
     last_scan_success=None,

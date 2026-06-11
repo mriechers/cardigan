@@ -73,6 +73,12 @@ class IngestScanner:
     # Maximum recursion depth for subdirectory scanning
     MAX_SCAN_DEPTH = 3
 
+    # Number of rows per INSERT batch in _track_files_batch.
+    # SQLite's per-statement parameter limit is 32 766 (SQLITE_MAX_VARIABLE_NUMBER).
+    # Our INSERT uses 9 bound params per row, so 500 rows x 9 = 4 500 -- well within
+    # limits.  Sprint 1B will replace this file; tune here only if needed before then.
+    UPSERT_BATCH_SIZE = 500
+
     def __init__(
         self,
         base_url: str = "https://mmingest.pbswi.wisc.edu/",
@@ -317,17 +323,28 @@ class IngestScanner:
                     new_files.append(f)
                     seen_urls.add(f.url)
 
+            # Count by type before batching (order is stable; just need totals)
             for f in new_files:
-                insert_query = text("""
-                    INSERT OR IGNORE INTO available_files
-                    (remote_url, filename, directory_path, file_type, media_id,
-                     file_size_bytes, remote_modified_at, first_seen_at, last_seen_at, status)
-                    VALUES
-                    (:remote_url, :filename, :directory_path, :file_type, :media_id,
-                     :file_size_bytes, :remote_modified_at, :now, :now, 'new')
-                """)
-                await session.execute(
-                    insert_query,
+                new_count += 1
+                if f.file_type == "transcript":
+                    new_transcripts += 1
+                else:
+                    new_screengrabs += 1
+
+            # Batch INSERT: one executemany call per UPSERT_BATCH_SIZE rows instead
+            # of N individual executes.  Reduces SQL round-trips from ~40k to ~80 on
+            # a full scan.  Sprint 1B replaces this file; keep changes surgical.
+            insert_query = text("""
+                INSERT OR IGNORE INTO available_files
+                (remote_url, filename, directory_path, file_type, media_id,
+                 file_size_bytes, remote_modified_at, first_seen_at, last_seen_at, status)
+                VALUES
+                (:remote_url, :filename, :directory_path, :file_type, :media_id,
+                 :file_size_bytes, :remote_modified_at, :now, :now, 'new')
+            """)
+            for batch_start in range(0, len(new_files), self.UPSERT_BATCH_SIZE):
+                batch = new_files[batch_start : batch_start + self.UPSERT_BATCH_SIZE]
+                params_list = [
                     {
                         "remote_url": f.url,
                         "filename": f.filename,
@@ -337,13 +354,10 @@ class IngestScanner:
                         "file_size_bytes": f.file_size_bytes,
                         "remote_modified_at": f.modified_at.isoformat() if f.modified_at else None,
                         "now": now,
-                    },
-                )
-                new_count += 1
-                if f.file_type == "transcript":
-                    new_transcripts += 1
-                else:
-                    new_screengrabs += 1
+                    }
+                    for f in batch
+                ]
+                await session.execute(insert_query, params_list)
 
             # Step 3: Update last_seen_at for existing files (single UPDATE)
             if existing_urls:
@@ -368,6 +382,7 @@ class IngestScanner:
         url: str,
         directory_path: str,
         depth: int = 0,
+        visited_urls: Optional[set] = None,
     ) -> List[RemoteFile]:
         """
         Fetch and parse a directory listing, recursing into subdirectories.
@@ -376,10 +391,22 @@ class IngestScanner:
             url: Full URL to the directory
             directory_path: Path relative to base URL
             depth: Current recursion depth (0 = top-level configured directory)
+            visited_urls: Set of canonical URLs already crawled in THIS scan. Passed
+                through recursion to prevent re-walking the same URL (e.g., when two
+                different parents both link to a shared subdirectory). Initialized to
+                an empty set if None — each top-level caller gets a fresh set.
 
         Returns:
             List of RemoteFile objects (including from subdirectories)
         """
+        if visited_urls is None:
+            visited_urls = set()
+
+        canonical_url = url.rstrip("/")
+        if canonical_url in visited_urls:
+            logger.debug(f"Skipping already-visited URL: {url}")
+            return []
+
         files: List[RemoteFile] = []
 
         async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=True) as client:
@@ -390,6 +417,11 @@ class IngestScanner:
 
             response = await client.get(url, auth=auth)
             response.raise_for_status()
+
+            # Mark visited only after a successful fetch. If a transient failure
+            # stamped the URL pre-fetch, a sibling path linking to the same URL
+            # would silently skip it on retry rather than getting a real chance.
+            visited_urls.add(canonical_url)
 
             # Parse HTML into files and subdirectory links
             found_files, subdirs = self._parse_directory_listing(
@@ -403,16 +435,32 @@ class IngestScanner:
 
         # Recurse into subdirectories if within depth limit
         if depth < self.MAX_SCAN_DEPTH:
+            # Lowercase ancestor segments for case-insensitive loop detection.
+            # Mirrors how `ignore_directories` is normalized at init.
+            ancestor_segments = {segment.lower() for segment in directory_path.strip("/").split("/") if segment}
+
             for subdir_name, subdir_url in subdirs:
                 subdir_path = f"{directory_path.rstrip('/')}/{subdir_name}/"
 
-                # Check against ignore list
+                # Skip ignored directories (configured by name)
                 if subdir_name.lower() in self.ignore_directories:
                     logger.debug(f"Skipping ignored directory: {subdir_path}")
                     continue
 
+                # Skip subdirs whose name reappears in the ancestor path.
+                # Defends against server-side directory mirroring (bind mounts,
+                # Apache Alias directives, symlinks) where /<X>/.../<X>/ returns
+                # the same listing as /<X>/ and the crawl would otherwise walk
+                # mirrored content until the request timeout fires. Originally
+                # surfaced on mmingest under /Education/.
+                if subdir_name.lower() in ancestor_segments:
+                    logger.warning(
+                        f"Skipping recursive loop: '{subdir_name}' already in ancestor path {directory_path}"
+                    )
+                    continue
+
                 try:
-                    sub_files = await self._scan_directory(subdir_url, subdir_path, depth + 1)
+                    sub_files = await self._scan_directory(subdir_url, subdir_path, depth + 1, visited_urls)
                     files.extend(sub_files)
                 except Exception as e:
                     logger.warning(f"Failed to scan subdirectory {subdir_path}: {e}")

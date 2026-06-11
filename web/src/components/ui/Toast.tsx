@@ -99,27 +99,27 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
 
   const variantStyles: Record<ToastVariant, { bg: string; border: string; text: string; icon: string }> = {
     success: {
-      bg: 'bg-green-900/90',
-      border: 'border-green-500/50',
-      text: 'text-green-100',
+      bg: 'bg-status-completed/90',
+      border: 'border-status-completed/50',
+      text: 'text-white',
       icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
     },
     error: {
-      bg: 'bg-red-900/90',
-      border: 'border-red-500/50',
-      text: 'text-red-100',
+      bg: 'bg-status-failed/90',
+      border: 'border-status-failed/50',
+      text: 'text-white',
       icon: 'M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z',
     },
     warning: {
-      bg: 'bg-yellow-900/90',
-      border: 'border-yellow-500/50',
-      text: 'text-yellow-100',
+      bg: 'bg-status-pending/90',
+      border: 'border-status-pending/50',
+      text: 'text-white',
       icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z',
     },
     info: {
-      bg: 'bg-blue-900/90',
-      border: 'border-blue-500/50',
-      text: 'text-blue-100',
+      bg: 'bg-pbs-900/90',
+      border: 'border-pbs-500/50',
+      text: 'text-pbs-100',
       icon: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
     },
   }

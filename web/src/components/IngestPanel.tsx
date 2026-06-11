@@ -201,25 +201,25 @@ export default function IngestPanel() {
   }
 
   return (
-    <div className="bg-gray-800 rounded-lg border border-gray-700 p-6 space-y-4">
+    <div className="bg-surface-800 rounded-lg border border-surface-700 p-6 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-white">Ready to Queue</h2>
-          <p className="text-sm text-gray-400">
+          <p className="text-sm text-surface-400">
             {totalNew} transcript{totalNew !== 1 ? 's' : ''} ready for processing
           </p>
         </div>
         <div className="flex items-center space-x-3">
           {lastScanAt && (
-            <span className="text-sm text-gray-400" title={new Date(lastScanAt + 'Z').toLocaleString()}>
+            <span className="text-sm text-surface-400" title={new Date(lastScanAt + 'Z').toLocaleString()}>
               Last scan: {formatRelativeTime(lastScanAt + 'Z')}
             </span>
           )}
           <button
             onClick={handleScan}
             disabled={scanning}
-            className="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white rounded-md transition-colors"
+            className="px-3 py-1.5 text-sm bg-surface-700 hover:bg-surface-600 disabled:opacity-50 text-white rounded-md transition-colors"
             aria-label="Scan for new transcript files"
           >
             {scanning ? 'Checking...' : 'Check Now'}
@@ -229,21 +229,21 @@ export default function IngestPanel() {
 
       {/* Error Message */}
       {error && (
-        <div role="alert" aria-live="assertive" className="bg-red-900/20 border border-red-500/30 rounded-lg p-4">
-          <p className="text-red-400">{error}</p>
+        <div role="alert" aria-live="assertive" className="bg-status-failed/15 border border-status-failed/30 rounded-lg p-4">
+          <p className="text-status-failed">{error}</p>
         </div>
       )}
 
       {/* Bulk Actions */}
       {selectedFileIds.size > 0 && (
-        <div className="bg-blue-900/20 border border-blue-500/30 rounded-lg p-4">
+        <div className="bg-pbs-900/20 border border-pbs-500/30 rounded-lg p-4">
           <div className="flex items-center justify-between">
-            <span className="text-blue-400 text-sm">
+            <span className="text-pbs-400 text-sm">
               {selectedFileIds.size} file{selectedFileIds.size !== 1 ? 's' : ''} selected
             </span>
             <button
               onClick={handleQueueSelected}
-              className="px-3 py-1.5 text-sm bg-green-600 hover:bg-green-500 text-white rounded-md transition-colors"
+              className="px-3 py-1.5 text-sm bg-pbs-500 hover:bg-pbs-400 text-white rounded-md transition-colors"
               aria-label={`Queue ${selectedFileIds.size} selected files`}
             >
               Queue Selected
@@ -255,27 +255,27 @@ export default function IngestPanel() {
       {/* File List */}
       {loading ? (
         <div className="py-8 text-center">
-          <p className="text-gray-400 animate-pulse">Loading available files...</p>
+          <p className="text-surface-400 animate-pulse">Loading available files...</p>
         </div>
       ) : files.length === 0 ? (
         <div className="py-8 text-center">
-          <p className="text-gray-400">No new transcript files available</p>
-          <p className="text-sm text-gray-500 mt-1">Click "Check Now" to scan for new files</p>
+          <p className="text-surface-400">No new transcript files available</p>
+          <p className="text-sm text-surface-400 mt-1">Click "Check Now" to scan for new files</p>
         </div>
       ) : (
         <div className="space-y-2">
           {/* Select All */}
           {files.length > 1 && (
-            <div className="flex items-center px-3 py-2 bg-gray-900 rounded-lg">
+            <div className="flex items-center px-3 py-2 bg-surface-900 rounded-lg">
               <label className="flex items-center space-x-3 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={selectedFileIds.size === files.length}
                   onChange={toggleSelectAll}
-                  className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500 focus:ring-offset-gray-800"
+                  className="w-4 h-4 rounded border-surface-600 bg-surface-700 text-pbs-500 focus:ring-pbs-400 focus:ring-offset-surface-800"
                   aria-label="Select all files"
                 />
-                <span className="text-sm text-gray-400 font-medium">Select All</span>
+                <span className="text-sm text-surface-400 font-medium">Select All</span>
               </label>
             </div>
           )}
@@ -284,7 +284,7 @@ export default function IngestPanel() {
           {files.map((file) => (
             <div
               key={file.id}
-              className="flex items-center justify-between p-3 bg-gray-900 rounded-lg hover:bg-gray-850 transition-colors"
+              className="flex items-center justify-between p-3 bg-surface-900 rounded-lg hover:bg-surface-850 transition-colors"
             >
               <div className="flex items-center space-x-3 flex-1 min-w-0">
                 <label className="flex items-center cursor-pointer">
@@ -292,7 +292,7 @@ export default function IngestPanel() {
                     type="checkbox"
                     checked={selectedFileIds.has(file.id)}
                     onChange={() => toggleFileSelection(file.id)}
-                    className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500 focus:ring-offset-gray-800"
+                    className="w-4 h-4 rounded border-surface-600 bg-surface-700 text-pbs-500 focus:ring-pbs-400 focus:ring-offset-surface-800"
                     aria-label={`Select ${file.media_id || file.filename}`}
                   />
                 </label>
@@ -302,23 +302,23 @@ export default function IngestPanel() {
                     {file.media_id ? (
                       <span className="font-medium text-white font-mono">{file.media_id}</span>
                     ) : (
-                      <span className="font-medium text-gray-400">{file.filename}</span>
+                      <span className="font-medium text-surface-400">{file.filename}</span>
                     )}
                   </div>
 
                   {file.sst_record && (
-                    <div className="text-sm text-gray-400 mt-0.5">
+                    <div className="text-sm text-surface-400 mt-0.5">
                       {file.sst_record.title && (
                         <span className="mr-2">{file.sst_record.title}</span>
                       )}
                       {file.sst_record.project && (
-                        <span className="text-gray-500">• {file.sst_record.project}</span>
+                        <span className="text-surface-400">• {file.sst_record.project}</span>
                       )}
                     </div>
                   )}
 
                   {!file.sst_record && file.media_id && (
-                    <div className="text-xs text-yellow-500 mt-0.5">
+                    <div className="text-xs text-status-pending mt-0.5">
                       No SST record found
                     </div>
                   )}
@@ -328,14 +328,14 @@ export default function IngestPanel() {
               <div className="flex items-center space-x-2 ml-4">
                 <button
                   onClick={() => handleQueueFile(file.id)}
-                  className="px-3 py-1 text-sm bg-green-600 hover:bg-green-500 text-white rounded transition-colors"
+                  className="px-3 py-1 text-sm bg-pbs-500 hover:bg-pbs-400 text-white rounded transition-colors"
                   aria-label={`Queue ${file.media_id || file.filename} for processing`}
                 >
                   Queue
                 </button>
                 <button
                   onClick={() => handleIgnoreFile(file.id)}
-                  className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors"
+                  className="px-3 py-1 text-sm bg-surface-700 hover:bg-surface-600 text-surface-300 rounded transition-colors"
                   aria-label={`Ignore ${file.media_id || file.filename}`}
                 >
                   Ignore

@@ -64,13 +64,47 @@ export default function Help() {
   }
 
   return (
-    <div className="flex gap-8">
+    <div className="lg:flex lg:gap-8">
+      {/* Mobile TOC — collapsible, shown below lg: */}
+      <details className="lg:hidden mb-6">
+        <summary className="flex items-center justify-between px-4 py-3 bg-surface-800 rounded-lg border border-surface-700 cursor-pointer text-sm font-display font-semibold text-surface-300 select-none">
+          <span>Contents</span>
+          <svg className="w-4 h-4 text-surface-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </summary>
+        <nav className="mt-2 px-4 py-3 bg-surface-800 rounded-lg border border-surface-700" aria-label="Table of contents">
+          <ul className="space-y-1">
+            {toc.filter(e => e.level <= 2).map((entry) => (
+              <li key={entry.id}>
+                <button
+                  onClick={() => {
+                    scrollTo(entry.id)
+                    const details = document.querySelector('details.lg\\:hidden') as HTMLDetailsElement
+                    if (details) details.open = false
+                  }}
+                  className={`block w-full text-left text-sm px-2 py-1 rounded transition-colors ${
+                    entry.level === 2 ? 'pl-4' : ''
+                  } ${
+                    activeSection === entry.id
+                      ? 'text-pbs-400 bg-surface-700'
+                      : 'text-surface-400 hover:text-surface-200 hover:bg-surface-800/50'
+                  }`}
+                >
+                  {entry.text}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      </details>
+
       {/* Table of Contents Sidebar */}
       <nav
         className="hidden lg:block w-56 flex-shrink-0 sticky top-20 self-start max-h-[calc(100vh-6rem)] overflow-y-auto"
         aria-label="Table of contents"
       >
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
+        <h2 className="text-sm font-semibold text-surface-400 uppercase tracking-wider mb-3">
           Contents
         </h2>
         <ul className="space-y-1">
@@ -82,8 +116,8 @@ export default function Help() {
                   entry.level === 2 ? 'pl-4' : ''
                 } ${
                   activeSection === entry.id
-                    ? 'text-blue-400 bg-gray-800'
-                    : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'
+                    ? 'text-pbs-400 bg-surface-800'
+                    : 'text-surface-400 hover:text-surface-200 hover:bg-surface-800/50'
                 }`}
               >
                 {entry.text}
@@ -95,21 +129,21 @@ export default function Help() {
 
       {/* Main Content */}
       <article className="flex-1 min-w-0">
-        <div className="bg-gray-800 rounded-lg border border-gray-700 p-8">
-          <div className="prose prose-invert prose-gray max-w-none
+        <div className="bg-surface-800 rounded-lg border border-surface-700 p-4 sm:p-6 lg:p-8">
+          <div className="prose prose-invert max-w-none
             prose-headings:scroll-mt-20
-            prose-h1:text-2xl prose-h1:font-bold prose-h1:text-white prose-h1:border-b prose-h1:border-gray-700 prose-h1:pb-3 prose-h1:mb-6
+            prose-h1:text-2xl prose-h1:font-bold prose-h1:text-white prose-h1:border-b prose-h1:border-surface-700 prose-h1:pb-3 prose-h1:mb-6
             prose-h2:text-xl prose-h2:font-semibold prose-h2:text-white prose-h2:mt-10 prose-h2:mb-4
-            prose-h3:text-lg prose-h3:font-medium prose-h3:text-gray-200
-            prose-p:text-gray-300 prose-p:leading-relaxed
-            prose-a:text-blue-400 prose-a:no-underline hover:prose-a:underline
+            prose-h3:text-lg prose-h3:font-medium prose-h3:text-surface-200
+            prose-p:text-surface-300 prose-p:leading-relaxed
+            prose-a:text-pbs-400 prose-a:no-underline hover:prose-a:underline
             prose-strong:text-white
-            prose-code:text-blue-300 prose-code:bg-gray-900 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-sm
+            prose-code:text-pbs-300 prose-code:bg-surface-900 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-sm
             prose-table:border-collapse
-            prose-th:bg-gray-900 prose-th:text-gray-200 prose-th:text-left prose-th:px-3 prose-th:py-2 prose-th:border prose-th:border-gray-700 prose-th:text-sm
-            prose-td:px-3 prose-td:py-2 prose-td:border prose-td:border-gray-700 prose-td:text-sm prose-td:text-gray-300
-            prose-li:text-gray-300
-            prose-hr:border-gray-700
+            prose-th:bg-surface-900 prose-th:text-surface-200 prose-th:text-left prose-th:px-3 prose-th:py-2 prose-th:border prose-th:border-surface-700 prose-th:text-sm
+            prose-td:px-3 prose-td:py-2 prose-td:border prose-td:border-surface-700 prose-td:text-sm prose-td:text-surface-300
+            prose-li:text-surface-300
+            prose-hr:border-surface-700
           ">
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}

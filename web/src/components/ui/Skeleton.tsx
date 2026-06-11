@@ -8,7 +8,7 @@ interface SkeletonProps {
 export function Skeleton({ className = '' }: SkeletonProps) {
   return (
     <div
-      className={`animate-pulse bg-gray-700 rounded ${className}`}
+      className={`animate-pulse bg-surface-700 rounded ${className}`}
       aria-hidden="true"
     />
   )
@@ -19,7 +19,7 @@ export function Skeleton({ className = '' }: SkeletonProps) {
  */
 export function SkeletonCard() {
   return (
-    <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
+    <div className="bg-surface-800 rounded-lg border border-surface-700 p-4">
       <Skeleton className="h-4 w-20 mb-2" />
       <Skeleton className="h-8 w-16" />
     </div>
@@ -31,7 +31,7 @@ export function SkeletonCard() {
  */
 export function SkeletonTableRow() {
   return (
-    <tr className="border-b border-gray-700">
+    <tr className="border-b border-surface-700">
       <td className="px-4 py-3"><Skeleton className="h-4 w-8" /></td>
       <td className="px-4 py-3"><Skeleton className="h-4 w-48" /></td>
       <td className="px-4 py-3"><Skeleton className="h-5 w-20 rounded-full" /></td>
@@ -48,7 +48,7 @@ export function SkeletonTableRow() {
  */
 export function SkeletonListItem() {
   return (
-    <div className="p-4 bg-gray-800 border border-gray-700 rounded-lg">
+    <div className="p-4 bg-surface-800 border border-surface-700 rounded-lg">
       <div className="flex items-center justify-between">
         <div className="flex-1">
           <Skeleton className="h-5 w-48 mb-2" />
@@ -80,12 +80,12 @@ export function SkeletonDashboard() {
       </div>
 
       {/* Recent Jobs */}
-      <div className="bg-gray-800 rounded-lg border border-gray-700">
-        <div className="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
+      <div className="bg-surface-800 rounded-lg border border-surface-700">
+        <div className="px-4 py-3 border-b border-surface-700 flex items-center justify-between">
           <Skeleton className="h-5 w-32" />
           <Skeleton className="h-4 w-16" />
         </div>
-        <div className="divide-y divide-gray-700">
+        <div className="divide-y divide-surface-700">
           {[1, 2, 3, 4, 5].map((i) => (
             <div key={i} className="px-4 py-3">
               <div className="flex items-center justify-between">
@@ -118,9 +118,9 @@ export function SkeletonQueue() {
 
       <Skeleton className="h-10 w-96" />
 
-      <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+      <div className="bg-surface-800 rounded-lg border border-surface-700 overflow-hidden">
         <table className="w-full">
-          <thead className="bg-gray-850 border-b border-gray-700">
+          <thead className="bg-surface-850 border-b border-surface-700">
             <tr>
               <th className="px-4 py-3"><Skeleton className="h-4 w-8" /></th>
               <th className="px-4 py-3"><Skeleton className="h-4 w-20" /></th>

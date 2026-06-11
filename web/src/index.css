@@ -30,7 +30,7 @@ body {
 
 /* Focus-visible styles for keyboard navigation */
 *:focus-visible {
-  outline: 2px solid #3b82f6; /* blue-500 */
+  outline: 2px solid #5283d6; /* pbs-400 */
   outline-offset: 2px;
 }
 

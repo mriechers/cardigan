@@ -157,16 +157,16 @@ export default function ScreengrabSlideout({ mediaId, onClose }: ScreengrabSlide
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-surface-700">
         <div>
           <h3 className="text-lg font-semibold text-white">Screengrabs</h3>
-          <p className="text-sm text-gray-400">
+          <p className="text-sm text-surface-400">
             {pendingCount} available for {mediaId}
           </p>
         </div>
         <button
           onClick={onClose}
-          className="text-gray-400 hover:text-white text-2xl leading-none px-2"
+          className="text-surface-400 hover:text-white text-2xl leading-none px-2"
           aria-label="Close screengrab panel"
         >
           &times;
@@ -175,11 +175,11 @@ export default function ScreengrabSlideout({ mediaId, onClose }: ScreengrabSlide
 
       {/* Attach All Button */}
       {pendingCount > 1 && (
-        <div className="px-4 py-3 border-b border-gray-700">
+        <div className="px-4 py-3 border-b border-surface-700">
           <button
             onClick={handleAttachAll}
             disabled={batchAttaching}
-            className="w-full px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-lg transition-colors font-medium"
+            className="w-full px-4 py-2 bg-pbs-500 hover:bg-pbs-400 disabled:opacity-50 text-white rounded-lg transition-colors font-medium"
           >
             {batchAttaching ? 'Attaching...' : `Attach All (${pendingCount})`}
           </button>
@@ -190,13 +190,13 @@ export default function ScreengrabSlideout({ mediaId, onClose }: ScreengrabSlide
       <div className="flex-1 overflow-y-auto p-4">
         {/* Existing Attachments Banner */}
         {existingAttachments !== null && existingAttachments > 0 && (
-          <div className="mb-4 p-3 bg-blue-900/20 border border-blue-500/30 rounded-lg">
+          <div className="mb-4 p-3 bg-pbs-900/20 border border-pbs-500/30 rounded-lg">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
-                <svg className="w-5 h-5 text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-5 h-5 text-pbs-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                <p className="text-blue-300 text-sm">
+                <p className="text-pbs-300 text-sm">
                   <span className="font-medium">{existingAttachments}</span> image{existingAttachments !== 1 ? 's' : ''} already attached
                 </p>
               </div>
@@ -205,7 +205,7 @@ export default function ScreengrabSlideout({ mediaId, onClose }: ScreengrabSlide
                   href={`https://airtable.com/${AIRTABLE_BASE_ID}/${AIRTABLE_SST_TABLE_ID}/${sstRecordId}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-blue-400 hover:text-blue-300 text-sm flex items-center space-x-1"
+                  className="text-pbs-400 hover:text-pbs-300 text-sm flex items-center space-x-1"
                 >
                   <span>View in Airtable</span>
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -224,7 +224,7 @@ export default function ScreengrabSlideout({ mediaId, onClose }: ScreengrabSlide
               href={`https://airtable.com/${AIRTABLE_BASE_ID}/${AIRTABLE_SST_TABLE_ID}/${sstRecordId}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-gray-400 hover:text-gray-300 text-sm flex items-center space-x-1"
+              className="text-surface-400 hover:text-surface-300 text-sm flex items-center space-x-1"
             >
               <span>View SST record in Airtable</span>
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -235,19 +235,19 @@ export default function ScreengrabSlideout({ mediaId, onClose }: ScreengrabSlide
         )}
 
         {error && (
-          <div className="mb-4 p-3 bg-red-900/20 border border-red-500/30 rounded-lg">
-            <p className="text-red-400 text-sm">{error}</p>
+          <div className="mb-4 p-3 bg-status-failed/15 border border-status-failed/30 rounded-lg">
+            <p className="text-status-failed text-sm">{error}</p>
           </div>
         )}
 
         {loading ? (
           <div className="py-8 text-center">
-            <p className="text-gray-400 animate-pulse">Loading screengrabs...</p>
+            <p className="text-surface-400 animate-pulse">Loading screengrabs...</p>
           </div>
         ) : screengrabs.length === 0 ? (
           <div className="py-8 text-center">
-            <p className="text-gray-400">No screengrabs available for this project</p>
-            <p className="text-sm text-gray-500 mt-1">
+            <p className="text-surface-400">No screengrabs available for this project</p>
+            <p className="text-sm text-surface-400 mt-1">
               Screengrabs may have already been attached or none were found on the ingest server.
             </p>
           </div>
@@ -256,10 +256,10 @@ export default function ScreengrabSlideout({ mediaId, onClose }: ScreengrabSlide
             {screengrabs.map((screengrab) => (
               <div
                 key={screengrab.id}
-                className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden"
+                className="bg-surface-800 rounded-lg border border-surface-700 overflow-hidden"
               >
                 {/* Thumbnail */}
-                <div className="aspect-video bg-gray-900 relative">
+                <div className="aspect-video bg-surface-900 relative">
                   <img
                     src={screengrab.remote_url}
                     alt={screengrab.filename}
@@ -272,7 +272,7 @@ export default function ScreengrabSlideout({ mediaId, onClose }: ScreengrabSlide
 
                   {/* Status Badge */}
                   {screengrab.status === 'attached' && (
-                    <div className="absolute top-2 right-2 px-2 py-1 bg-green-600 text-white text-xs rounded">
+                    <div className="absolute top-2 right-2 px-2 py-1 bg-status-completed text-white text-xs rounded">
                       Attached
                     </div>
                   )}
@@ -280,10 +280,10 @@ export default function ScreengrabSlideout({ mediaId, onClose }: ScreengrabSlide
 
                 {/* Info */}
                 <div className="p-3">
-                  <p className="text-sm text-gray-300 truncate" title={screengrab.filename}>
+                  <p className="text-sm text-surface-300 truncate" title={screengrab.filename}>
                     {screengrab.filename}
                   </p>
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="text-xs text-surface-400 mt-1">
                     {formatRelativeTime(screengrab.first_seen_at + 'Z')}
                   </p>
 
@@ -293,13 +293,13 @@ export default function ScreengrabSlideout({ mediaId, onClose }: ScreengrabSlide
                       <button
                         onClick={() => handleAttach(screengrab.id)}
                         disabled={attaching === screengrab.id}
-                        className="flex-1 px-3 py-1.5 text-sm bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded transition-colors"
+                        className="flex-1 px-3 py-1.5 text-sm bg-pbs-500 hover:bg-pbs-400 disabled:opacity-50 text-white rounded transition-colors"
                       >
                         {attaching === screengrab.id ? 'Attaching...' : 'Attach'}
                       </button>
                       <button
                         onClick={() => handleIgnore(screengrab.id)}
-                        className="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors"
+                        className="px-3 py-1.5 text-sm bg-surface-700 hover:bg-surface-600 text-surface-300 rounded transition-colors"
                       >
                         Ignore
                       </button>
