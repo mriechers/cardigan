@@ -102,9 +102,11 @@
     "local-dougie": {
       "type": "openai",
       "endpoint": "http://localhost:27180/v1/chat/completions",
+      "endpoint_env": "DOUGIE_ENDPOINT",
       "model": "mlx-community/Qwen3.6-35B-A3B-4bit",
       "strip_reasoning": true,
       "force_model": true,
+      "defer_when_unavailable": true,
       "timeout": 300,
       "cost_per_project": 0.0,
       "enabled": false
@@ -149,6 +151,10 @@
       "overlap_captions": 8,
       "max_parallel": 3,
       "min_tier": 1
+    },
+    "deferral": {
+      "backoff_minutes": [2, 5, 10, 15],
+      "ceiling_hours": 6
     }
   },
   "model_families": [

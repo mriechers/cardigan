@@ -10,8 +10,11 @@ import pytest_asyncio
 from api.models.events import EventCreate, EventData, EventType
 from api.models.job import JobCreate, JobStatus, JobUpdate
 from api.services.database import (
+    claim_next_job,
+    clear_defer_state,
     close_db,
     create_job,
+    defer_job,
     delete_job,
     get_config,
     get_events_for_job,
@@ -810,3 +813,139 @@ async def test_create_job_accepts_app_version_override(test_db):
         app_version="v2.1",
     )
     assert job.app_version == "v2.1"
+
+
+# ===== Defer-and-requeue (busy local backend) =====
+
+
+async def _job_row(job_id):
+    """Read the raw jobs row (defer columns aren't on the Job model)."""
+    from sqlalchemy import select
+
+    from api.services.database import get_session, jobs_table
+
+    async with get_session() as session:
+        result = await session.execute(select(jobs_table).where(jobs_table.c.id == job_id))
+        return result.fetchone()
+
+
+async def _make_inprogress_job(name="defer-test"):
+    await create_job(
+        JobCreate(project_name=name, project_path=f"/p/{name}", transcript_file=f"/t/{name}.txt")
+    )
+    job = await claim_next_job()  # pending -> in_progress
+    return job
+
+
+@pytest.mark.asyncio
+async def test_defer_job_requeues_under_ceiling(test_db):
+    job = await _make_inprogress_job()
+
+    await defer_job(job.id, backoff_minutes=[2, 5, 10, 15], ceiling_hours=6, detail="memory pressure")
+
+    row = await _job_row(job.id)
+    assert row.status == JobStatus.pending.value
+    assert row.defer_count == 1
+    assert row.retry_after is not None
+    assert row.first_deferred_at is not None
+    # retry_after is in the future, so the worker won't immediately reclaim it
+    assert await claim_next_job() is None
+
+
+@pytest.mark.asyncio
+async def test_defer_job_backoff_increments_count_keeps_first(test_db):
+    job = await _make_inprogress_job("defer-twice")
+
+    await defer_job(job.id, backoff_minutes=[2, 5], ceiling_hours=6)
+    first_row = await _job_row(job.id)
+    # Re-claim requires clearing the gate; simulate the second defer directly.
+    await defer_job(job.id, backoff_minutes=[2, 5], ceiling_hours=6)
+    second_row = await _job_row(job.id)
+
+    assert second_row.defer_count == 2
+    assert second_row.first_deferred_at == first_row.first_deferred_at  # ceiling anchored to first
+
+
+@pytest.mark.asyncio
+async def test_claim_skips_future_retry_after_then_claims_when_due(test_db):
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import update
+
+    from api.services.database import get_session, jobs_table
+
+    job = await _make_inprogress_job("gate")
+    await defer_job(job.id, backoff_minutes=[15], ceiling_hours=6)
+
+    assert await claim_next_job() is None  # gated
+
+    # Backdate retry_after to the past → now eligible
+    past = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    async with get_session() as session:
+        await session.execute(update(jobs_table).where(jobs_table.c.id == job.id).values(retry_after=past))
+        await session.commit()
+
+    claimed = await claim_next_job()
+    assert claimed is not None
+    assert claimed.id == job.id
+
+
+@pytest.mark.asyncio
+async def test_defer_job_pauses_past_ceiling(test_db):
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import update
+
+    from api.services.database import get_session, jobs_table
+
+    job = await _make_inprogress_job("ceiling")
+    # Pretend it first deferred 7h ago.
+    seven_h_ago = (datetime.now(timezone.utc) - timedelta(hours=7)).isoformat()
+    async with get_session() as session:
+        await session.execute(
+            update(jobs_table)
+            .where(jobs_table.c.id == job.id)
+            .values(first_deferred_at=seven_h_ago, defer_count=20)
+        )
+        await session.commit()
+
+    await defer_job(job.id, backoff_minutes=[2, 5], ceiling_hours=6, detail="still busy")
+
+    row = await _job_row(job.id)
+    assert row.status == JobStatus.paused.value
+    assert "local capacity" in (row.error_message or "")
+
+
+@pytest.mark.asyncio
+async def test_defer_job_does_not_burn_retry_count(test_db):
+    job = await _make_inprogress_job("retrybudget")
+    await defer_job(job.id, backoff_minutes=[2], ceiling_hours=6)
+    row = await _job_row(job.id)
+    assert row.retry_count == 0
+
+
+@pytest.mark.asyncio
+async def test_defer_job_honors_retry_after_hint(test_db):
+    from datetime import datetime, timezone
+
+    job = await _make_inprogress_job("hint")
+    before = datetime.now(timezone.utc)
+    # A 30s hint should schedule retry_after ~30s out, far sooner than the 15m schedule.
+    await defer_job(job.id, backoff_minutes=[15], ceiling_hours=6, retry_after_s=30)
+    row = await _job_row(job.id)
+    retry_after = datetime.fromisoformat(row.retry_after)
+    assert (retry_after - before).total_seconds() < 120  # honored the short hint, not the 15m default
+
+
+@pytest.mark.asyncio
+async def test_clear_defer_state(test_db):
+    job = await _make_inprogress_job("clear")
+    await defer_job(job.id, backoff_minutes=[2], ceiling_hours=6)
+    assert (await _job_row(job.id)).defer_count == 1
+
+    await clear_defer_state(job.id)
+
+    row = await _job_row(job.id)
+    assert row.defer_count == 0
+    assert row.retry_after is None
+    assert row.first_deferred_at is None

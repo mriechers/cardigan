@@ -25,6 +25,7 @@ class EventType(str, Enum):
     system_error = "system_error"
     user_action = "user_action"
     api_call = "api_call"
+    job_deferred = "job_deferred"  # local backend busy; job requeued with backoff
 
 
 class EventData(BaseModel):

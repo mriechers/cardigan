@@ -16,12 +16,15 @@ from api.models.job import JobStatus
 from api.services.airtable import get_airtable_client
 from api.services.database import (
     claim_next_job,
+    clear_defer_state,
+    defer_job,
     log_event,
     update_job_heartbeat,
     update_job_phase,
     update_job_status,
 )
 from api.services.llm import (
+    BackendUnavailableError,
     LLMResponse,
     end_run_tracking,
     get_llm_client,
@@ -862,6 +865,24 @@ Extract any name or spelling corrections that should be added to the glossary. S
 
                 await update_job_phase(job_id, phases)
 
+                if phase_result.get("deferred"):
+                    # Backend busy, not broken: requeue with backoff (or pause past
+                    # the ceiling) and stop here. The worker reclaims the job when
+                    # retry_after elapses, resuming at this still-unfinished phase.
+                    backoff_minutes, ceiling_hours = self._deferral_policy()
+                    await defer_job(
+                        job_id,
+                        backoff_minutes=backoff_minutes,
+                        ceiling_hours=ceiling_hours,
+                        retry_after_s=phase_result.get("retry_after_s"),
+                        detail=phase_result.get("detail"),
+                    )
+                    logger.info(
+                        "Job requeued — local backend busy",
+                        extra={"job_id": job_id, "phase": phase_name, "detail": phase_result.get("detail")},
+                    )
+                    return
+
                 if not phase_result["success"]:
                     raise Exception(f"Phase {phase_name} failed: {phase_result.get('error')}")
 
@@ -1038,6 +1059,9 @@ Extract any name or spelling corrections that should be added to the glossary. S
                 JobStatus.completed,
                 actual_cost=run_summary["total_cost"] if run_summary else 0,
             )
+            # Job finished: clear any deferral bookkeeping so a future reprocess
+            # starts a fresh capacity-wait ceiling rather than inheriting this one.
+            await clear_defer_state(job_id)
 
             # Archive the transcript file (non-fatal if this fails)
             try:
@@ -1485,6 +1509,15 @@ Extract any name or spelling corrections that should be added to the glossary. S
         )
         return False
 
+    def _deferral_policy(self) -> tuple[list, float]:
+        """Backoff schedule (minutes) and give-up ceiling (hours) for deferring a
+        job when a local backend is busy. Read from routing.deferral, with
+        sensible defaults so the feature works even without explicit config."""
+        cfg = self.llm.config.get("routing", {}).get("deferral", {})
+        backoff_minutes = cfg.get("backoff_minutes") or [2, 5, 10, 15]
+        ceiling_hours = cfg.get("ceiling_hours", 6)
+        return backoff_minutes, ceiling_hours
+
     async def _run_phase(
         self,
         job_id: int,
@@ -1624,6 +1657,22 @@ Extract any name or spelling corrections that should be added to the glossary. S
                 "input_tokens": response.input_tokens,
                 "output_tokens": response.output_tokens,
                 "model": response.model,
+            }
+
+        except BackendUnavailableError as e:
+            # The backend is temporarily busy (memory pressure / loading / contention),
+            # not broken. Signal the pipeline to requeue rather than fail the job.
+            logger.info(
+                "Phase deferred — backend unavailable",
+                extra={"job_id": job_id, "phase": phase_name, "backend": e.backend, "detail": e.detail},
+            )
+            return {
+                "success": False,
+                "deferred": True,
+                "detail": e.detail,
+                "retry_after_s": e.retry_after_s,
+                "cost": 0,
+                "tokens": 0,
             }
 
         except asyncio.TimeoutError:
