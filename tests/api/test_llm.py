@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 from api.services.llm import (
+    BackendUnavailableError,
     CostCapExceededError,
     LLMClient,
     LLMResponse,
@@ -51,10 +52,13 @@ def mock_config(tmp_path):
             "local-dougie": {
                 "type": "openai",
                 "endpoint": "http://localhost:27180/v1/chat/completions",
+                "endpoint_env": "DOUGIE_ENDPOINT",
                 "model": "qwen-local",
                 "strip_reasoning": True,
                 "force_model": True,
+                "defer_when_unavailable": True,
                 "cost_per_project": 0.0,
+                "timeout": 300,
                 "enabled": False,
             },
             "openai-plain": {
@@ -520,6 +524,16 @@ class TestStripReasoning:
         raw = "<think>\nline one\nline two\n</think>\nFinal answer."
         assert strip_reasoning(raw) == "Final answer."
 
+    def test_removes_dangling_close_tag_without_opener(self):
+        # Qwen3 chat templates often inject the opening <think> into the prompt,
+        # so the server streams back only the reasoning + a closing </think>.
+        raw = "let me reason about this\nstep two</think>\nThe answer is 42."
+        assert strip_reasoning(raw) == "The answer is 42."
+
+    def test_removes_dangling_close_then_fence(self):
+        raw = 'reasoning here</think>\n```json\n{"theme": "rivers"}\n```'
+        assert strip_reasoning(raw) == '{"theme": "rivers"}'
+
 
 class TestLocalBackendIntegration:
     """The local-dougie backend seam: response cleaning + forced model id.
@@ -599,3 +613,192 @@ class TestLocalBackendIntegration:
                 )
 
         assert response.model == "anthropic/claude-haiku-4.5"
+
+    @pytest.mark.asyncio
+    async def test_cost_per_project_zeroes_local_cost(self, llm_client):
+        # The local model id is unknown to MODEL_PRICING, so calculate_cost would
+        # bill the conservative $1/$3-per-M estimate. cost_per_project:0.0 must win.
+        start_run_tracking(job_id=905)
+        mock_response = self._mock_openai_response("hi")
+
+        with patch.object(httpx.AsyncClient, "post", return_value=mock_response):
+            with patch("api.services.llm.log_event"):
+                response = await llm_client.chat(
+                    messages=[{"role": "user", "content": "x"}], backend="local-dougie"
+                )
+
+        assert response.cost == 0.0
+
+    @pytest.mark.asyncio
+    async def test_disables_server_thinking_when_strip_reasoning(self, llm_client):
+        # Mirror outsource.py: the primary control is telling the server not to
+        # think, not just stripping after the fact.
+        start_run_tracking(job_id=906)
+        mock_response = self._mock_openai_response("hi")
+
+        with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
+            with patch("api.services.llm.log_event"):
+                await llm_client.chat(
+                    messages=[{"role": "user", "content": "x"}], backend="local-dougie"
+                )
+
+        # call_args_list[0] is the LLM request; a Langfuse trace POST may follow.
+        payload = mock_post.call_args_list[0].kwargs["json"]
+        assert payload["chat_template_kwargs"] == {"enable_thinking": False}
+
+    @pytest.mark.asyncio
+    async def test_no_server_thinking_kwarg_without_strip_reasoning(self, llm_client):
+        start_run_tracking(job_id=907)
+        mock_response = self._mock_openai_response("hi")
+
+        with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
+            with patch("api.services.llm.log_event"):
+                await llm_client.chat(
+                    messages=[{"role": "user", "content": "x"}], backend="openai-plain"
+                )
+
+        payload = mock_post.call_args_list[0].kwargs["json"]
+        assert "chat_template_kwargs" not in payload
+
+    @pytest.mark.asyncio
+    async def test_honors_per_backend_timeout(self, llm_client):
+        start_run_tracking(job_id=908)
+        mock_response = self._mock_openai_response("hi")
+
+        with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
+            with patch("api.services.llm.log_event"):
+                await llm_client.chat(
+                    messages=[{"role": "user", "content": "x"}], backend="local-dougie"
+                )
+
+        assert mock_post.call_args_list[0].kwargs["timeout"] == 300
+
+    @pytest.mark.asyncio
+    async def test_endpoint_env_overrides_config_endpoint(self, llm_client, monkeypatch):
+        monkeypatch.setenv("DOUGIE_ENDPOINT", "http://studio.lan:27180/v1/chat/completions")
+        start_run_tracking(job_id=909)
+        mock_response = self._mock_openai_response("hi")
+
+        with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
+            with patch("api.services.llm.log_event"):
+                await llm_client.chat(
+                    messages=[{"role": "user", "content": "x"}], backend="local-dougie"
+                )
+
+        assert mock_post.call_args_list[0].args[0] == "http://studio.lan:27180/v1/chat/completions"
+
+    @pytest.mark.asyncio
+    async def test_no_auth_header_when_keyless(self, llm_client):
+        start_run_tracking(job_id=910)
+        mock_response = self._mock_openai_response("hi")
+
+        with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
+            with patch("api.services.llm.log_event"):
+                await llm_client.chat(
+                    messages=[{"role": "user", "content": "x"}], backend="local-dougie"
+                )
+
+        headers = mock_post.call_args_list[0].kwargs["headers"]
+        assert "Authorization" not in headers
+
+
+class TestBackendUnavailable:
+    """A defer_when_unavailable backend converts transient-unavailable signals
+    (503 / connection / timeout) into BackendUnavailableError so the worker can
+    requeue the job instead of failing it. Genuine errors still fail.
+    """
+
+    def _mock_response(self, status_code, json_body=None, headers=None):
+        resp = MagicMock()
+        resp.status_code = status_code
+        resp.headers = headers or {}
+        resp.json.return_value = json_body if json_body is not None else {}
+        resp.text = json.dumps(json_body) if json_body is not None else ""
+        if status_code >= 400:
+            resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+                f"{status_code}", request=MagicMock(), response=resp
+            )
+        else:
+            resp.raise_for_status.return_value = None
+        return resp
+
+    @pytest.mark.asyncio
+    async def test_raises_on_503_for_deferrable_backend(self, llm_client):
+        start_run_tracking(job_id=920)
+        resp = self._mock_response(503, {"detail": "memory pressure 69% ≥ ceiling 65%; refusing to load"})
+
+        with patch.object(httpx.AsyncClient, "post", return_value=resp):
+            with patch("api.services.llm.log_event"):
+                with pytest.raises(BackendUnavailableError) as exc:
+                    await llm_client.chat(
+                        messages=[{"role": "user", "content": "x"}], backend="local-dougie"
+                    )
+
+        assert "memory pressure" in exc.value.detail
+        assert exc.value.backend == "local-dougie"
+
+    @pytest.mark.asyncio
+    async def test_raises_on_connect_error_for_deferrable_backend(self, llm_client):
+        start_run_tracking(job_id=921)
+
+        with patch.object(httpx.AsyncClient, "post", side_effect=httpx.ConnectError("refused")):
+            with patch("api.services.llm.log_event"):
+                with pytest.raises(BackendUnavailableError):
+                    await llm_client.chat(
+                        messages=[{"role": "user", "content": "x"}], backend="local-dougie"
+                    )
+
+    @pytest.mark.asyncio
+    async def test_raises_on_read_timeout_for_deferrable_backend(self, llm_client):
+        start_run_tracking(job_id=922)
+
+        with patch.object(httpx.AsyncClient, "post", side_effect=httpx.ReadTimeout("slow")):
+            with patch("api.services.llm.log_event"):
+                with pytest.raises(BackendUnavailableError):
+                    await llm_client.chat(
+                        messages=[{"role": "user", "content": "x"}], backend="local-dougie"
+                    )
+
+    @pytest.mark.asyncio
+    async def test_503_not_converted_for_non_deferrable_backend(self, llm_client):
+        # openai-plain has no defer_when_unavailable flag -> 503 is a normal failure.
+        start_run_tracking(job_id=923)
+        resp = self._mock_response(503, {"detail": "nope"})
+
+        with patch.object(httpx.AsyncClient, "post", return_value=resp):
+            with patch("api.services.llm.log_event"):
+                with pytest.raises(httpx.HTTPStatusError):
+                    await llm_client.chat(
+                        messages=[{"role": "user", "content": "x"}], backend="openai-plain"
+                    )
+
+    @pytest.mark.asyncio
+    async def test_503_with_retryable_false_is_not_deferred(self, llm_client):
+        # A future dougie envelope marking the error non-retryable must NOT defer.
+        start_run_tracking(job_id=924)
+        resp = self._mock_response(
+            503, {"error": {"retryable": False, "message": "model not found"}}
+        )
+
+        with patch.object(httpx.AsyncClient, "post", return_value=resp):
+            with patch("api.services.llm.log_event"):
+                with pytest.raises(httpx.HTTPStatusError):
+                    await llm_client.chat(
+                        messages=[{"role": "user", "content": "x"}], backend="local-dougie"
+                    )
+
+    @pytest.mark.asyncio
+    async def test_reads_retry_after_header(self, llm_client):
+        start_run_tracking(job_id=925)
+        resp = self._mock_response(
+            503, {"detail": "busy"}, headers={"retry-after": "300"}
+        )
+
+        with patch.object(httpx.AsyncClient, "post", return_value=resp):
+            with patch("api.services.llm.log_event"):
+                with pytest.raises(BackendUnavailableError) as exc:
+                    await llm_client.chat(
+                        messages=[{"role": "user", "content": "x"}], backend="local-dougie"
+                    )
+
+        assert exc.value.retry_after_s == 300
