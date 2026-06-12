@@ -107,6 +107,7 @@
       "strip_reasoning": true,
       "force_model": true,
       "defer_when_unavailable": true,
+      "max_tokens": 8192,
       "timeout": 300,
       "cost_per_project": 0.0,
       "enabled": false

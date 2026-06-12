@@ -57,6 +57,7 @@ def mock_config(tmp_path):
                 "strip_reasoning": True,
                 "force_model": True,
                 "defer_when_unavailable": True,
+                "max_tokens": 8192,
                 "cost_per_project": 0.0,
                 "timeout": 300,
                 "enabled": False,
@@ -672,6 +673,53 @@ class TestLocalBackendIntegration:
                 )
 
         assert mock_post.call_args_list[0].kwargs["timeout"] == 300
+
+    @pytest.mark.asyncio
+    async def test_defaults_max_tokens_for_openai_backend(self, llm_client):
+        # Without a default, an OpenAI-compatible server (e.g. MLX) applies its own
+        # tiny default (512) and truncates analyst/formatter output. openai-plain
+        # has no configured max_tokens, so the code default applies.
+        start_run_tracking(job_id=930)
+        mock_response = self._mock_openai_response("hi")
+
+        with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
+            with patch("api.services.llm.log_event"):
+                await llm_client.chat(
+                    messages=[{"role": "user", "content": "x"}], backend="openai-plain"
+                )
+
+        payload = mock_post.call_args_list[0].kwargs["json"]
+        assert payload["max_tokens"] >= 4096
+
+    @pytest.mark.asyncio
+    async def test_backend_config_max_tokens_wins(self, llm_client):
+        start_run_tracking(job_id=931)
+        mock_response = self._mock_openai_response("hi")
+
+        with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
+            with patch("api.services.llm.log_event"):
+                await llm_client.chat(
+                    messages=[{"role": "user", "content": "x"}], backend="local-dougie"
+                )
+
+        payload = mock_post.call_args_list[0].kwargs["json"]
+        assert payload["max_tokens"] == 8192  # local-dougie config value
+
+    @pytest.mark.asyncio
+    async def test_explicit_max_tokens_kwarg_wins(self, llm_client):
+        start_run_tracking(job_id=932)
+        mock_response = self._mock_openai_response("hi")
+
+        with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
+            with patch("api.services.llm.log_event"):
+                await llm_client.chat(
+                    messages=[{"role": "user", "content": "x"}],
+                    backend="local-dougie",
+                    max_tokens=256,
+                )
+
+        payload = mock_post.call_args_list[0].kwargs["json"]
+        assert payload["max_tokens"] == 256
 
     @pytest.mark.asyncio
     async def test_endpoint_env_overrides_config_endpoint(self, llm_client, monkeypatch):

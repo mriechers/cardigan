@@ -784,6 +784,10 @@ class LLMClient:
             "messages": messages,
             **kwargs,
         }
+        # Cap output explicitly. OpenAI-compatible servers (e.g. MLX) default to a
+        # tiny max_tokens (~512) that truncates analyst/formatter output; cloud
+        # backends don't. Precedence: explicit kwarg > backend config > 4096.
+        payload["max_tokens"] = payload.get("max_tokens") or config.get("max_tokens", 4096)
         # Local MLX (Qwen) backends: tell the server not to emit chain-of-thought
         # at all (primary control, mirroring outsource.py); strip_reasoning on the
         # response below is the belt-and-suspenders backup.
