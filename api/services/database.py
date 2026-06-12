@@ -118,6 +118,11 @@ jobs_table = Table(
     Column("content_type", Text, nullable=True),  # 'full', 'short', or 'clip'
     Column("app_version", Text, nullable=True),
     Column("validation_result", Text, nullable=True),  # JSON validation result
+    # Defer-and-requeue (busy local backend). Timestamps are ISO-8601 UTC
+    # strings so claim_next_job's raw-SQL gate compares them lexicographically.
+    Column("retry_after", Text, nullable=True),  # don't reclaim before this time
+    Column("defer_count", Integer, nullable=False, server_default="0"),
+    Column("first_deferred_at", Text, nullable=True),  # anchors the give-up ceiling
 )
 
 # Define session_stats table
@@ -844,6 +849,8 @@ async def claim_next_job(worker_id: Optional[str] = None) -> Optional[Job]:
 
         # SQLite-compatible atomic claim using UPDATE with subquery
         # This finds the next job and claims it in a single statement
+        # A deferred job carries a future retry_after; skip it until that time so
+        # a busy local backend isn't re-hit before its backoff elapses.
         claim_sql = text("""
             UPDATE jobs
             SET status = :new_status,
@@ -852,6 +859,7 @@ async def claim_next_job(worker_id: Optional[str] = None) -> Optional[Job]:
             WHERE id = (
                 SELECT id FROM jobs
                 WHERE status = :pending_status
+                  AND (retry_after IS NULL OR retry_after <= :now)
                 ORDER BY priority DESC, queued_at ASC
                 LIMIT 1
             )
@@ -865,6 +873,7 @@ async def claim_next_job(worker_id: Optional[str] = None) -> Optional[Job]:
                 "pending_status": JobStatus.pending.value,
                 "started_at": now.isoformat(),
                 "heartbeat": now.isoformat(),
+                "now": now.isoformat(),
             },
         )
 
@@ -892,6 +901,140 @@ async def update_heartbeat(job_id: int) -> bool:
         stmt = update(jobs_table).where(jobs_table.c.id == job_id).values(last_heartbeat=datetime.now(timezone.utc))
         result = await session.execute(stmt)
         return result.rowcount > 0
+
+
+async def defer_job(
+    job_id: int,
+    *,
+    backoff_minutes: List[int],
+    ceiling_hours: float,
+    retry_after_s: Optional[int] = None,
+    detail: Optional[str] = None,
+) -> Optional[Job]:
+    """Requeue a job whose local backend was busy — or pause it past the ceiling.
+
+    Under the ceiling: status -> pending with a future ``retry_after`` (backoff)
+    and an incremented ``defer_count``. ``defer_count`` is deliberately separate
+    from ``retry_count``/``max_retries`` — a busy backend is not a failure, so it
+    must not burn the failure-retry budget.
+
+    Past the give-up ceiling (wall-clock since ``first_deferred_at``): status ->
+    paused with a clear, human-actionable message.
+
+    Args:
+        backoff_minutes: backoff schedule, indexed by current defer_count (plateaus
+            at the last entry).
+        ceiling_hours: max wall-clock to keep deferring before pausing for a human.
+        retry_after_s: backend-supplied hint; overrides the schedule when present.
+        detail: upstream "why" (e.g. "memory pressure 69%…") for the event log.
+    """
+    from datetime import timedelta
+
+    now = datetime.now(timezone.utc)
+
+    async with get_session() as session:
+        row = (
+            await session.execute(select(jobs_table).where(jobs_table.c.id == job_id))
+        ).fetchone()
+        if row is None:
+            return None
+
+        defer_count = row.defer_count or 0
+        first_deferred_at = row.first_deferred_at
+        first_dt = datetime.fromisoformat(first_deferred_at) if first_deferred_at else None
+
+        # Give-up ceiling: pause for a human after waiting too long.
+        if first_dt is not None and (now - first_dt) >= timedelta(hours=ceiling_hours):
+            message = (
+                f"Waited {ceiling_hours:g}h for local capacity; backend still busy. "
+                "Retry, or switch this job to a cloud backend."
+            )
+            await session.execute(
+                update(jobs_table)
+                .where(jobs_table.c.id == job_id)
+                .values(
+                    status=JobStatus.paused.value,
+                    error_message=message,
+                    error_timestamp=now,
+                    current_phase=None,
+                )
+            )
+            await _insert_event(
+                session,
+                job_id,
+                EventType.system_pause,
+                {
+                    "reason": "deferral_ceiling_exceeded",
+                    "detail": detail,
+                    "defer_count": defer_count,
+                    "ceiling_hours": ceiling_hours,
+                },
+                now,
+            )
+            await session.commit()
+        else:
+            if retry_after_s is not None:
+                backoff_s = int(retry_after_s)
+            elif backoff_minutes:
+                idx = min(defer_count, len(backoff_minutes) - 1)
+                backoff_s = backoff_minutes[idx] * 60
+            else:
+                backoff_s = 5 * 60
+            retry_after = now + timedelta(seconds=backoff_s)
+
+            await session.execute(
+                update(jobs_table)
+                .where(jobs_table.c.id == job_id)
+                .values(
+                    status=JobStatus.pending.value,
+                    retry_after=retry_after.isoformat(),
+                    defer_count=defer_count + 1,
+                    first_deferred_at=first_deferred_at or now.isoformat(),
+                    current_phase=None,
+                )
+            )
+            await _insert_event(
+                session,
+                job_id,
+                EventType.job_deferred,
+                {
+                    "reason": "backend_unavailable",
+                    "detail": detail,
+                    "defer_count": defer_count + 1,
+                    "retry_after": retry_after.isoformat(),
+                },
+                now,
+            )
+            await session.commit()
+
+    return await get_job(job_id)
+
+
+async def clear_defer_state(job_id: int) -> None:
+    """Reset deferral bookkeeping so a later, unrelated busy spell starts fresh.
+
+    Called when a job makes forward progress (a phase succeeds) — the backend
+    served the request, so the prior busy spell is over and its ceiling is moot.
+    """
+    async with get_session() as session:
+        await session.execute(
+            update(jobs_table)
+            .where(jobs_table.c.id == job_id)
+            .values(retry_after=None, defer_count=0, first_deferred_at=None)
+        )
+        await session.commit()
+
+
+async def _insert_event(session, job_id: int, event_type: EventType, data: dict, now: datetime) -> None:
+    """Insert a session_stats event within an existing session (caller commits)."""
+    await session.execute(
+        session_stats_table.insert().values(
+            job_id=job_id,
+            timestamp=now,
+            event_type=event_type.value,
+            data=json.dumps(data),
+        )
+    )
 
 
 async def get_stale_jobs(threshold_minutes: int = 10) -> List[Job]:
