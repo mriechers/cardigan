@@ -105,8 +105,11 @@ async def websocket_jobs_endpoint(websocket: WebSocket, token: str = Query(defau
     Clients connect to this endpoint to receive real-time notifications
     when jobs are created, updated, or completed.
 
-    When CARDIGAN_API_KEY is set, the `token` query parameter must match.
-    When the env var is empty/absent, all connections are allowed (dev mode).
+    When CARDIGAN_API_KEY is set, the request must present the key via either
+    the ``X-API-Key`` header (preferred — the nginx WS proxy injects it, so the
+    browser never has to carry the key in client-side JS) or the ``token`` query
+    parameter (fallback for direct connections that cannot set headers). When the
+    env var is empty/absent, all connections are allowed (dev mode).
 
     Message format:
         {
@@ -116,9 +119,13 @@ async def websocket_jobs_endpoint(websocket: WebSocket, token: str = Query(defau
         }
     """
     api_key = os.environ.get("CARDIGAN_API_KEY", "")
-    if api_key and token != api_key:
-        await websocket.close(code=1008, reason="Policy Violation")
-        return
+    if api_key:
+        # Header (set by the nginx WS proxy) takes precedence; query token is a
+        # fallback for clients that cannot send headers on the WS handshake.
+        provided = websocket.headers.get("x-api-key") or token
+        if provided != api_key:
+            await websocket.close(code=1008, reason="Policy Violation")
+            return
 
     await manager.connect(websocket)
 
