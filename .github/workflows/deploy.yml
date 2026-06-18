@@ -89,3 +89,45 @@ jobs:
             ${{ env.IMAGE_PREFIX }}-web:${{ github.sha }}
           cache-from: type=gha,scope=deploy-web
           cache-to: type=gha,mode=max,scope=deploy-web
+
+  deploy-homelab:
+    name: Deploy to homelab
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    # Push-based half of the deploy: after the images land on GHCR, tell the
+    # homelab LXC to pull + restart so prod tracks main automatically (the
+    # job Watchtower used to do — it was removed for crash-looping).
+    #
+    # Dormant until configured: set the repo VARIABLE HOMELAB_DEPLOY_ENABLED
+    # to "true" once the secrets/vars/host-key below are in place. Until then
+    # this job is skipped (no red CI). See docs/HOMELAB_DEPLOY.md.
+    #
+    # Requires:
+    #   secrets.TS_OAUTH_CLIENT_ID / TS_OAUTH_SECRET  — Tailscale OAuth (tag:ci)
+    #   secrets.HOMELAB_SSH_KEY                        — CI deploy private key
+    #   vars.HOMELAB_DEPLOY_HOST                       — LXC tailscale IP / MagicDNS name
+    #   vars.HOMELAB_DEPLOY_ENABLED == 'true'          — activation flag
+    if: github.ref == 'refs/heads/main' && vars.HOMELAB_DEPLOY_ENABLED == 'true'
+    steps:
+      - name: Join Tailscale (ephemeral CI node)
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Pull latest images and restart the stack
+        env:
+          SSH_KEY: ${{ secrets.HOMELAB_SSH_KEY }}
+          DEPLOY_HOST: ${{ vars.HOMELAB_DEPLOY_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # authorized_keys on the host pins a forced command, so the literal
+          # remote arg ("deploy") is ignored — the host always runs the
+          # `docker compose pull && up -d` script. The key cannot do anything else.
+          ssh -i ~/.ssh/id_ed25519 \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=30 \
+            "root@${DEPLOY_HOST}" deploy
