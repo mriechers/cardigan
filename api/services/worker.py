@@ -1565,6 +1565,7 @@ Extract any name or spelling corrections that should be added to the glossary. S
                         context=context,
                         project_path=project_path,
                         chunking_config=chunking_config,
+                        model_override=model_override,
                     )
 
         # Load prompts
@@ -1709,6 +1710,7 @@ Extract any name or spelling corrections that should be added to the glossary. S
         context: Dict[str, Any],
         project_path: Path,
         chunking_config: Dict[str, Any],
+        model_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Run formatter phase with chunked parallel processing.
 
@@ -1822,6 +1824,7 @@ Please format this transcript section:
                         backend=backend,
                         job_id=job_id,
                         phase="formatter",
+                        model=model_override,
                     ),
                     timeout=effective_timeout,
                 )
