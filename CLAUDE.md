@@ -28,6 +28,34 @@ Cardigan - A database-backed, API-first system for processing video transcripts 
 - React web dashboard for monitoring
 - Claude Desktop for copy-editor workflow (MCP integration)
 
+## Deployment Environments (READ BEFORE CALLING THE API)
+
+There are two running instances. **For any production/editorial work — reviewing
+real jobs, reading SST metadata, copy-editing live content — agents MUST target
+the homelab-hosted container, not localhost.**
+
+| Environment | Base URL | Use for |
+|-------------|----------|---------|
+| **Production (default)** | `http://cardigan01:8100` | All real editorial/production work. Reach over Tailscale (MagicDNS name `cardigan01`, CTID 103) or LAN. |
+| Local dev | `http://localhost:8100` | Only when actively developing/testing the API locally. Never for production data. |
+
+Rules for agents:
+- **Default to `http://cardigan01:8100`.** Only use `localhost` when the user is
+  explicitly doing local development.
+- **Target the name `cardigan01`, never a hard-coded tailnet IP** — tailnet IPs
+  drift (it has already changed once). LAN fallback if MagicDNS is down:
+  `192.168.1.42:8100`.
+- Honor a caller-supplied `CARDIGAN_API_URL` if set; otherwise the production
+  default applies.
+- **Auth:** when `CARDIGAN_API_KEY` is set on the deployment, send it as an
+  `X-API-Key` header (exempt paths: `/`, `/api/system/health`, `/docs`,
+  `/openapi.json`, `/api/ws/*`). The homelab box is currently unauthenticated +
+  tailnet/LAN-only; read the key from the environment, never hard-code it.
+- The REST API is **read-only for SST** — there is no Airtable-write endpoint.
+  SST writes (`propose → review → commit`) exist only via the MCP server.
+
+See `docs/AGENT_INTERFACE_GUIDE.md` for the endpoint catalog.
+
 ## Key Commands
 
 ### Development

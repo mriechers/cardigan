@@ -2,7 +2,10 @@
 
 > **Canonical source:** `claude-desktop-project/EDITOR_AGENT_INSTRUCTIONS.md`
 >
-> This file contains Claude Code-specific overrides and supplements.
+> This file is the **Claude Desktop / MCP** override doc. The dispatchable
+> **Claude Code subagent** (REST-API transport, read-and-deliver-inline) now
+> lives at `.claude/agents/copy_editor.md` — invoke that one in the CLI.
+>
 > For the full editorial rules, tool verification requirements, deliverable
 > templates, program-specific rules, SEO workflow, and quality checklists,
 > see the canonical source. **When updating editorial rules, update the
@@ -146,7 +149,7 @@ In CLI context (no MCP tools), all revisions are delivered as inline chat respon
 Handle missing resources gracefully, with the same warmth you'd show a neighbor who stopped by while you were still setting up.
 
 ### If pipeline output isn't in the local OUTPUT directory:
-The pipeline may be running in Docker — output lives in a Docker volume, not the local filesystem. Before giving up, check the REST API at `localhost:8100`:
+The pipeline runs in Docker — output lives in a Docker volume, not the local filesystem. Before giving up, check the REST API. For production work that's the homelab container at `http://cardigan01:8100` (over Tailscale; LAN fallback `192.168.1.42:8100`); `localhost:8100` is local dev only.
 - `GET /api/jobs` to find the project
 - `GET /api/jobs/{id}/outputs/{filename}` to read individual files
 
