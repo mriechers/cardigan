@@ -830,9 +830,7 @@ async def _job_row(job_id):
 
 
 async def _make_inprogress_job(name="defer-test"):
-    await create_job(
-        JobCreate(project_name=name, project_path=f"/p/{name}", transcript_file=f"/t/{name}.txt")
-    )
+    await create_job(JobCreate(project_name=name, project_path=f"/p/{name}", transcript_file=f"/t/{name}.txt"))
     job = await claim_next_job()  # pending -> in_progress
     return job
 
@@ -903,9 +901,7 @@ async def test_defer_job_pauses_past_ceiling(test_db):
     seven_h_ago = (datetime.now(timezone.utc) - timedelta(hours=7)).isoformat()
     async with get_session() as session:
         await session.execute(
-            update(jobs_table)
-            .where(jobs_table.c.id == job.id)
-            .values(first_deferred_at=seven_h_ago, defer_count=20)
+            update(jobs_table).where(jobs_table.c.id == job.id).values(first_deferred_at=seven_h_ago, defer_count=20)
         )
         await session.commit()
 

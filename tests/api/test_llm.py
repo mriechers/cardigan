@@ -561,9 +561,7 @@ class TestLocalBackendIntegration:
 
         with patch.object(httpx.AsyncClient, "post", return_value=mock_response):
             with patch("api.services.llm.log_event"):
-                response = await llm_client.chat(
-                    messages=[{"role": "user", "content": "x"}], backend="local-dougie"
-                )
+                response = await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-dougie")
 
         assert response.content == '{"ok": true}'
 
@@ -575,9 +573,7 @@ class TestLocalBackendIntegration:
 
         with patch.object(httpx.AsyncClient, "post", return_value=mock_response):
             with patch("api.services.llm.log_event"):
-                response = await llm_client.chat(
-                    messages=[{"role": "user", "content": "x"}], backend="openai-plain"
-                )
+                response = await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="openai-plain")
 
         # openai-plain has no strip_reasoning flag -> content passes through raw
         assert response.content == dirty
@@ -624,9 +620,7 @@ class TestLocalBackendIntegration:
 
         with patch.object(httpx.AsyncClient, "post", return_value=mock_response):
             with patch("api.services.llm.log_event"):
-                response = await llm_client.chat(
-                    messages=[{"role": "user", "content": "x"}], backend="local-dougie"
-                )
+                response = await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-dougie")
 
         assert response.cost == 0.0
 
@@ -639,9 +633,7 @@ class TestLocalBackendIntegration:
 
         with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
             with patch("api.services.llm.log_event"):
-                await llm_client.chat(
-                    messages=[{"role": "user", "content": "x"}], backend="local-dougie"
-                )
+                await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-dougie")
 
         # call_args_list[0] is the LLM request; a Langfuse trace POST may follow.
         payload = mock_post.call_args_list[0].kwargs["json"]
@@ -654,9 +646,7 @@ class TestLocalBackendIntegration:
 
         with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
             with patch("api.services.llm.log_event"):
-                await llm_client.chat(
-                    messages=[{"role": "user", "content": "x"}], backend="openai-plain"
-                )
+                await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="openai-plain")
 
         payload = mock_post.call_args_list[0].kwargs["json"]
         assert "chat_template_kwargs" not in payload
@@ -668,9 +658,7 @@ class TestLocalBackendIntegration:
 
         with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
             with patch("api.services.llm.log_event"):
-                await llm_client.chat(
-                    messages=[{"role": "user", "content": "x"}], backend="local-dougie"
-                )
+                await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-dougie")
 
         assert mock_post.call_args_list[0].kwargs["timeout"] == 300
 
@@ -684,9 +672,7 @@ class TestLocalBackendIntegration:
 
         with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
             with patch("api.services.llm.log_event"):
-                await llm_client.chat(
-                    messages=[{"role": "user", "content": "x"}], backend="openai-plain"
-                )
+                await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="openai-plain")
 
         payload = mock_post.call_args_list[0].kwargs["json"]
         assert payload["max_tokens"] >= 4096
@@ -698,9 +684,7 @@ class TestLocalBackendIntegration:
 
         with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
             with patch("api.services.llm.log_event"):
-                await llm_client.chat(
-                    messages=[{"role": "user", "content": "x"}], backend="local-dougie"
-                )
+                await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-dougie")
 
         payload = mock_post.call_args_list[0].kwargs["json"]
         assert payload["max_tokens"] == 8192  # local-dougie config value
@@ -729,9 +713,7 @@ class TestLocalBackendIntegration:
 
         with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
             with patch("api.services.llm.log_event"):
-                await llm_client.chat(
-                    messages=[{"role": "user", "content": "x"}], backend="local-dougie"
-                )
+                await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-dougie")
 
         assert mock_post.call_args_list[0].args[0] == "http://studio.lan:27180/v1/chat/completions"
 
@@ -742,9 +724,7 @@ class TestLocalBackendIntegration:
 
         with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
             with patch("api.services.llm.log_event"):
-                await llm_client.chat(
-                    messages=[{"role": "user", "content": "x"}], backend="local-dougie"
-                )
+                await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-dougie")
 
         headers = mock_post.call_args_list[0].kwargs["headers"]
         assert "Authorization" not in headers
@@ -778,9 +758,7 @@ class TestBackendUnavailable:
         with patch.object(httpx.AsyncClient, "post", return_value=resp):
             with patch("api.services.llm.log_event"):
                 with pytest.raises(BackendUnavailableError) as exc:
-                    await llm_client.chat(
-                        messages=[{"role": "user", "content": "x"}], backend="local-dougie"
-                    )
+                    await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-dougie")
 
         assert "memory pressure" in exc.value.detail
         assert exc.value.backend == "local-dougie"
@@ -792,9 +770,7 @@ class TestBackendUnavailable:
         with patch.object(httpx.AsyncClient, "post", side_effect=httpx.ConnectError("refused")):
             with patch("api.services.llm.log_event"):
                 with pytest.raises(BackendUnavailableError):
-                    await llm_client.chat(
-                        messages=[{"role": "user", "content": "x"}], backend="local-dougie"
-                    )
+                    await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-dougie")
 
     @pytest.mark.asyncio
     async def test_raises_on_read_timeout_for_deferrable_backend(self, llm_client):
@@ -803,9 +779,7 @@ class TestBackendUnavailable:
         with patch.object(httpx.AsyncClient, "post", side_effect=httpx.ReadTimeout("slow")):
             with patch("api.services.llm.log_event"):
                 with pytest.raises(BackendUnavailableError):
-                    await llm_client.chat(
-                        messages=[{"role": "user", "content": "x"}], backend="local-dougie"
-                    )
+                    await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-dougie")
 
     @pytest.mark.asyncio
     async def test_503_not_converted_for_non_deferrable_backend(self, llm_client):
@@ -816,37 +790,27 @@ class TestBackendUnavailable:
         with patch.object(httpx.AsyncClient, "post", return_value=resp):
             with patch("api.services.llm.log_event"):
                 with pytest.raises(httpx.HTTPStatusError):
-                    await llm_client.chat(
-                        messages=[{"role": "user", "content": "x"}], backend="openai-plain"
-                    )
+                    await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="openai-plain")
 
     @pytest.mark.asyncio
     async def test_503_with_retryable_false_is_not_deferred(self, llm_client):
         # A future dougie envelope marking the error non-retryable must NOT defer.
         start_run_tracking(job_id=924)
-        resp = self._mock_response(
-            503, {"error": {"retryable": False, "message": "model not found"}}
-        )
+        resp = self._mock_response(503, {"error": {"retryable": False, "message": "model not found"}})
 
         with patch.object(httpx.AsyncClient, "post", return_value=resp):
             with patch("api.services.llm.log_event"):
                 with pytest.raises(httpx.HTTPStatusError):
-                    await llm_client.chat(
-                        messages=[{"role": "user", "content": "x"}], backend="local-dougie"
-                    )
+                    await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-dougie")
 
     @pytest.mark.asyncio
     async def test_reads_retry_after_header(self, llm_client):
         start_run_tracking(job_id=925)
-        resp = self._mock_response(
-            503, {"detail": "busy"}, headers={"retry-after": "300"}
-        )
+        resp = self._mock_response(503, {"detail": "busy"}, headers={"retry-after": "300"})
 
         with patch.object(httpx.AsyncClient, "post", return_value=resp):
             with patch("api.services.llm.log_event"):
                 with pytest.raises(BackendUnavailableError) as exc:
-                    await llm_client.chat(
-                        messages=[{"role": "user", "content": "x"}], backend="local-dougie"
-                    )
+                    await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-dougie")
 
         assert exc.value.retry_after_s == 300

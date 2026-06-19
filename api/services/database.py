@@ -933,9 +933,7 @@ async def defer_job(
     now = datetime.now(timezone.utc)
 
     async with get_session() as session:
-        row = (
-            await session.execute(select(jobs_table).where(jobs_table.c.id == job_id))
-        ).fetchone()
+        row = (await session.execute(select(jobs_table).where(jobs_table.c.id == job_id))).fetchone()
         if row is None:
             return None
 

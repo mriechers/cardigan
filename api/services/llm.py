@@ -308,9 +308,7 @@ def _resolve_endpoint(config: Dict[str, Any]) -> str:
     return config["endpoint"]
 
 
-def _backend_cost(
-    config: Dict[str, Any], model: str, input_tokens: int, output_tokens: int
-) -> float:
+def _backend_cost(config: Dict[str, Any], model: str, input_tokens: int, output_tokens: int) -> float:
     """Cost for a call, honoring a backend's declared flat cost.
 
     A backend may declare ``cost_per_project`` (e.g. self-hosted local inference
@@ -806,9 +804,7 @@ class LLMClient:
             # Unreachable or too slow. For a deferrable backend this is "busy /
             # not up right now" — let the worker requeue rather than fail.
             if defer:
-                raise BackendUnavailableError(
-                    f"{type(e).__name__}: {e}", backend=self.active_backend
-                ) from e
+                raise BackendUnavailableError(f"{type(e).__name__}: {e}", backend=self.active_backend) from e
             raise
 
         # A deferrable backend's 503 means "try later" (memory pressure / loading /
@@ -816,9 +812,7 @@ class LLMClient:
         if defer and response.status_code == 503:
             detail, retry_after_s, retryable = _parse_unavailable_503(response)
             if retryable:
-                raise BackendUnavailableError(
-                    detail, backend=self.active_backend, retry_after_s=retry_after_s
-                )
+                raise BackendUnavailableError(detail, backend=self.active_backend, retry_after_s=retry_after_s)
 
         response.raise_for_status()
 
