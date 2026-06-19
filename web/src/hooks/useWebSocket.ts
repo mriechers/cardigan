@@ -79,6 +79,14 @@ export function useJobsWebSocket(options: UseJobsWebSocketOptions = {}): UseJobs
   const heartbeatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const isIntentionallyClosed = useRef(false)
 
+  // Keep the latest options in a ref so `connect` stays referentially
+  // stable across renders. Callers (e.g. Queue.tsx) pass inline callbacks
+  // whose identity changes every render — if `connect` depended on them
+  // directly, the mount effect below would tear down and reopen the
+  // WebSocket on every render, churning connections endlessly.
+  const optionsRef = useRef({ onJobUpdate, onStatsUpdate, autoReconnect, reconnectInterval })
+  optionsRef.current = { onJobUpdate, onStatsUpdate, autoReconnect, reconnectInterval }
+
   const connect = useCallback(() => {
     // Don't connect if already connected or intentionally closed
     if (wsRef.current?.readyState === WebSocket.OPEN || isIntentionallyClosed.current) {
@@ -115,11 +123,12 @@ export function useJobsWebSocket(options: UseJobsWebSocketOptions = {}): UseJobs
           const message: WebSocketMessage = JSON.parse(event.data)
           setLastMessage(message)
 
-          // Handle different message types
-          if (message.type === 'stats_updated' && message.stats && onStatsUpdate) {
-            onStatsUpdate(message.stats)
-          } else if (message.job && onJobUpdate) {
-            onJobUpdate(message.job, message.type)
+          // Handle different message types (read from ref for latest callbacks)
+          const { onJobUpdate: handleJob, onStatsUpdate: handleStats } = optionsRef.current
+          if (message.type === 'stats_updated' && message.stats && handleStats) {
+            handleStats(message.stats)
+          } else if (message.job && handleJob) {
+            handleJob(message.job, message.type)
           }
         } catch (err) {
           console.error('[WebSocket] Failed to parse message:', err)
@@ -142,11 +151,12 @@ export function useJobsWebSocket(options: UseJobsWebSocketOptions = {}): UseJobs
         }
 
         // Attempt reconnection if not intentionally closed
-        if (autoReconnect && !isIntentionallyClosed.current) {
-          console.log(`[WebSocket] Reconnecting in ${reconnectInterval}ms...`)
+        const { autoReconnect: shouldReconnect, reconnectInterval: interval } = optionsRef.current
+        if (shouldReconnect && !isIntentionallyClosed.current) {
+          console.log(`[WebSocket] Reconnecting in ${interval}ms...`)
           reconnectTimeoutRef.current = setTimeout(() => {
             connect()
-          }, reconnectInterval)
+          }, interval)
         }
       }
 
@@ -156,13 +166,14 @@ export function useJobsWebSocket(options: UseJobsWebSocketOptions = {}): UseJobs
       setConnectionError(err as Error)
 
       // Retry connection
-      if (autoReconnect && !isIntentionallyClosed.current) {
+      const { autoReconnect: shouldReconnect, reconnectInterval: interval } = optionsRef.current
+      if (shouldReconnect && !isIntentionallyClosed.current) {
         reconnectTimeoutRef.current = setTimeout(() => {
           connect()
-        }, reconnectInterval)
+        }, interval)
       }
     }
-  }, [autoReconnect, reconnectInterval, onJobUpdate, onStatsUpdate])
+  }, [])
 
   const disconnect = useCallback(() => {
     isIntentionallyClosed.current = true

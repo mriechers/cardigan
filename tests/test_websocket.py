@@ -1,6 +1,8 @@
 """Tests for WebSocket endpoint."""
 
+import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from api.main import app
 from api.models.job import Job, JobStatus
@@ -19,6 +21,43 @@ def test_websocket_connection():
         # Receive pong
         data = websocket.receive_text()
         assert data == "pong"
+
+
+def test_websocket_auth_accepts_x_api_key_header(monkeypatch):
+    """When CARDIGAN_API_KEY is set, the X-API-Key header (injected by the nginx
+    WS proxy) authenticates the connection."""
+    monkeypatch.setenv("CARDIGAN_API_KEY", "secret-key")
+    client = TestClient(app)
+
+    with client.websocket_connect(
+        "/api/ws/jobs", headers={"X-API-Key": "secret-key"}
+    ) as websocket:
+        websocket.send_text("ping")
+        assert websocket.receive_text() == "pong"
+
+
+def test_websocket_auth_accepts_query_token_fallback(monkeypatch):
+    """The ?token= query param still authenticates (fallback for clients that
+    cannot set headers on the WS handshake)."""
+    monkeypatch.setenv("CARDIGAN_API_KEY", "secret-key")
+    client = TestClient(app)
+
+    with client.websocket_connect("/api/ws/jobs?token=secret-key") as websocket:
+        websocket.send_text("ping")
+        assert websocket.receive_text() == "pong"
+
+
+def test_websocket_auth_rejects_missing_or_wrong_key(monkeypatch):
+    """When CARDIGAN_API_KEY is set, a connection with no/incorrect credential
+    is closed with a policy-violation (1008)."""
+    monkeypatch.setenv("CARDIGAN_API_KEY", "secret-key")
+    client = TestClient(app)
+
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(
+            "/api/ws/jobs", headers={"X-API-Key": "wrong"}
+        ) as websocket:
+            websocket.receive_text()
 
 
 def test_websocket_broadcast_job_update():
