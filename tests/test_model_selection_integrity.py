@@ -96,3 +96,51 @@ async def test_chunked_formatter_passes_model_override(monkeypatch, tmp_path):
     )
 
     assert seen_models == ["anthropic/claude-sonnet-4.6", "anthropic/claude-sonnet-4.6"], seen_models
+
+
+@pytest.mark.asyncio
+async def test_chunked_formatter_records_real_model(monkeypatch, tmp_path):
+    """The chunked formatter result must report the model that ran, not 'chunked (...)'."""
+    from types import SimpleNamespace
+
+    from api.services import worker as worker_mod
+    from api.services.chunking import TranscriptChunk
+    from api.services.worker import JobWorker
+
+    w = JobWorker.__new__(JobWorker)
+    w.llm = MagicMock()
+    w.llm.get_backend_for_phase = MagicMock(return_value="openrouter")
+    w.llm.get_backend_config = MagicMock(return_value={"timeout": 120})
+
+    async def fake_chat(**kwargs):
+        return SimpleNamespace(content="formatted", cost=0.01, total_tokens=10,
+                               input_tokens=6, output_tokens=4,
+                               model="anthropic/claude-sonnet-4.6")
+
+    w.llm.chat = fake_chat
+    monkeypatch.setattr(worker_mod, "log_event", AsyncMock())
+    monkeypatch.setattr(w, "_load_agent_prompt", lambda phase: "system")
+
+    chunks = [TranscriptChunk(index=0, content="a", start_timecode="00:00:00",
+                              end_timecode="00:00:05", word_count=1, overlap_prefix="")]
+    result = await w._run_formatter_chunked(
+        job_id=1, chunks=chunks, context={"analyst_output": ""},
+        project_path=tmp_path, chunking_config={"max_parallel": 1},
+        model_override="anthropic/claude-sonnet-4.6",
+    )
+    assert "claude-sonnet-4.6" in result["model"]
+    assert "chunked" not in result["model"].split()[0]  # real id, not the opaque string
+
+
+def test_revalidation_updates_validator_model():
+    """After re-validation, the validator entry in phases[] must reflect the model that judged."""
+    # Pure helper test: the update logic lives in a small helper we add.
+    from api.services.worker import apply_validator_model
+
+    phases = [
+        {"name": "formatter", "model": "anthropic/claude-sonnet-4.6"},
+        {"name": "validator", "model": "anthropic/claude-4.5-haiku-20251001"},
+    ]
+    updated = apply_validator_model(phases, "anthropic/claude-sonnet-4.6")
+    val = next(p for p in updated if p["name"] == "validator")
+    assert val["model"] == "anthropic/claude-sonnet-4.6"

@@ -123,6 +123,14 @@ class WorkerConfig:
         self.worker_id = worker_id or f"worker-{os.getpid()}"
 
 
+def apply_validator_model(phases: list, model: Optional[str]) -> list:
+    """Set the validator phase's recorded model to the model that just re-judged."""
+    for p in phases:
+        if p.get("name") == "validator" and model:
+            p["model"] = model
+    return phases
+
+
 class JobWorker:
     """Processes jobs from the queue through agent phases.
 
@@ -491,7 +499,13 @@ class JobWorker:
                     if validator_result.get("output"):
                         try:
                             validation_data = self._parse_validation_result(validator_result["output"])
-                            await update_job(job_id, JobUpdate(validation_result=validation_data))
+                            refreshed = await get_job(job_id)
+                            phases = refreshed.phases or [] if refreshed else []
+                            phases = apply_validator_model(phases, validator_result.get("model"))
+                            await update_job(
+                                job_id,
+                                JobUpdate(validation_result=validation_data, phases=phases),
+                            )
                             logger.info(
                                 "Post-retry validation complete",
                                 extra={
@@ -1846,6 +1860,7 @@ Please format this transcript section:
                     "tokens": response.total_tokens,
                     "input_tokens": response.input_tokens,
                     "output_tokens": response.output_tokens,
+                    "model": response.model,
                 }
 
         # Log phase start
@@ -1898,6 +1913,7 @@ Please format this transcript section:
             total_tokens = sum(r["tokens"] for r in chunk_results)
             total_input_tokens = sum(r.get("input_tokens", 0) for r in chunk_results)
             total_output_tokens = sum(r.get("output_tokens", 0) for r in chunk_results)
+            actual_model = next((r.get("model") for r in chunk_results if r.get("model")), None)
 
             # Merge text outputs
             merged = merge_formatter_chunks([r["content"] for r in chunk_results])
@@ -1911,7 +1927,7 @@ Please format this transcript section:
                 prev_file.write_text(prev_content)
 
             provenance_header = (
-                f"<!-- model: chunked ({total_chunks} chunks) | "
+                f"<!-- model: {actual_model} (chunked, {total_chunks} chunks) | "
                 f"backend: {backend} | "
                 f"cost: ${total_cost:.4f} | tokens: {total_tokens} -->\n"
             )
@@ -1940,7 +1956,7 @@ Please format this transcript section:
                 "tokens": total_tokens,
                 "input_tokens": total_input_tokens,
                 "output_tokens": total_output_tokens,
-                "model": f"chunked ({total_chunks} chunks via {backend})",
+                "model": actual_model or f"chunked ({total_chunks} chunks via {backend})",
             }
 
         except Exception as e:
