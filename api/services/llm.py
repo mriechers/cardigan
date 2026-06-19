@@ -6,6 +6,7 @@ model selection, and event logging.
 
 import json
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -43,6 +44,63 @@ class TokenCostTooHighError(Exception):
     """Raised when a model's per-token cost exceeds the safety limit."""
 
     pass
+
+
+class BackendUnavailableError(Exception):
+    """A backend that opted into deferral (``defer_when_unavailable``) is
+    temporarily unavailable — busy, loading, or refusing to load under memory
+    pressure (a 503), or unreachable / too slow (connection / read timeout).
+
+    The worker catches this to requeue the job instead of failing it. Carries
+    the upstream ``detail`` (for the dashboard) and an optional ``retry_after_s``
+    hint from the backend.
+    """
+
+    def __init__(self, detail: str, *, backend: Optional[str] = None, retry_after_s: Optional[int] = None):
+        super().__init__(detail)
+        self.detail = detail
+        self.backend = backend
+        self.retry_after_s = retry_after_s
+
+
+def _parse_unavailable_503(response: "httpx.Response") -> tuple[str, Optional[int], bool]:
+    """Extract (detail, retry_after_s, retryable) from a 503 response.
+
+    Tolerates today's flat ``{"detail": "..."}`` body and a future richer
+    envelope ``{"error": {"retryable": bool, "retry_after_s": int, "message": ...}}``
+    (see the dougie busy-signal handoff). Defaults to retryable=True so a bare
+    503 from a deferrable backend is treated as "try later".
+    """
+    retryable = True
+    retry_after_s: Optional[int] = None
+    detail: Optional[str] = None
+
+    ra = response.headers.get("retry-after")
+    if ra and str(ra).isdigit():
+        retry_after_s = int(ra)
+
+    try:
+        body = response.json()
+    except Exception:
+        body = {}
+
+    if isinstance(body, dict):
+        err = body.get("error")
+        if isinstance(err, dict):
+            if err.get("retryable") is False:
+                retryable = False
+            detail = err.get("message") or detail
+            if err.get("retry_after_s") is not None:
+                retry_after_s = err["retry_after_s"]
+        if detail is None:
+            detail = body.get("detail")
+        if retry_after_s is None and body.get("retry_after_s") is not None:
+            retry_after_s = body["retry_after_s"]
+
+    if detail is None:
+        detail = (response.text or "")[:200] or "backend returned 503"
+
+    return detail, retry_after_s, retryable
 
 
 # Pricing per 1M tokens (input/output) - updated Dec 2024
@@ -207,6 +265,61 @@ async def end_run_tracking(job_id: Optional[int] = None) -> Optional[Dict[str, A
         _current_run_tracker = None
 
     return summary
+
+
+# Qwen3-family chain-of-thought blocks, emitted by the local MLX backend by
+# default; stripped so downstream phases get clean answers.
+_THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+# Qwen3 chat templates often inject the opening <think> into the prompt, so the
+# server streams back only the reasoning and a dangling </think> — strip that
+# leading prefix too (no-op once the well-formed block above has been removed).
+_DANGLING_THINK_RE = re.compile(r"\A.*?</think>\s*", re.DOTALL)
+# A markdown code fence wrapping the entire response (```json ... ```), common
+# when asking for structured output; stripped so results parse directly.
+_FENCE_RE = re.compile(r"\A```[a-zA-Z]*\n(.*?)\n?```\s*\Z", re.DOTALL)
+
+
+def strip_reasoning(text: str) -> str:
+    """Remove Qwen <think> blocks and a whole-response markdown fence.
+
+    Mirrors the-lodge `outsource.py` so the local MLX backend's output matches
+    what cloud backends return. Handles both well-formed ``<think>…</think>``
+    blocks and a dangling ``</think>`` with no opener (the common Qwen3 case).
+    Safe on already-clean text (no-op).
+    """
+    text = _THINK_RE.sub("", text)
+    text = _DANGLING_THINK_RE.sub("", text, count=1)
+    text = text.strip()
+    fence = _FENCE_RE.match(text)
+    if fence:
+        text = fence.group(1).strip()
+    return text
+
+
+def _resolve_endpoint(config: Dict[str, Any]) -> str:
+    """Resolve a backend's endpoint, honoring an optional ``endpoint_env`` override.
+
+    Lets the deploy environment supply the URL (e.g. the LXC→Mac Studio address
+    for local-dougie) without baking a homelab address into committed config.
+    """
+    env_var = config.get("endpoint_env")
+    if env_var:
+        return os.getenv(env_var, config["endpoint"])
+    return config["endpoint"]
+
+
+def _backend_cost(config: Dict[str, Any], model: str, input_tokens: int, output_tokens: int) -> float:
+    """Cost for a call, honoring a backend's declared flat cost.
+
+    A backend may declare ``cost_per_project`` (e.g. self-hosted local inference
+    is free at 0.0); that wins over the per-token estimate, which would otherwise
+    bill an unknown local model id at ``calculate_cost``'s conservative cloud rate
+    and could trip the run cost cap on a genuinely free run.
+    """
+    flat = config.get("cost_per_project")
+    if flat is not None:
+        return float(flat)
+    return calculate_cost(model, input_tokens, output_tokens)
 
 
 def calculate_cost(
@@ -479,10 +592,14 @@ class LLMClient:
         backend_config = self.get_backend_config(backend_name)
 
         # Determine model — priority order:
+        # 0. Backend with force_model (e.g. local-dougie serves one model only —
+        #    its own id must win over a phase_models cloud id the server can't serve)
         # 1. Explicit model param
         # 2. phase_models config (per-phase model assignment from Settings UI)
         # 3. Backend's configured model / fallback_model
-        if model:
+        if backend_config.get("force_model"):
+            model_id = backend_config.get("model")
+        elif model:
             model_id = model
         elif phase:
             phase_models = self.config.get("phase_models", {})
@@ -654,22 +771,49 @@ class LLMClient:
         """Make OpenAI API call."""
         client = await self.get_client()
 
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
+        headers = {"Content-Type": "application/json"}
+        # Keyless backends (e.g. a local MLX server) skip auth — sending
+        # "Bearer None" can trip servers/proxies that validate the header.
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
 
         payload = {
             "model": model,
             "messages": messages,
             **kwargs,
         }
+        # Cap output explicitly. OpenAI-compatible servers (e.g. MLX) default to a
+        # tiny max_tokens (~512) that truncates analyst/formatter output; cloud
+        # backends don't. Precedence: explicit kwarg > backend config > 4096.
+        payload["max_tokens"] = payload.get("max_tokens") or config.get("max_tokens", 4096)
+        # Local MLX (Qwen) backends: tell the server not to emit chain-of-thought
+        # at all (primary control, mirroring outsource.py); strip_reasoning on the
+        # response below is the belt-and-suspenders backup.
+        if config.get("strip_reasoning"):
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
 
-        response = await client.post(
-            config["endpoint"],
-            headers=headers,
-            json=payload,
-        )
+        defer = bool(config.get("defer_when_unavailable"))
+        try:
+            response = await client.post(
+                _resolve_endpoint(config),
+                headers=headers,
+                json=payload,
+                timeout=config.get("timeout", httpx.USE_CLIENT_DEFAULT),
+            )
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.PoolTimeout) as e:
+            # Unreachable or too slow. For a deferrable backend this is "busy /
+            # not up right now" — let the worker requeue rather than fail.
+            if defer:
+                raise BackendUnavailableError(f"{type(e).__name__}: {e}", backend=self.active_backend) from e
+            raise
+
+        # A deferrable backend's 503 means "try later" (memory pressure / loading /
+        # contention) unless it explicitly marks the error non-retryable.
+        if defer and response.status_code == 503:
+            detail, retry_after_s, retryable = _parse_unavailable_503(response)
+            if retryable:
+                raise BackendUnavailableError(detail, backend=self.active_backend, retry_after_s=retry_after_s)
+
         response.raise_for_status()
 
         data = response.json()
@@ -679,8 +823,13 @@ class LLMClient:
         output_tokens = usage.get("completion_tokens", 0)
         total_tokens = usage.get("total_tokens", input_tokens + output_tokens)
 
-        cost = calculate_cost(model, input_tokens, output_tokens)
+        cost = _backend_cost(config, model, input_tokens, output_tokens)
         content = data["choices"][0]["message"]["content"]
+
+        # Local MLX (Qwen) backends opt into reasoning/fence stripping so their
+        # output matches what cloud backends return.
+        if config.get("strip_reasoning"):
+            content = strip_reasoning(content)
 
         return LLMResponse(
             content=content,

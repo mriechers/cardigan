@@ -544,3 +544,98 @@ class TestWorkerStart:
             task.cancel()
 
         assert mock_claim_job.call_count >= 1
+
+
+class TestRunPhaseDeferral:
+    """_run_phase converts a BackendUnavailableError into a deferred result
+    instead of a failed one, so the pipeline can requeue the job."""
+
+    @pytest.mark.asyncio
+    @patch("api.services.worker.get_llm_client")
+    @patch("api.services.worker.log_event")
+    @patch("api.services.worker.AGENTS_DIR")
+    async def test_backend_unavailable_returns_deferred(
+        self, mock_agents_dir, mock_log_event, mock_get_llm, mock_llm_client, tmp_path
+    ):
+        from api.services.llm import BackendUnavailableError
+
+        mock_get_llm.return_value = mock_llm_client
+        mock_llm_client.chat = AsyncMock(
+            side_effect=BackendUnavailableError("memory pressure 69%", backend="local-dougie", retry_after_s=30)
+        )
+        mock_log_event.return_value = None
+        mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
+
+        worker = JobWorker()
+        result = await worker._run_phase(
+            job_id=1, phase_name="analyst", context={"transcript": "x"}, project_path=tmp_path
+        )
+
+        assert result["success"] is False
+        assert result["deferred"] is True
+        assert "memory pressure" in result["detail"]
+        assert result["retry_after_s"] == 30
+
+
+class TestProcessJobDeferral:
+    """A phase that defers (busy local backend) requeues the job via defer_job
+    instead of failing it."""
+
+    @pytest.mark.asyncio
+    @patch("api.services.worker.get_llm_client")
+    @patch("api.services.worker.defer_job", new_callable=AsyncMock)
+    @patch("api.services.worker.update_job_status")
+    @patch("api.services.worker.update_job_phase")
+    @patch("api.services.worker.update_job_heartbeat")
+    @patch("api.services.worker.log_event")
+    @patch("api.services.worker.start_run_tracking")
+    @patch("api.services.worker.end_run_tracking")
+    @patch("api.services.worker.TRANSCRIPTS_DIR")
+    @patch("api.services.worker.OUTPUT_DIR")
+    @patch("api.services.worker.AGENTS_DIR")
+    async def test_deferred_phase_requeues_not_fails(
+        self,
+        mock_agents_dir,
+        mock_output_dir,
+        mock_transcripts_dir,
+        mock_end_tracking,
+        mock_start_tracking,
+        mock_log_event,
+        mock_update_heartbeat,
+        mock_update_phase,
+        mock_update_status,
+        mock_defer_job,
+        mock_get_llm,
+        mock_llm_client,
+        tmp_path,
+        sample_job,
+    ):
+        from api.services.llm import BackendUnavailableError
+
+        mock_get_llm.return_value = mock_llm_client
+        mock_llm_client.chat = AsyncMock(
+            side_effect=BackendUnavailableError("memory pressure 69%", backend="local-dougie", retry_after_s=30)
+        )
+        mock_update_status.return_value = None
+        mock_update_phase.return_value = None
+        mock_update_heartbeat.return_value = None
+        mock_log_event.return_value = None
+        mock_start_tracking.return_value = MagicMock(total_cost=0, total_tokens=0)
+        mock_end_tracking.return_value = {"total_cost": 0.0, "total_tokens": 0}
+        mock_transcripts_dir.__truediv__ = lambda self, name: tmp_path / name
+        mock_output_dir.__truediv__ = lambda self, name: tmp_path / name
+        mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
+        (tmp_path / sample_job["transcript_file"]).write_text("Test transcript content")
+
+        worker = JobWorker()
+        await worker.process_job(sample_job)
+
+        # The job was requeued, not failed.
+        assert mock_defer_job.called
+        statuses = [
+            (c.args[1].value if hasattr(c.args[1], "value") else c.args[1])
+            for c in mock_update_status.call_args_list
+            if len(c.args) > 1
+        ]
+        assert "failed" not in statuses
+        assert "completed" not in statuses

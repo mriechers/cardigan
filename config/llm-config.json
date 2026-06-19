@@ -98,6 +98,19 @@
       "endpoint": "https://openrouter.ai/api/v1/chat/completions",
       "api_key_env": "OPENROUTER_API_KEY",
       "timeout": 300
+    },
+    "local-dougie": {
+      "type": "openai",
+      "endpoint": "http://localhost:27180/v1/chat/completions",
+      "endpoint_env": "DOUGIE_ENDPOINT",
+      "model": "mlx-community/Qwen3.6-35B-A3B-4bit",
+      "strip_reasoning": true,
+      "force_model": true,
+      "defer_when_unavailable": true,
+      "max_tokens": 8192,
+      "timeout": 300,
+      "cost_per_project": 0.0,
+      "enabled": false
     }
   },
   "auto_select": {
@@ -139,6 +152,10 @@
       "overlap_captions": 8,
       "max_parallel": 3,
       "min_tier": 1
+    },
+    "deferral": {
+      "backoff_minutes": [2, 5, 10, 15],
+      "ceiling_hours": 6
     }
   },
   "model_families": [
