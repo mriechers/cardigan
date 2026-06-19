@@ -103,7 +103,7 @@ class MmingestIndexer:
         base_url: str = "https://mmingest.pbswi.wisc.edu/",
         directories: Optional[list[str]] = None,
         max_concurrent: int = 4,
-        rate_per_second: float = 2.0,
+        rate_per_second: float = 1.0,
         crawler_auth: Optional[tuple[str, str]] = None,
     ) -> None:
         self._engine = engine
