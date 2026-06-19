@@ -1,8 +1,11 @@
-# QA-Failure Auto-Escalation — Design
+# QA-Failure Auto-Escalation + Pause-and-Suggest Failure Handling — Design
 
-**Date:** 2026-06-18
+**Date:** 2026-06-18 (updated 2026-06-19)
 **Status:** Approved (design); pending implementation plan
 **Author:** Claude Code (brainstormed with Mark)
+**Depends on:** `2026-06-19-model-selection-integrity-design.md` (Spec A) —
+**hard prerequisite.** Escalation is meaningless until a selected/escalated
+model actually runs and is recorded honestly.
 
 ## Problem
 
@@ -14,31 +17,57 @@ In `api/services/worker.py` (around line 1037) the worker calls
 `update_job_status(job_id, JobStatus.completed)` unconditionally once all
 phases have executed without throwing. Execution success ("no phase raised
 an exception") is conflated with content success ("the validator approved
-the output"). As a result a job whose validator returned
-`overall: "fail"` still lands as a green **completed** job, with
-`error_message: null`, indistinguishable in the queue from a clean run.
+the output"). A job whose validator returned `overall: "fail"` still lands
+as a green **completed** job, with `error_message: null`, indistinguishable
+in the queue from a clean run.
 
-This was caught on the live system (cardigan01:8100): the two most recent
-jobs both had `validation_result.overall == "fail"` yet `status ==
-"completed"`:
+Caught live (cardigan01:8100): the two most recent finished jobs both had
+`validation_result.overall == "fail"` yet `status == "completed"`:
 
 | Job | Transcript | Status | Validator verdict | Flagged phases |
 |-----|-----------|--------|-------------------|----------------|
 | 10 | `6POL0114.srt` | completed | **fail** | formatter, seo |
 | 9 | `6POL0114CLEAN.srt` | completed | **fail** | formatter |
 
-Job 9 is set aside (raw transcript with stray audio — a data problem, not a
-pipeline problem). Job 10 is the motivating case: a clean transcript that
-should not have flagged so heavily. Investigation showed the failures are
-**tier-correlated** — the flagged phases were the cheapest/most-fragmented
-passes (SEO on Haiku; formatter run chunked across 2 chunks, which breaks
-speaker attribution at chunk seams). The defects are the kind a stronger
-model resolves.
+Job 9 is set aside (raw transcript with stray audio — a data problem). Job
+10 is the motivating case: a clean transcript that flagged heavily. The
+failures were **tier-correlated** — the flagged phases were the cheapest /
+most-fragmented passes (SEO on Haiku; formatter chunked across 2 chunks).
 
-The validator that produced the harsh verdict was *itself* on the cheapest
-tier (Haiku) and was visibly unreliable — it flagged the SEO phase for
-presenting a draft *and* a corrected version, and admitted uncertainty about
-whether its own 300-character limit applied.
+A second failure mode surfaced in flight (job 11): **OpenRouter credit
+exhaustion fails silently.** `_call_openrouter` (`llm.py:567`) has no branch
+that recognizes a 402; it `print()`s the body and `raise_for_status()`es a
+raw `httpx.HTTPStatusError`, which the optional-phase non-fatal handler then
+swallows — leaving the job wedged `in_progress` with an empty
+`error_message`.
+
+QA-fail, credit-exhaustion, and the already-handled truncation case all want
+the **same** outcome: stop, set a visible non-`completed` state, show the
+editor a clear next step. This spec builds that shared machinery and wires
+all three triggers into it.
+
+### Live evidence from a controlled re-run (job 11, 2026-06-19)
+
+To validate the design we re-ran the pipeline with `analyst→Opus-4.8` and
+`seo/validator→Sonnet-4.6` (via per-phase `model_override`, the only channel
+that works pre-Spec-A). Findings that shaped this spec:
+
+- **Validator→Sonnet is the biggest lever.** On comparable content, the
+  flag count dropped from **8 (Haiku judge) to 1 (Sonnet judge)**: SEO went
+  `fail` (4 flags) → `pass`, and formatter went 4 flags → 1. The dropped
+  items were exactly the noise (Sara/Sarah, "attribution uncertainty,"
+  speculative truncation-risk, SEO draft/limit confusion). Hard evidence for
+  the validator-default change below.
+- **Escalation is not a cure-all.** The single flag that survived a Sonnet
+  judge was the formatter's *intentional* `<!-- REVIEW NOTES -->` HTML
+  comment block (invisible in rendered markdown; carries real editorial
+  intel). No model bump clears it — it is a formatter↔validator contract
+  question, not a quality problem. So the auto-escalate loop will still
+  terminate at pause-and-suggest for structural flags.
+- **Confound noted:** job 11's transcript (`6POL0114_retry.srt`) is a
+  shorter cut (~11 min) than job 10's full 32 min, so content-specific
+  comparisons (e.g. speaker attribution in the later word-frequency segment)
+  are inconclusive — that segment isn't in job 11's transcript.
 
 ## Goals
 
@@ -47,159 +76,156 @@ whether its own 300-character limit applied.
 2. When QA fails, the system **automatically re-runs the weak work once on a
    stronger model**, and only escalates to the editor if it still fails.
 3. "Stronger model" is decided by **model family** (`haiku → sonnet → opus`),
-   parsed from the model the phase actually ran on — **not** by the
-   `cheapskate / default / big-brain` tier labels, which we want to stop
-   leaning on.
+   parsed from the model the phase actually ran on — not the
+   `cheapskate / default / big-brain` tier labels.
+4. **OpenRouter credit exhaustion surfaces a clear, actionable message**
+   ("add credit, then retry") instead of failing silently, and does not
+   consume a retry.
 
 ## Non-Goals
 
-- Ripping the `cheapskate / default / big-brain` labels out of
-  `phase_backends` system-wide. That is a separate, larger refactor. This
-  feature is built family-first and adds **no new** dependence on those
-  labels; it is the first brick toward removing them, not the teardown.
-- Re-tuning the validator's editorial criteria (e.g. so it stops counting
-  missing optional inputs like Media ID or air date as failures). Worth
-  doing later; out of scope here. Moving the validator off Haiku is expected
-  to reduce the worst of the noise on its own.
+- Removing the tier labels from `phase_backends` system-wide (separate
+  refactor).
+- **Model-selection integrity** (config propagation, chunked-formatter
+  override, model recording) — moved to **Spec A**, which this depends on.
+- Re-tuning the validator's editorial criteria so it stops counting missing
+  optional inputs (Media ID, air date) or the REVIEW-NOTES block as
+  failures. Deferred, but now with a concrete first case (see below).
 
-## Existing machinery this reuses
+## Prerequisite (Spec A)
 
-- **Truncation pause/suggest pattern** (`worker.py` ~900–960): when the
-  formatter truncates a transcript, the job is set to `JobStatus.paused`
-  with an actionable message ("Retry to escalate to a more capable model"),
-  and the retry endpoint resets formatter + downstream phases. This is the
-  proven template for "detect a problem → pause → suggest retry → reset the
-  right phases." QA-failure escalation generalizes it to a new trigger.
-- **Retry phase-reset logic** in `api/routers/jobs.py` `retry_job` — already
-  computes "reset this phase and everything downstream."
-- **Provenance headers** — each `<phase>_output.md` already carries a
-  `<!-- model: ... -->` header recording the model that produced it.
+This feature assumes the model an escalation picks **actually runs and is
+recorded**. Two Spec A fixes are load-bearing here:
+
+- **Config/model selection takes effect on the worker** — otherwise the
+  baseline being judged didn't run on the configured models.
+- **The chunked formatter honors a model override** — otherwise escalating
+  the formatter (the most-flagged phase) is a silent no-op. Spec B's
+  formatter escalation cannot work without Spec A Fix 2.
+- **`phases[].model` is accurate** — family parsing for escalation reads it.
 
 ## Design
 
-### Trigger
+### Shared pause-and-suggest terminal helper
+
+One helper all triggers call: set `JobStatus.paused`, write a structured,
+actionable `error_message` (trigger + what to do), preserve per-phase flags
+where relevant, ensure the job is visibly **not** `completed`. Truncation is
+migrated onto this helper; QA-fail and credit-exhaustion are new callers.
+
+### Trigger A — QA failure (validator `overall: "fail"`)
 
 After all phases run, **before** the unconditional `completed` transition,
-inspect `validation_result.overall`:
+inspect `validation_result.overall`: `"pass"` → `completed`; `"fail"` →
+escalate.
 
-- `"pass"` → `completed` (unchanged behavior).
-- `"fail"` → enter escalation.
+**Escalation (automatic, once):**
+1. **Select phases:** earliest validator-flagged phase plus every downstream
+   phase (reuse the existing reset-downstream logic).
+2. **Determine each phase's family** from its actual running model's slug
+   (`haiku | sonnet | opus`), robust to OpenRouter's mixed word order.
+3. **Bump one family up** (`haiku → sonnet → opus`); `opus` is terminal.
+4. **Resolve the target model from the live OpenRouter catalog:** newest
+   `anthropic/*` in the target family by `created`, **excluding `-fast` and
+   `fable`**. Cached (~1h TTL); on fetch failure, log and fall through to
+   pause-and-suggest.
+5. **Re-run** the selected phases on their escalated models (passed as
+   `model_override` — works for the formatter only once Spec A Fix 2 lands),
+   then **re-validate** on the configured default (Sonnet).
+   **Optional:** re-run the formatter **un-chunked** on the bigger-context
+   escalated model — removes chunk-seam risk and the override-drop path in
+   one move (depends on Spec A Fix 2).
 
-### Escalation (automatic, once)
+**Terminal states:**
+- Re-validation `"pass"` → `completed`, escalation recorded.
+- Still `"fail"`, or every flagged phase already `opus`, or the one
+  auto-escalation already used → **pause-and-suggest**
+  (*"QA failed — review or retry on a stronger model"* + per-phase flags).
+  Note: **structural flags survive escalation** (e.g. the REVIEW-NOTES
+  block), so this state is expected even on a healthy pipeline until the
+  criteria question is resolved.
 
-1. **Select phases.** Find the earliest phase the validator flagged
-   (`validation_result.phase_results[*].status == "fail"`) and include it
-   plus every downstream phase, reusing the existing reset-downstream logic.
-2. **Determine each phase's family.** Read the phase's actual running model
-   from its provenance header, parse the family token (`haiku | sonnet |
-   opus`) from the slug (robust to OpenRouter's mixed word order, e.g. both
-   `claude-sonnet-4.6` and `claude-4.5-haiku-20251001`).
-3. **Bump one family up** per phase: `haiku → sonnet → opus`. `opus` is
-   terminal. A phase already at `opus` cannot escalate.
-4. **Resolve the concrete target model from the live OpenRouter catalog:**
-   query `GET https://openrouter.ai/api/v1/models`, filter to
-   `anthropic/*` models in the target family, exclude `-fast` and `fable`
-   variants, and pick the newest by the `created` timestamp. The catalog
-   response is **cached** (TTL ~1h) so this is not a per-job network hit.
-5. **Re-run** the selected phases on their escalated models, then
-   **re-validate**. The validator runs on its configured default
-   (latest Sonnet — see below).
+**Manual retry after pause:** bumps each not-yet-`opus` phase one more family;
+`opus` is the ceiling.
 
-### Terminal states
+**"Escalate once" guard:** a persisted marker (e.g. `auto_escalated_at`)
+prevents the loop or a later manual retry from re-triggering the auto path.
 
-- Re-validation `"pass"` → `completed`. The escalation is recorded in the
-  job's phase/run history (which phases re-ran, on what models).
-- Re-validation still `"fail"`, **or** every flagged phase is already at
-  `opus`, **or** the one auto-escalation has already been used → `paused`
-  with a clear message: *"QA failed — review or retry on a stronger model,"*
-  including the per-phase flags. The job is now visibly not-`completed`,
-  which is what eliminates the original silent failure.
-- Catalog fetch fails (network/parse error): log and fall through to the
-  `paused`/suggest terminal state rather than blocking the job.
+### Trigger B — OpenRouter credit exhaustion
 
-### Manual retry after pause
+- In `_call_openrouter`, detect insufficient-credit responses (HTTP 402, or
+  an error body indicating credit/quota exhaustion) and raise a new typed
+  `CreditExhaustedError` (sibling of the existing typed LLM errors).
+- It is **never swallowed**, even in an optional phase. Both handlers route
+  to **pause-and-suggest**: *"OpenRouter credit exhausted — add credit, then
+  retry."*
+- It **does not consume a retry**.
 
-The editor's manual retry on a `paused` QA-failed job bumps each
-not-yet-`opus` phase **one more family** (so phases that went `haiku →
-sonnet` on the auto attempt go `sonnet → opus` on the click); phases already
-at `opus` stay. `opus` is the ceiling; there are no further auto-bumps.
+### Trigger C — Truncation (existing)
 
-### "Escalate once" guard
-
-A persisted marker on the job records that an automatic QA-escalation has
-occurred (e.g. an `auto_escalated_at` timestamp, or reuse of existing
-per-phase tier/retry tracking). The escalation loop checks this so neither
-the loop nor a later manual retry re-triggers the automatic path.
+Migrated onto the shared pause-and-suggest helper; behavior unchanged.
 
 ### Validator default
 
 Move the `validator` phase off the cheapskate tier to the default
-(Sonnet 4.6 — currently the newest Sonnet in the catalog). Configurable.
-A stronger judge is both more trustworthy and less likely to fail a job on
-noise, which is what lets the auto-escalate loop actually converge.
+(Sonnet 4.6). Configurable. Evidence: the live re-run showed an **8 → 1**
+flag reduction switching the judge from Haiku to Sonnet — a stronger judge
+is both more trustworthy and lets the auto-escalate loop converge.
 
 ### Configuration
 
-New block in `config/llm-config.json` (family-first, no tier labels):
-
 ```jsonc
 "qa_escalation": {
-  "on_validation_fail": true,        // master switch
-  "max_auto_escalations": 1,         // "once"
+  "on_validation_fail": true,
+  "max_auto_escalations": 1,
   "family_order": ["haiku", "sonnet", "opus"],
   "exclude_variants": ["fast", "fable"]
 }
 ```
 
-Plus the one-line change moving `validator` in `phase_backends` to the
-default (Sonnet) tier.
+Plus moving `validator` to the default (Sonnet) model. Credit-exhaustion
+handling has no tunables (always on).
 
-## Folded-in data-integrity fixes
+## Deferred follow-up (was a non-goal, now has a concrete case)
 
-These are in scope because the escalation logic depends on them.
-
-1. **`phases[].model` must record the model that actually ran.** On job 10
-   the job record reported the validator on Haiku while
-   `validator_output.md`'s header reported Sonnet 4.6 — two validator passes
-   with only one recorded. Family parsing for escalation depends on this
-   field being correct.
-2. **`current_phase` must advance through the final phase.** Job 10's
-   `current_phase` was left at `"seo"` even though `timestamp` ran and
-   completed afterward. Cosmetic, but a paused/suggested job should display
-   the correct phase.
+The first criteria-tuning question to resolve: **is the formatter's
+`<!-- REVIEW NOTES -->` HTML comment block actually a validator-level
+defect?** It is invisible in rendered markdown and carries useful editorial
+intel. Either the formatter should stop emitting it into the body, or the
+validator should stop flagging it. Until decided, jobs with only this flag
+will pause-and-suggest despite being publishable.
 
 ## What "OpenRouter provides" (reference)
 
-The OpenRouter catalog (`/api/v1/models`, public, no key) does **not**
-expose a capability rank or successor pointer. It does expose, per model:
-`id` (family parseable from the slug), `created` (pick newest in family),
-`pricing`, `context_length`, `architecture`, `benchmarks`,
-`knowledge_cutoff`, and more. Pricing is **not** a reliable ladder on its
-own — `opus-*-fast` variants ($10–30/Mtok) and `fable-5` ($10/Mtok) price
-above plain `opus` ($5/Mtok), so a "next most expensive" rule would jump to
-the wrong model. Hence family parsing + an explicit family order, with
-`-fast` and `fable` excluded.
+`/api/v1/models` (public, no key) exposes per model: `id` (family from the
+slug), `created` (newest in family), `pricing`, `context_length`,
+`benchmarks`, etc. — but **no** capability rank or successor pointer.
+Pricing is not a reliable ladder: `opus-*-fast` ($10–30/Mtok) and `fable-5`
+($10/Mtok) price above plain `opus` ($5/Mtok), so a "next most expensive"
+rule jumps wrong. Hence family parsing + explicit order, `-fast`/`fable`
+excluded.
 
 ## Testing
 
 **Unit**
-- Family parse from varied slugs (`claude-sonnet-4.6`,
-  `claude-4.5-haiku-20251001`, `claude-opus-4.8`).
-- Family bump + `opus` clamp.
-- `-fast` / `fable` exclusion in catalog filtering.
-- "Escalate once" guard prevents re-triggering.
-- Earliest-flagged-phase + downstream selection.
-- Catalog-fetch-failure falls back to pause/suggest.
+- Family parse from varied slugs; family bump + `opus` clamp.
+- `-fast` / `fable` exclusion.
+- "Escalate once" guard; earliest-flagged-phase + downstream selection.
+- Catalog-fetch-failure falls back to pause-and-suggest.
+- `CreditExhaustedError` raised on 402 / credit body; **not** swallowed by
+  the optional-phase handler.
+- Pause-and-suggest helper writes the correct per-trigger message and never
+  leaves the job `completed`.
 
 **Integration** (LLM and catalog stubbed — no spend, no live network)
-- Stubbed validator returning `fail` then `pass` ⇒ job ends `completed`
-  with the escalation recorded.
-- Stubbed validator returning persistent `fail` ⇒ job ends `paused` with the
-  suggest message and per-phase flags.
-- Flagged phase already at `opus` ⇒ straight to `paused`, no escalation
-  attempt.
+- Validator `fail` then `pass` ⇒ `completed` with escalation recorded.
+- Validator persistent `fail` ⇒ `paused` with suggest message + flags.
+- Flagged phase already `opus` ⇒ straight to `paused`.
+- OpenRouter 402 mid-job ⇒ `paused` with credit message, retry count
+  unchanged.
 
 ## Open questions
 
-None outstanding. Defaults for manual-retry behavior and `-fast`/`fable`
-exclusion were accepted during design.
+None outstanding. (Spec split into A/B, manual-retry behavior,
+`-fast`/`fable` exclusion, and the job-11 evidence were settled during
+design.)
