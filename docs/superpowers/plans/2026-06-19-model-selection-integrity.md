@@ -14,7 +14,7 @@
 - `ruff` clean; `pytest` green.
 - No `.env` files — secrets via macOS Keychain / Docker secrets; config via `llm-config.json` only.
 - Do not break the existing OpenAPI contract (no endpoint signature changes here).
-- The non-chunked `_run_phase` model resolution is the reference behavior and is already correct (explicit `model` arg > `phase_models[phase]` > backend default). This plan makes the worker config, the chunked path, and the recorded model match it — it does not change that resolution order.
+- The non-chunked `_run_phase` model resolution is the reference behavior and is already correct. As of the current `chat()` (`api/services/llm.py:600-611`) the priority is: **(0) backend `force_model`** (local-only backends that serve one model) → **(1) explicit `model` arg** → **(2) `phase_models[phase]`** → **(3) backend default**. The chunked formatter uses the `openrouter` backend, which has **no `force_model`**, so passing `model=model_override` (branch 1) wins as intended. This plan makes the worker config, the chunked path, and the recorded model match the reference behavior — it does not change that resolution order.
 - Tier labels (`cheapskate/default/big-brain`) are out of scope — do not touch `phase_backends` semantics.
 
 ---
@@ -24,11 +24,11 @@
 **Why:** The worker's `LLMService` is loaded once at startup (`worker.py:166`) and never refreshed, so Settings changes made via the API never affect running jobs. A per-job reload is simple and always-correct given low job throughput.
 
 **Files:**
-- Modify: `api/services/worker.py` — `process_job` (starts line 654)
+- Modify: `api/services/worker.py` — `process_job` (starts line 657)
 - Test: `tests/test_model_selection_integrity.py` (create)
 
 **Interfaces:**
-- Consumes: `JobWorker.llm` (an `LLMService` with `reload_config() -> None`, defined at `api/services/llm.py:367`).
+- Consumes: `JobWorker.llm` (an `LLMService` with `reload_config() -> None`, defined at `api/services/llm.py:480`).
 - Produces: nothing new; behavioral guarantee that `process_job` calls `self.llm.reload_config()` before running any phase.
 
 - [ ] **Step 1: Write the failing test**
@@ -79,7 +79,7 @@ Expected: FAIL — `reload_config` not called (assertion error, `calls` is `['se
 
 - [ ] **Step 3: Add the reload call at the top of `process_job`**
 
-In `api/services/worker.py`, inside `process_job`, immediately after `self._current_job_id = job_id` (line ~657) and before the `logger.info("Processing job", ...)` line, add:
+In `api/services/worker.py`, inside `process_job`, immediately after `self._current_job_id = job_id` (line 660) and before the `logger.info("Processing job", ...)` line, add:
 
 ```python
         # Pick up any model/config changes made via the Settings API since
@@ -108,7 +108,7 @@ git commit -m "fix(worker): reload LLM config at job start so Settings changes t
 **Why:** Even with a per-job reload, the worker reads its *own* container-local `config/llm-config.json`. Both containers must read/write the *same* file. Make the path an absolute, env-configurable location on a shared volume, seeded from the image default if missing.
 
 **Files:**
-- Modify: `api/services/llm.py` — `LLMService.__init__` (line 251)
+- Modify: `api/services/llm.py` — `LLMService.__init__` (line 364)
 - Modify: `api/routers/config.py` — `CONFIG_PATH` (line 20) and add a resolver
 - Create: `api/services/config_path.py` (single source of truth for the path + seeding)
 - Modify: `docker-compose.prod.yml` — add shared config volume + `LLM_CONFIG_PATH` to `api` and `worker`
@@ -248,7 +248,7 @@ git commit -m "fix(config): resolve llm-config from shared LLM_CONFIG_PATH so ap
 **Why:** When chunking is enabled, `_run_phase` routes the formatter to `_run_formatter_chunked` **without** passing `model_override`, and the per-chunk `chat()` call passes no `model`. So formatter model changes (manual retry or, later, escalation) are silently ignored — verified live on job 11.
 
 **Files:**
-- Modify: `api/services/worker.py` — `_run_phase` chunked branch (call at ~1527), `_run_formatter_chunked` signature (line 1653), `process_chunk` `chat()` call (line 1768)
+- Modify: `api/services/worker.py` — `_run_phase` chunked branch (call at ~1559), `_run_formatter_chunked` signature (line 1702), `process_chunk` `chat()` call (line 1817)
 - Test: `tests/test_model_selection_integrity.py` (append)
 
 **Interfaces:**
@@ -305,7 +305,7 @@ Expected: FAIL — `_run_formatter_chunked` has no `model_override` parameter (T
 
 In `api/services/worker.py`:
 
-(a) Update the signature (line 1653):
+(a) Update the signature (line 1702):
 
 ```python
     async def _run_formatter_chunked(
@@ -319,13 +319,13 @@ In `api/services/worker.py`:
     ) -> Dict[str, Any]:
 ```
 
-(b) Pass it from the `_run_phase` chunked branch (the `return await self._run_formatter_chunked(...)` call near line 1527) by adding:
+(b) Pass it from the `_run_phase` chunked branch (the `return await self._run_formatter_chunked(...)` call near line 1559) by adding:
 
 ```python
                         model_override=model_override,
 ```
 
-(c) In `process_chunk`, the `self.llm.chat(...)` call (line 1768), add the `model` kwarg:
+(c) In `process_chunk`, the `self.llm.chat(...)` call (line 1817), add the `model` kwarg:
 
 ```python
                     self.llm.chat(
@@ -358,7 +358,7 @@ git commit -m "fix(formatter): thread model_override through the chunked formatt
 **Why:** Two recording gaps. (a) The chunked formatter records the opaque string `chunked (N chunks via <backend>)` instead of the real model, so family/diagnostic logic can't read it. (b) The post-retry re-validation (`worker.py:482-498`) writes a new `validation_result` and `validator_output.md` but never updates the validator's `phases[].model` — this is exactly why job 10's record said Haiku while the file said Sonnet.
 
 **Files:**
-- Modify: `api/services/worker.py` — `process_chunk` return (line ~1788), `_run_formatter_chunked` provenance header (line ~1858) and return dict (line ~1881), post-retry re-validation block (lines ~488-491)
+- Modify: `api/services/worker.py` — `process_chunk` return (line ~1837), `_run_formatter_chunked` provenance header (line ~1908) and return dict (line ~1937), post-retry re-validation block (line 493)
 - Test: `tests/test_model_selection_integrity.py` (append)
 
 **Interfaces:**
@@ -408,7 +408,7 @@ Expected: FAIL — result["model"] is `chunked (1 chunks via openrouter)`.
 
 - [ ] **Step 3: Capture and report the real model in the chunked path**
 
-In `api/services/worker.py`, `process_chunk`'s return dict (line ~1788), add the model:
+In `api/services/worker.py`, `process_chunk`'s return dict (line ~1837), add the model:
 
 ```python
                 return {
@@ -421,13 +421,13 @@ In `api/services/worker.py`, `process_chunk`'s return dict (line ~1788), add the
                 }
 ```
 
-After the `chunk_results` aggregation (near line 1853, where `total_cost`/`total_tokens` are summed), add:
+After the `chunk_results` aggregation (near line 1895, where `total_cost`/`total_tokens` are summed), add:
 
 ```python
             actual_model = next((r.get("model") for r in chunk_results if r.get("model")), None)
 ```
 
-Change the provenance header (line ~1858) to use it:
+Change the provenance header (line ~1908) to use it:
 
 ```python
             provenance_header = (
@@ -437,7 +437,7 @@ Change the provenance header (line ~1858) to use it:
             )
 ```
 
-Change the return dict's `model` (line ~1887) to:
+Change the return dict's `model` (line ~1937) to:
 
 ```python
                 "model": actual_model or f"chunked ({total_chunks} chunks via {backend})",
@@ -484,7 +484,7 @@ def apply_validator_model(phases: list, model: Optional[str]) -> list:
     return phases
 ```
 
-In the post-retry re-validation block (lines ~488-491), after `validation_data = self._parse_validation_result(validator_result["output"])` and before/with the `update_job` call, load the current phases, apply the model, and persist:
+In the post-retry re-validation block (line 493), after `validation_data = self._parse_validation_result(validator_result["output"])` and before/with the `update_job` call, load the current phases, apply the model, and persist:
 
 ```python
                             validation_data = self._parse_validation_result(validator_result["output"])
