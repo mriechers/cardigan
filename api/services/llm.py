@@ -367,10 +367,9 @@ class LLMClient:
         Args:
             config_path: Path to llm-config.json (default: config/llm-config.json)
         """
-        if config_path is None:
-            config_path = "config/llm-config.json"
+        from api.services.config_path import resolve_config_path
 
-        self.config_path = Path(config_path)
+        self.config_path = Path(config_path) if config_path else resolve_config_path()
         self.config = self._load_config()
         self._http_client: Optional[httpx.AsyncClient] = None
 
