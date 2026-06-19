@@ -30,6 +30,7 @@ from api.services.ingest_scheduler import start_scheduler, stop_scheduler
 from api.services.langfuse_client import get_langfuse_client
 from api.services.llm import close_llm_client, get_llm_client
 from api.services.logging import get_logger, setup_logging
+from api.services.mmingest.scheduler import start_mmingest_scheduler, stop_mmingest_scheduler
 
 # Initialize logging for API
 setup_logging(log_file="api.log")
@@ -58,9 +59,15 @@ async def lifespan(app: FastAPI):
     # Start ingest scheduler (Sprint 11.1)
     await start_scheduler()
     logger.info("Ingest scheduler started")
+    # Start mmingest delta-walk scheduler (was the documented Sprint 2 TODO:
+    # the crawler/indexer existed but was never wired into the app lifespan,
+    # so mmingest_files/sidecars never populated in a running deployment).
+    await start_mmingest_scheduler()
+    logger.info("mmingest scheduler started")
     yield
     # Shutdown: Close connections
     logger.info("Shutting down API server")
+    await stop_mmingest_scheduler()
     await stop_scheduler()
     await close_llm_client()
     await database.close_db()
