@@ -30,7 +30,7 @@ import json
 import logging
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -698,6 +698,92 @@ async def list_tools() -> list[Tool]:
                 "required": ["media_id"],
             },
         ),
+        # -----------------------------------------------------------------------
+        # mmingest tools (Sprint 4A) — in-process, no HTTP round-trip
+        # -----------------------------------------------------------------------
+        Tool(
+            name="search_mmingest",
+            description=(
+                "Full-text search PBS Wisconsin's mmingest caption corpus via FTS5. "
+                "Returns BM25-ranked results with snippets. Mirrors HTTP "
+                "GET /api/mmingest/search but runs in-process (no HTTP, no auth round-trip). "
+                "Use for finding episodes by transcript content (e.g. 'inside wisconsin politics' "
+                "or 'climate change')."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "FTS5 MATCH query string. Phrases in double quotes match adjacently; bare terms are AND-ed.",
+                    },
+                    "prefix": {
+                        "type": "string",
+                        "description": "Optional 4-char show prefix filter (e.g. '6POL' or '2WLI'). Exact case-insensitive match.",
+                    },
+                    "since": {
+                        "type": "string",
+                        "description": "Optional ISO 8601 datetime; only return results modified at-or-after this timestamp.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max results to return. Default 25, max 100.",
+                        "default": 25,
+                        "minimum": 1,
+                        "maximum": 100,
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="get_mmingest_asset",
+            description=(
+                "Get the canonical asset record for a PBS Wisconsin Media ID, including "
+                "primary URL, variants (PLEDGE/DS cuts), superseded REVs, and the linked "
+                "Airtable record ID. Mirrors HTTP GET /api/mmingest/assets/{media_id} "
+                "but runs in-process."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "media_id": {
+                        "type": "string",
+                        "description": "8-character Media ID (e.g. '6POL0101'). Case-insensitive.",
+                    }
+                },
+                "required": ["media_id"],
+            },
+        ),
+        Tool(
+            name="list_recent_mmingest_assets",
+            description=(
+                "List recently-arrived PBS Wisconsin assets on mmingest, ordered by "
+                "first-seen timestamp. Mirrors HTTP GET /api/mmingest/recent but runs "
+                "in-process. Use to poll for new arrivals (e.g. caption files just "
+                "delivered for an episode in production)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "since": {
+                        "type": "string",
+                        "description": ("Optional ISO 8601 datetime cutoff. If absent, defaults to 24 hours ago."),
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max results to return. Default 50, max 200.",
+                        "default": 50,
+                        "minimum": 1,
+                        "maximum": 200,
+                    },
+                    "prefix": {
+                        "type": "string",
+                        "description": "Optional 4-char show prefix filter.",
+                    },
+                },
+            },
+        ),
     ]
 
 
@@ -933,6 +1019,12 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         return await handle_review_proposed_edits(arguments)
     elif name == "commit_sst_edits":
         return await handle_commit_sst_edits(arguments)
+    elif name == "search_mmingest":
+        return await handle_search_mmingest(arguments)
+    elif name == "get_mmingest_asset":
+        return await handle_get_mmingest_asset(arguments)
+    elif name == "list_recent_mmingest_assets":
+        return await handle_list_recent_mmingest_assets(arguments)
     else:
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -2114,6 +2206,262 @@ async def handle_commit_sst_edits(arguments: dict) -> list[TextContent]:
         lines.append(f"\n⚠️ Fields updated but audit comment failed to post on `{record_id}`. Check Airtable manually.")
         logger.warning(f"Failed to post audit comment on {record_id} for {media_id}")
     lines.append(f"✅ {len(proposed)} field{'s' if len(proposed) != 1 else ''} written successfully")
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+# =============================================================================
+# mmingest MCP Tool Handlers (Sprint 4A; HTTP-backed since 2026-06)
+#
+# These three handlers call the Cardigan HTTP API at EDITORIAL_API_URL so they
+# read the SAME live mmingest index the deployment serves.  The original Sprint
+# 4A approach queried an in-process SQLite engine (the local dashboard.db next
+# to the MCP process); on any machine other than the server that DB is stale or
+# empty, so "recent"/"search" silently returned nothing.  The source of record
+# is the domain, not local disk.  Airtable enrichment now happens server-side
+# in the /assets route, so these handlers only format the JSON they receive.
+# =============================================================================
+
+
+async def _mmingest_api_get(path: str, params: dict) -> tuple[Optional[dict], Optional[int], Optional[str]]:
+    """GET a JSON object from the Cardigan mmingest API.
+
+    Returns ``(payload, status_code, error)``:
+      * success     -> (dict, 2xx, None)
+      * HTTP error   -> (None, status, None)   — caller maps status (e.g. 404)
+      * transport    -> (None, None, message)  — network/JSON failure
+
+    None-valued params are dropped so optional filters are omitted cleanly.
+    """
+    url = f"{API_BASE_URL.rstrip('/')}{path}"
+    query = {k: v for k, v in params.items() if v is not None}
+    headers = {}
+    api_key = os.environ.get("EDITORIAL_API_KEY")
+    if api_key:
+        headers["X-API-Key"] = api_key
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(url, params=query, headers=headers)
+    except httpx.HTTPError as exc:
+        return None, None, f"Error: could not reach mmingest API at {url} ({type(exc).__name__})."
+    if resp.status_code >= 400:
+        return None, resp.status_code, None
+    try:
+        return resp.json(), resp.status_code, None
+    except ValueError:
+        return None, resp.status_code, f"Error: mmingest API returned a non-JSON response for {path}."
+
+
+async def handle_search_mmingest(arguments: dict) -> list[TextContent]:
+    """FTS5 full-text search over the mmingest sidecar corpus.
+
+    Proxies GET /api/mmingest/search on the Cardigan API (EDITORIAL_API_URL).
+    """
+    query = (arguments.get("query") or "").strip()
+    if not query:
+        return [TextContent(type="text", text="Error: query is required and must not be empty.")]
+
+    prefix = arguments.get("prefix") or None
+    since_raw = arguments.get("since") or None
+    limit = min(max(int(arguments.get("limit") or 25), 1), 100)
+
+    # Parse optional since datetime
+    since_iso: Optional[str] = None
+    if since_raw:
+        try:
+            since_dt = datetime.fromisoformat(since_raw.replace("Z", "+00:00"))
+            since_iso = since_dt.isoformat()
+        except ValueError:
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Error: invalid ISO 8601 datetime for 'since': {since_raw!r}",
+                )
+            ]
+
+    payload, status, error = await _mmingest_api_get(
+        "/api/mmingest/search",
+        {"q": query, "prefix": prefix, "since": since_iso, "limit": limit},
+    )
+    if error:
+        return [TextContent(type="text", text=error)]
+    if status == 500:
+        # The API returns 500 on malformed FTS5 syntax (issue #191).
+        return [
+            TextContent(
+                type="text",
+                text=("Error: invalid FTS5 query syntax. " "Use double quotes around multi-word phrases."),
+            )
+        ]
+    if payload is None:
+        return [TextContent(type="text", text=f"Error: mmingest search failed (HTTP {status}).")]
+
+    rows = payload.get("results", [])
+    total = payload.get("total", len(rows))
+
+    if not rows:
+        filters = []
+        if prefix:
+            filters.append(f"prefix={prefix!r}")
+        if since_raw:
+            filters.append(f"since={since_raw!r}")
+        filter_str = f" (filters: {', '.join(filters)})" if filters else ""
+        return [
+            TextContent(
+                type="text",
+                text=f"No results found for query {query!r}{filter_str}.",
+            )
+        ]
+
+    # Format results as markdown
+    lines = [f"# mmingest Search: {query!r}\n"]
+    lines.append(f"**{total} total match{'es' if total != 1 else ''}** (showing {len(rows)})\n")
+
+    for m in rows:
+        media_id = m.get("media_id") or "(unknown)"
+        prefix_val = m.get("prefix") or ""
+        rev_date = m.get("revision_date") or ""
+        modified = m.get("modified_at") or ""
+        snippet_raw = m.get("snippet") or ""
+        kind = m.get("sidecar_kind") or ""
+
+        header = f"## {media_id}"
+        if prefix_val:
+            header += f"  |  show: {prefix_val}"
+        if rev_date:
+            header += f"  |  rev: {rev_date}"
+        lines.append(header)
+
+        lines.append(f"**Type:** {kind}  |  **Modified:** {modified}")
+        lines.append(f"**Snippet:** {snippet_raw}")
+        lines.append("")
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def handle_get_mmingest_asset(arguments: dict) -> list[TextContent]:
+    """Return the {primary, variants, superseded} shape for a PBS Wisconsin Media ID.
+
+    Proxies GET /api/mmingest/assets/{media_id} on the Cardigan API
+    (EDITORIAL_API_URL).  Airtable enrichment is done server-side.
+    """
+    media_id = (arguments.get("media_id") or "").strip()
+    if not media_id:
+        return [TextContent(type="text", text="Error: media_id is required.")]
+
+    payload, status, error = await _mmingest_api_get(f"/api/mmingest/assets/{media_id}", {})
+    if error:
+        return [TextContent(type="text", text=error)]
+    if status == 404:
+        return [TextContent(type="text", text=f"No asset found for media_id={media_id!r}.")]
+    if payload is None:
+        return [TextContent(type="text", text=f"Error: mmingest asset lookup failed (HTTP {status}).")]
+
+    primary = payload.get("primary")
+    variant_rows = payload.get("variants") or []
+    superseded_rows = payload.get("superseded") or []
+
+    # Format as markdown
+    lines = [f"# Asset: {media_id}\n"]
+
+    if primary:
+        lines.append("## Primary")
+        lines.append(f"**URL:** {primary.get('url')}")
+        lines.append(f"**Type:** {primary.get('file_type')}  |  **REV date:** {primary.get('revision_date') or 'n/a'}")
+        lines.append(f"**Modified:** {primary.get('remote_modified_at') or 'n/a'}")
+        at_record_id = primary.get("airtable_record_id")
+        if at_record_id:
+            at_url = f"https://airtable.com/appZ2HGwhiifQToB6/tblTKFOwTvK7xw1H5/{at_record_id}"
+            lines.append(f"**Airtable:** [{at_record_id}]({at_url})")
+        else:
+            lines.append("**Airtable:** (not linked)")
+        lines.append("")
+    else:
+        lines.append("## Primary\n(no primary row — asset may be variants-only)\n")
+
+    lines.append("## Variants")
+    if variant_rows:
+        for v in variant_rows:
+            lines.append(f"- **{v.get('variant_tag')}** — {v.get('url')}  |  {v.get('file_type')}")
+    else:
+        lines.append("(none)")
+    lines.append("")
+
+    lines.append("## Superseded REVs")
+    if superseded_rows:
+        for s in superseded_rows:
+            lines.append(f"- REV {s.get('revision_date') or 'n/a'} — {s.get('url')}  |  {s.get('file_type')}")
+    else:
+        lines.append("(none)")
+    lines.append("")
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def handle_list_recent_mmingest_assets(arguments: dict) -> list[TextContent]:
+    """List recently-arrived PBS Wisconsin assets on mmingest.
+
+    Proxies GET /api/mmingest/recent on the Cardigan API (EDITORIAL_API_URL).
+    """
+    since_raw = arguments.get("since") or None
+    limit = min(max(int(arguments.get("limit") or 50), 1), 200)
+    prefix = arguments.get("prefix") or None
+
+    # Default: last 24 hours (same as S3B router)
+    if since_raw:
+        try:
+            since_dt = datetime.fromisoformat(since_raw.replace("Z", "+00:00"))
+            since_iso = since_dt.isoformat()
+        except ValueError:
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Error: invalid ISO 8601 datetime for 'since': {since_raw!r}",
+                )
+            ]
+    else:
+        since_dt = datetime.now(timezone.utc) - timedelta(hours=24)
+        since_iso = since_dt.isoformat()
+
+    payload, status, error = await _mmingest_api_get(
+        "/api/mmingest/recent",
+        {"since": since_iso, "prefix": prefix, "limit": limit},
+    )
+    if error:
+        return [TextContent(type="text", text=error)]
+    if payload is None:
+        return [TextContent(type="text", text=f"Error: mmingest recent lookup failed (HTTP {status}).")]
+
+    rows = payload.get("results", [])
+    total = payload.get("total", len(rows))
+
+    if not rows:
+        window = since_raw or f"last 24 hours (since {since_iso})"
+        return [
+            TextContent(
+                type="text",
+                text=f"No new arrivals in the window ({window}).",
+            )
+        ]
+
+    # Format as markdown list
+    lines = ["# Recent mmingest Arrivals\n"]
+    lines.append(f"**{total} file{'s' if total != 1 else ''}** since {since_iso} (showing {len(rows)})\n")
+
+    for m in rows:
+        media_id = m.get("media_id") or m.get("url") or "(unknown)"
+        prefix_val = m.get("prefix") or ""
+        show = m.get("show_name") or ""
+        ftype = m.get("file_type") or ""
+        seen = m.get("first_seen_at") or ""
+        url = m.get("url") or ""
+
+        label = media_id
+        if show:
+            label += f" — {show}"
+        lines.append(f"- **{label}**")
+        lines.append(f"  Prefix: {prefix_val}  |  Type: {ftype}  |  First seen: {seen}")
+        lines.append(f"  URL: {url}")
 
     return [TextContent(type="text", text="\n".join(lines))]
 
