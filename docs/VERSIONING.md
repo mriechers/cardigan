@@ -70,11 +70,13 @@ A few sharper edges worth calling out:
    git tag -a v4.1.1 -m "v4.1.1: <one-line summary>"
    git push origin v4.1.1
    ```
-3. The `Deploy` workflow runs on push to `main`, so tagging itself does
+3. The push-based deploy job (CI on push to `main`, which replaced
+   Watchtower in #216) builds and ships the image, so tagging itself does
    not trigger a build. To redeploy with the new version baked in, push
    any commit to `main` (or merge a release-notes PR that touches at
    least one file).
-4. Verify the deployed version after Watchtower picks up the new image:
+4. Verify the deployed version once the deploy job has rolled the new
+   image out:
    ```bash
    curl -s http://<host>/api/system/health | jq '.version // .status'
    curl -s http://<host>/ | jq '.version'

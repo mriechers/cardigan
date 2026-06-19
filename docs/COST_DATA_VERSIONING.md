@@ -7,7 +7,11 @@ version, how historical data is preserved, and how to operate both.
 
 Three tables — `jobs`, `session_stats`, `chat_sessions` — carry an
 `app_version` TEXT column populated at insert time from the
-`CARDIGAN_VERSION` env var (default `"v4.1"`, set in `docker-compose.yml`).
+`CARDIGAN_VERSION` env var. When that env var is unset, the value is
+**derived from the git tag** (e.g. `v4.2`) via `setuptools_scm` →
+`_default_app_version()` in `api/services/database.py`. The compose files
+set the env var explicitly (`:-v4.2` fallback) so a deployed container is
+pinned to the current epoch regardless of how the image was built.
 
 The point: when the prompt strategy, model routing, or pipeline shape
 changes meaningfully, cost-per-job numbers from before and after are
@@ -17,15 +21,16 @@ epoch instead of averaging across regimes.
 ## Bumping the version for a new epoch
 
 1. Pick a tag. Convention: `v<major>.<minor>` matching the codebase
-   sprint label (e.g., `v4.2`).
-2. Edit the default in `api/services/database.py`:
-   ```python
-   APP_VERSION = os.getenv("CARDIGAN_VERSION") or "v4.2"
-   ```
-3. Edit `docker-compose.yml` and `docker-compose.prod.yml`, both
-   services, replacing `:-v4.1` with `:-v4.2`.
-4. `docker compose up -d` to restart.
-5. Verify: `docker exec cardigan-v4-api-1 printenv CARDIGAN_VERSION`.
+   sprint label (e.g., `v4.2`). Tag the release (`git tag -a v4.2.0`) —
+   `_default_app_version()` derives the `v4.2` epoch from it automatically.
+   **Do not hand-edit `api/services/database.py`** — there is no static
+   default to change; it reads from the git tag.
+2. Edit `docker-compose.yml` and `docker-compose.prod.yml`, both
+   services, replacing `:-v4.1` with `:-v4.2` so the deployment fallback
+   matches the tag (the env var is read *before* the tag-derived default,
+   so this pin is what a running container actually reports).
+3. `docker compose up -d` to restart.
+4. Verify: `docker exec cardigan-v4-api-1 printenv CARDIGAN_VERSION`.
 
 The env var also accepts non-default values without code edits — handy
 for short-lived experiments: `CARDIGAN_VERSION=v4.2-rc1 docker compose up -d`.
