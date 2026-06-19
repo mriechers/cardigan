@@ -658,6 +658,9 @@ Extract any name or spelling corrections that should be added to the glossary. S
         """Process a single job through all phases."""
         job_id = job["id"]
         self._current_job_id = job_id
+        # Pick up any model/config changes made via the Settings API since
+        # this worker process started (api and worker are separate containers).
+        self.llm.reload_config()
         project_name = job.get("project_name", "Unknown")
 
         logger.info("Processing job", extra={"job_id": job_id, "project_name": project_name})
