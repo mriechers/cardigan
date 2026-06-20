@@ -374,7 +374,10 @@ class MmingestCrawler:
         self.ignore_directories: frozenset[str] = frozenset(d.strip("/").lower() for d in (ignore_directories or []))
         self.pause_window = pause_window
         self.auth = auth
-        self._rate_limiter = TokenBucket(rate=rate_per_second, burst=max_concurrent)
+        # burst=1 (not max_concurrent) to match the validated smoke-test
+        # politeness envelope: no first-wave request cluster against the Apache
+        # ingest server after start or after the quiet window (#183).
+        self._rate_limiter = TokenBucket(rate=rate_per_second, burst=1)
 
     # ------------------------------------------------------------------
     # Public API
