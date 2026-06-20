@@ -639,3 +639,38 @@ class TestProcessJobDeferral:
         ]
         assert "failed" not in statuses
         assert "completed" not in statuses
+
+
+class TestResolveDurationIntoMetrics:
+    """#126: the SRT-parsed duration must override the word-count estimate so
+    every downstream consumer (routing, prompt context, persisted
+    duration_minutes) reports the same value."""
+
+    @patch("api.services.worker.get_llm_client")
+    def test_srt_duration_overrides_word_count_estimate(self, mock_get_llm, mock_llm_client, tmp_path):
+        mock_get_llm.return_value = mock_llm_client
+        worker = JobWorker()
+
+        # SRT whose last caption ends at 00:18:34 (~18.57 min) — like job 168.
+        srt = tmp_path / "6POL0108.srt"
+        srt.write_text(
+            "1\n00:00:01,000 --> 00:00:04,000\nHello.\n\n" "2\n00:18:30,000 --> 00:18:34,000\nGoodbye.\n",
+            encoding="utf-8",
+        )
+        # Word-count estimate is wrong (38.5 min), like the SEO agent saw.
+        metrics = {"estimated_duration_minutes": 38.5, "word_count": 5000}
+
+        result = worker._resolve_duration_into_metrics(metrics, srt)
+
+        assert abs(result["estimated_duration_minutes"] - 18.57) < 0.2
+        assert metrics["estimated_duration_minutes"] != 38.5
+
+    @patch("api.services.worker.get_llm_client")
+    def test_no_srt_keeps_estimate(self, mock_get_llm, mock_llm_client, tmp_path):
+        mock_get_llm.return_value = mock_llm_client
+        worker = JobWorker()
+        metrics = {"estimated_duration_minutes": 25.0, "word_count": 4000}
+
+        result = worker._resolve_duration_into_metrics(metrics, None)
+
+        assert result["estimated_duration_minutes"] == 25.0
