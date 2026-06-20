@@ -251,6 +251,9 @@ class TestExponentialBackoff:
             base_url="https://test.example.com/",
             rate_per_second=1000.0,
         )
+        # Isolate backoff timing from rate-limiting (burst=1 default, #183) —
+        # asyncio.sleep is mocked, so a real token-bucket wait would busy-loop.
+        crawler._rate_limiter = TokenBucket(rate=1000.0, burst=1000)
 
         mock_client = AsyncMock()
         mock_client.get = mock_get
@@ -276,6 +279,11 @@ class TestExponentialBackoff:
             return resp
 
         crawler = MmingestCrawler(rate_per_second=1000.0)
+        # Isolate backoff timing from rate-limiting: the production default is
+        # burst=1 (#183), but these tests patch asyncio.sleep to a no-op, which
+        # would make the token-bucket refill wait busy-loop. A high burst keeps
+        # the limiter from engaging so we measure only the backoff sleeps.
+        crawler._rate_limiter = TokenBucket(rate=1000.0, burst=1000)
         mock_client = AsyncMock()
         mock_client.get = mock_get
         semaphore = asyncio.Semaphore(4)
@@ -291,6 +299,11 @@ class TestExponentialBackoff:
         import httpx
 
         crawler = MmingestCrawler(rate_per_second=1000.0)
+        # Isolate backoff timing from rate-limiting: the production default is
+        # burst=1 (#183), but these tests patch asyncio.sleep to a no-op, which
+        # would make the token-bucket refill wait busy-loop. A high burst keeps
+        # the limiter from engaging so we measure only the backoff sleeps.
+        crawler._rate_limiter = TokenBucket(rate=1000.0, burst=1000)
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(side_effect=httpx.ConnectError("refused"))
         semaphore = asyncio.Semaphore(4)
@@ -312,6 +325,11 @@ class TestExponentialBackoff:
         import httpx
 
         crawler = MmingestCrawler(rate_per_second=1000.0)
+        # Isolate backoff timing from rate-limiting: the production default is
+        # burst=1 (#183), but these tests patch asyncio.sleep to a no-op, which
+        # would make the token-bucket refill wait busy-loop. A high burst keeps
+        # the limiter from engaging so we measure only the backoff sleeps.
+        crawler._rate_limiter = TokenBucket(rate=1000.0, burst=1000)
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(side_effect=httpx.ConnectError("refused"))
         semaphore = asyncio.Semaphore(4)
@@ -825,3 +843,16 @@ class TestExtToFileType:
 
     def test_empty_ext_maps_to_other(self):
         assert _ext_to_file_type("") == "other"
+
+
+# ---------------------------------------------------------------------------
+# Sprint 1 hardening — #183 default crawler burst matches smoke test (burst=1)
+# ---------------------------------------------------------------------------
+
+
+def test_crawler_default_rate_limiter_burst_is_one():
+    """#183: the production crawler's rate limiter defaults to burst=1 to match
+    the smoke-test politeness envelope — no first-wave request cluster against
+    the Apache ingest server."""
+    crawler = MmingestCrawler()
+    assert crawler._rate_limiter._burst == 1
