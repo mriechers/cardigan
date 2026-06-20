@@ -525,39 +525,13 @@ class LLMClient:
         phase_backends = self.config.get("phase_backends", {})
         return phase_backends.get(phase, self.config.get("primary_backend", "openrouter"))
 
-    def get_next_tier(self, current_tier: int) -> Optional[int]:
-        """Get the next escalation tier, or None if at max.
-
-        Args:
-            current_tier: Current tier index
-
-        Returns:
-            Next tier index, or None if already at max
-        """
-        routing_config = self.config.get("routing", {})
-        tiers = routing_config.get("tiers", ["openrouter-cheapskate", "openrouter", "openrouter-big-brain"])
-
-        if current_tier < len(tiers) - 1:
-            return current_tier + 1
-        return None
-
-    def get_escalation_config(self) -> Dict[str, Any]:
-        """Get escalation configuration.
-
-        Returns:
-            Dict with escalation settings (enabled, on_failure, on_timeout, etc.)
-        """
-        routing_config = self.config.get("routing", {})
-        return routing_config.get(
-            "escalation",
-            {
-                "enabled": True,
-                "on_failure": True,
-                "on_timeout": True,
-                "timeout_seconds": 120,
-                "max_retries_per_tier": 1,
-            },
-        )
+    # NOTE: The auto-escalation tier ladder (get_next_tier / get_escalation_config)
+    # was removed in Epic L. Sprint 3 replaced automatic tier escalation with
+    # user-driven retry (POST .../retry with an explicit model_override), so the
+    # "cheapskate -> default -> big-brain" walk had no callers. Per-phase model
+    # selection is now direct via the phase_models config (see _resolve_model in
+    # generate()). See planning/epic-l-consolidation-plan.md for the remaining
+    # phase_backends -> phase_models consolidation.
 
     def get_api_key(self, backend_config: Dict[str, Any]) -> Optional[str]:
         """Get API key for a backend from environment."""
