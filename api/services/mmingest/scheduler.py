@@ -80,7 +80,7 @@ async def run_delta_walk() -> None:
             base_url="https://mmingest.pbswi.wisc.edu/",
             directories=["/"],
             max_concurrent=4,
-            rate_per_second=2.0,
+            rate_per_second=1.0,  # polite-crawl spec (#203)
         )
 
         run = await indexer.run_once()

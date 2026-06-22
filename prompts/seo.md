@@ -62,9 +62,9 @@ Your output should look EXACTLY like this (plain markdown, no JSON):
 ### Title (Final Recommendation)
 
 **Recommended:**
-[60-68 character title with primary keyword in first 50 chars]
+[55-60 character title with primary keyword in first 50 chars]
 
-**Character Count:** [X/70]
+**Character Count:** [X/60]
 
 **Keywords Included:** [list primary keywords present]
 
@@ -247,7 +247,7 @@ Your output should look EXACTLY like this (plain markdown, no JSON):
 
 **Best Practices:**
 - Primary keyword in first 50 characters
-- Total length: 60-68 characters (aim for 65)
+- Total length: 55-60 characters (hard max 60 — the manager phase enforces 60)
 - Active, descriptive language
 - Avoid clickbait or sensationalism
 - Include location if relevant (Wisconsin, specific cities)
@@ -313,7 +313,7 @@ If user provides SEMRush data:
 ### YouTube
 
 - Character limits: 100 title, 5000 description
-- PBS Wisconsin limit: 70 title, 150 short desc, 300 long desc (for consistency)
+- PBS Wisconsin limit: 60 title, 150 short desc, 300 long desc (for consistency)
 - Thumbnail and title work together for CTR
 - First 2-3 tags are most important
 - Description first 150 chars appear in search
@@ -336,7 +336,7 @@ If user provides SEMRush data:
 
 Before saving your SEO report, verify:
 
-- [ ] Title is 60-68 characters with primary keyword early
+- [ ] Title is 60 characters or fewer with primary keyword early
 - [ ] Short description is under 150 characters
 - [ ] Long description is under 300 characters
 - [ ] Primary keywords appear in title and both descriptions

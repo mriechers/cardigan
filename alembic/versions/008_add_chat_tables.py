@@ -63,9 +63,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index('ix_chat_messages_created_at', table_name='chat_messages')
-    op.drop_index('ix_chat_messages_session_id', table_name='chat_messages')
-    op.drop_table('chat_messages')
-    op.drop_index('ix_chat_sessions_status', table_name='chat_sessions')
-    op.drop_index('ix_chat_sessions_job_id', table_name='chat_sessions')
-    op.drop_table('chat_sessions')
+    # 012 (remove chat tables) has a no-op downgrade, so chat_messages /
+    # chat_sessions may already be gone when we downgrade through 008. Guard on
+    # existence so `alembic downgrade base` doesn't crash (#206). Dropping a
+    # table also drops its indexes, so explicit drop_index calls aren't needed.
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    if insp.has_table('chat_messages'):
+        op.drop_table('chat_messages')
+    if insp.has_table('chat_sessions'):
+        op.drop_table('chat_sessions')
