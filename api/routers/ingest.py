@@ -170,6 +170,11 @@ async def list_available_files(
         default=30, ge=1, le=365, description="Filter by first_seen_at within N days (default: 30)"
     ),
     exclude_with_jobs: bool = Query(default=True, description="Hide files that already have linked jobs"),
+    has_media_id: bool = Query(
+        default=True,
+        description="Only return files with a recognized PBS Media ID (default: true). "
+        "Set false to also show un-parsed files (notes, OS dupes), sorted below valid IDs.",
+    ),
 ) -> AvailableFilesResponse:
     """
     List files available for queueing.
@@ -184,6 +189,12 @@ async def list_available_files(
         search: Search term for filename or Media ID
         days: Filter to files seen within N days (default: 30)
         exclude_with_jobs: Hide files already linked to jobs (default: true)
+        has_media_id: Only return files whose filename parsed to a Media ID
+            (default: true). The scanner stores ``media_id`` only when
+            ``extract_media_id`` matches the PBS pattern, so a non-null value
+            means a recognized ID. Files like ``TLB CC IN WI.srt`` or
+            ``episode_notes.txt`` carry ``media_id = NULL`` and are noise on the
+            Ready-for-Work page; filtered out by default (#106).
 
     Returns:
         List of available files
@@ -220,8 +231,18 @@ async def list_available_files(
         if exclude_with_jobs:
             query += " AND job_id IS NULL"
 
-        # Sort by server modification time when available, otherwise first_seen
-        query += " ORDER BY COALESCE(remote_modified_at, first_seen_at) DESC LIMIT :limit"
+        # Media-ID filter: a non-null media_id means the filename parsed to a
+        # recognized PBS Media ID. Filtered in by default to keep the
+        # Ready-for-Work list free of notes / OS-duplicate noise (#106).
+        if has_media_id:
+            query += " AND media_id IS NOT NULL AND TRIM(media_id) != ''"
+
+        # Sort recognized Media IDs first (relevant when has_media_id is false),
+        # then by server modification time when available, otherwise first_seen.
+        query += (
+            " ORDER BY (media_id IS NULL OR TRIM(media_id) = '') ASC,"
+            " COALESCE(remote_modified_at, first_seen_at) DESC LIMIT :limit"
+        )
 
         result = await session.execute(text(query), params)
         rows = result.fetchall()
