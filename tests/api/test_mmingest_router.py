@@ -468,7 +468,7 @@ async def test_assets_with_variant(migrated_engine):
 
 @pytest.mark.asyncio
 async def test_assets_with_superseded_rev(migrated_engine):
-    """Gate 5: Older REV row is in superseded[], newer is primary."""
+    """Gate 5: ?include_superseded=true returns older REV in superseded[], newer is primary."""
     engine, db_path = migrated_engine
 
     async with engine.begin() as conn:
@@ -497,7 +497,7 @@ async def test_assets_with_superseded_rev(migrated_engine):
 
     mock_at = _make_mock_airtable()
     client = _make_client(db_path, mock_at)
-    resp = client.get("/api/mmingest/assets/6POL0101")
+    resp = client.get("/api/mmingest/assets/6POL0101?include_superseded=true")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -506,6 +506,109 @@ async def test_assets_with_superseded_rev(migrated_engine):
     assert data["variants"] == []
     assert len(data["superseded"]) == 1
     assert data["superseded"][0]["revision_date"] == "2026-01-01"
+
+
+# ---------------------------------------------------------------------------
+# Gate 5b — /assets/{id} superseded opt-in (#194)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_assets_superseded_default_empty(migrated_engine):
+    """#194 (default): no ?include_superseded param → superseded==[] while primary/variants intact."""
+    engine, db_path = migrated_engine
+
+    async with engine.begin() as conn:
+        # Newer REV (current primary)
+        new_id = await _insert_file(
+            conn,
+            remote_url="http://mmingest.example/6POL0101_REV20260319.mp4",
+            filename="6POL0101_REV20260319.mp4",
+            file_type="mp4",
+            media_id="6POL0101",
+            revision_date="2026-03-19",
+            variant_tag=None,
+            superseded_by=None,
+        )
+        # Older REV (superseded)
+        await _insert_file(
+            conn,
+            remote_url="http://mmingest.example/6POL0101_REV20260101.mp4",
+            filename="6POL0101_REV20260101.mp4",
+            file_type="mp4",
+            media_id="6POL0101",
+            revision_date="2026-01-01",
+            variant_tag=None,
+            superseded_by=new_id,
+        )
+        # A variant alongside the primary
+        await _insert_file(
+            conn,
+            remote_url="http://mmingest.example/6POL0101_PLEDGE.mp4",
+            filename="6POL0101_PLEDGE.mp4",
+            file_type="mp4",
+            media_id="6POL0101",
+            variant_tag="PLEDGE",
+            superseded_by=None,
+        )
+
+    mock_at = _make_mock_airtable()
+    client = _make_client(db_path, mock_at)
+    # No include_superseded param — default behaviour
+    resp = client.get("/api/mmingest/assets/6POL0101")
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    # primary and variants are fully populated
+    assert data["primary"] is not None
+    assert data["primary"]["revision_date"] == "2026-03-19"
+    assert len(data["variants"]) == 1
+    assert data["variants"][0]["variant_tag"] == "PLEDGE"
+    # superseded key is present but empty (opt-in not set)
+    assert data["superseded"] == []
+
+
+@pytest.mark.asyncio
+async def test_assets_superseded_opt_in(migrated_engine):
+    """#194 (opt-in): ?include_superseded=true returns the superseded entry populated."""
+    engine, db_path = migrated_engine
+
+    async with engine.begin() as conn:
+        # Newer REV (current primary)
+        new_id = await _insert_file(
+            conn,
+            remote_url="http://mmingest.example/6POL0101_REV20260319.mp4",
+            filename="6POL0101_REV20260319.mp4",
+            file_type="mp4",
+            media_id="6POL0101",
+            revision_date="2026-03-19",
+            variant_tag=None,
+            superseded_by=None,
+        )
+        # Older REV (superseded)
+        await _insert_file(
+            conn,
+            remote_url="http://mmingest.example/6POL0101_REV20260101.mp4",
+            filename="6POL0101_REV20260101.mp4",
+            file_type="mp4",
+            media_id="6POL0101",
+            revision_date="2026-01-01",
+            variant_tag=None,
+            superseded_by=new_id,
+        )
+
+    mock_at = _make_mock_airtable()
+    client = _make_client(db_path, mock_at)
+    resp = client.get("/api/mmingest/assets/6POL0101?include_superseded=true")
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["primary"] is not None
+    assert data["primary"]["revision_date"] == "2026-03-19"
+    assert data["variants"] == []
+    assert len(data["superseded"]) == 1
+    assert data["superseded"][0]["revision_date"] == "2026-01-01"
+    assert data["superseded"][0]["url"] == "http://mmingest.example/6POL0101_REV20260101.mp4"
 
 
 # ---------------------------------------------------------------------------
