@@ -28,6 +28,7 @@ KEY_SCAN_INTERVAL_HOURS = f"{INGEST_PREFIX}scan_interval_hours"
 KEY_SCAN_TIME = f"{INGEST_PREFIX}scan_time"
 KEY_LAST_SCAN_AT = f"{INGEST_PREFIX}last_scan_at"
 KEY_LAST_SCAN_SUCCESS = f"{INGEST_PREFIX}last_scan_success"
+KEY_LAST_SCAN_ERROR = f"{INGEST_PREFIX}last_scan_error"
 KEY_SERVER_URL = f"{INGEST_PREFIX}server_url"
 KEY_DIRECTORIES = f"{INGEST_PREFIX}directories"
 KEY_IGNORE_DIRECTORIES = f"{INGEST_PREFIX}ignore_directories"
@@ -95,6 +96,7 @@ async def get_ingest_config() -> IngestConfig:
     time_item = await get_config(KEY_SCAN_TIME)
     last_scan_item = await get_config(KEY_LAST_SCAN_AT)
     last_success_item = await get_config(KEY_LAST_SCAN_SUCCESS)
+    last_error_item = await get_config(KEY_LAST_SCAN_ERROR)
     server_url_item = await get_config(KEY_SERVER_URL)
     directories_item = await get_config(KEY_DIRECTORIES)
     ignore_dirs_item = await get_config(KEY_IGNORE_DIRECTORIES)
@@ -116,6 +118,9 @@ async def get_ingest_config() -> IngestConfig:
     last_scan_success = None
     if last_success_item:
         last_scan_success = last_success_item.get_typed_value()
+
+    # Empty string is stored on success to clear a prior error; treat it as None.
+    last_scan_error = last_error_item.value if last_error_item and last_error_item.value else None
 
     server_url = server_url_item.value if server_url_item else DEFAULT_CONFIG.server_url
 
@@ -139,6 +144,7 @@ async def get_ingest_config() -> IngestConfig:
         scan_time=scan_time,
         last_scan_at=last_scan_at,
         last_scan_success=last_scan_success,
+        last_scan_error=last_scan_error,
         server_url=server_url,
         directories=directories,
         ignore_directories=ignore_directories,
@@ -183,13 +189,18 @@ async def update_ingest_config(updates: IngestConfigUpdate) -> IngestConfig:
     return await get_ingest_config()
 
 
-async def record_scan_result(success: bool) -> None:
+async def record_scan_result(success: bool, error: Optional[str] = None) -> None:
     """Record the result of a scan operation.
 
-    Updates last_scan_at timestamp and last_scan_success flag.
+    Updates last_scan_at timestamp, last_scan_success flag, and last_scan_error
+    detail. On success the error is cleared (stored as an empty string) so a stale
+    failure message never lingers on the Ready screen after a good scan (#75).
 
     Args:
         success: Whether the scan completed successfully
+        error: Failure detail to persist when ``success`` is False (truncated to a
+            sane length so a giant traceback can't bloat the config row). Ignored
+            on success.
     """
     now = datetime.utcnow()
 
@@ -197,6 +208,16 @@ async def record_scan_result(success: bool) -> None:
 
     await set_config(
         KEY_LAST_SCAN_SUCCESS, str(success).lower(), value_type="bool", description="Whether last scan succeeded"
+    )
+
+    # Persist the failure detail (cleared on success). Cap length so a stack trace
+    # can't blow up the config value.
+    error_value = "" if success else (error or "Scan failed (no detail captured)")[:2000]
+    await set_config(
+        KEY_LAST_SCAN_ERROR,
+        error_value,
+        value_type="string",
+        description="Detail from the last failed scan; empty when the last scan succeeded",
     )
 
 
