@@ -264,13 +264,16 @@ async def list_available_files(
             for row in rows
         ]
 
-        # Get total count of new files
-        count_query = text("""
+        # Get total count of new files. Apply the same Media-ID filter as the
+        # list query above so total_new matches what's actually shown (#106).
+        count_sql = """
             SELECT COUNT(*) as count
             FROM available_files
             WHERE status = 'new' AND file_type = :file_type
-        """)
-        result = await session.execute(count_query, {"file_type": file_type or "transcript"})
+        """
+        if has_media_id:
+            count_sql += " AND media_id IS NOT NULL AND TRIM(media_id) != ''"
+        result = await session.execute(text(count_sql), {"file_type": file_type or "transcript"})
         total_new = result.fetchone().count
 
     # Get last scan timestamp from config

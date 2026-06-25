@@ -336,6 +336,49 @@ class TestAvailableFilesEndpoint:
         assert "media_id IS NOT NULL" not in sql, "has_media_id=false must not filter on media_id"
         assert "ORDER BY (media_id IS NULL" in sql
 
+    def _run_available_capturing_count_query(self, url: str) -> str:
+        """Hit GET /api/ingest/available and return the COUNT query's SQL text."""
+        captured = {}
+        with (
+            patch("api.routers.ingest.get_session") as mock_session,
+            patch("api.services.airtable.AirtableClient") as mock_airtable_class,
+            patch("api.routers.ingest.get_ingest_config", new_callable=AsyncMock) as mock_config,
+        ):
+            mock_db = MagicMock()
+            mock_result = MagicMock()
+            mock_result.fetchall.return_value = []
+            mock_count_result = MagicMock()
+            mock_count_row = MagicMock()
+            mock_count_row.count = 0
+            mock_count_result.fetchone.return_value = mock_count_row
+
+            async def execute_side_effect(query, params):
+                sql = str(query)
+                if "COUNT" in sql:
+                    captured["sql"] = sql
+                    return mock_count_result
+                return mock_result
+
+            mock_db.execute = AsyncMock(side_effect=execute_side_effect)
+            mock_session.return_value.__aenter__.return_value = mock_db
+            mock_airtable_class.return_value = MagicMock()
+            mock_config.return_value = MagicMock(last_scan_at=None)
+
+            response = client.get(url)
+            assert response.status_code == 200
+        return captured["sql"]
+
+    def test_count_query_filters_non_media_id_by_default(self):
+        """#106: total_new must apply the same Media-ID filter as the list, by default."""
+        sql = self._run_available_capturing_count_query("/api/ingest/available")
+        assert "media_id IS NOT NULL" in sql, "total_new must exclude null-media_id noise to match list"
+        assert "TRIM(media_id) != ''" in sql
+
+    def test_count_query_includes_non_media_id_when_disabled(self):
+        """#106: has_media_id=false must not filter the count, matching the list."""
+        sql = self._run_available_capturing_count_query("/api/ingest/available?has_media_id=false")
+        assert "media_id IS NOT NULL" not in sql, "has_media_id=false count must not filter on media_id"
+
 
 class TestTranscriptEndpoints:
     """Tests for transcript action endpoints."""
