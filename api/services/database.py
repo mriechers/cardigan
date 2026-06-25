@@ -595,7 +595,12 @@ async def update_job(job_id: int, job_update: JobUpdate) -> Optional[Job]:
 
         if job_update.error_message is not None:
             update_values["error_message"] = job_update.error_message
-            update_values["error_timestamp"] = datetime.now(timezone.utc)
+            # An empty error_message clears the error state (e.g. on job retry),
+            # so the stale failure timestamp must be cleared too — not re-stamped.
+            if job_update.error_message == "":
+                update_values["error_timestamp"] = None
+            else:
+                update_values["error_timestamp"] = datetime.now(timezone.utc)
 
         if job_update.estimated_cost is not None:
             update_values["estimated_cost"] = job_update.estimated_cost

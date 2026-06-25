@@ -18,7 +18,7 @@ export default {
           50:  '#f0f1f5',
           100: '#dfe1e9',
           200: '#c0c4d1',
-          300: '#9da2b5',
+          300: '#aeb3c3',  // distinct rung between 200/400 (was #9da2b5, collided with 400)
           400: '#9da2b5',  // bumped for WCAG AA (was #7a8098, 3.35:1 — failed)
           500: '#5c6380',
           600: '#464d68',
