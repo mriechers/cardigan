@@ -195,11 +195,15 @@ class IngestScanner:
         """
         matching_files: List[RemoteFile] = []
 
+        # One shared visited-URL set across configured directories so overlapping
+        # roots don't re-walk a shared subtree (mirrors scan(); #165 item 1).
+        visited_urls: set = set()
+
         # Scan configured directories for files matching this Media ID
         for directory in self.directories:
             try:
                 dir_url = f"{self.base_url}{directory}"
-                all_files = await self._scan_directory(dir_url, directory)
+                all_files = await self._scan_directory(dir_url, directory, visited_urls=visited_urls)
 
                 # Filter to files matching this Media ID
                 for remote_file in all_files:
@@ -239,11 +243,17 @@ class IngestScanner:
         try:
             all_files: List[RemoteFile] = []
 
+            # Share one visited-URL set across all configured top-level directories
+            # so a subdirectory reachable from more than one root (symlink, bind
+            # mount, Apache Alias) is walked only once per scan. Previously each
+            # top-level call got a fresh set, re-fetching shared targets per root (#168).
+            visited_urls: set = set()
+
             # Scan each configured directory
             for directory in self.directories:
                 dir_url = f"{self.base_url}{directory}"
                 try:
-                    files = await self._scan_directory(dir_url, directory)
+                    files = await self._scan_directory(dir_url, directory, visited_urls=visited_urls)
                     all_files.extend(files)
                 except Exception as e:
                     logger.warning(f"Failed to scan {directory}: {e}")
@@ -359,19 +369,28 @@ class IngestScanner:
                 ]
                 await session.execute(insert_query, params_list)
 
-            # Step 3: Update last_seen_at for existing files (single UPDATE)
-            if existing_urls:
-                update_query = text("""
+            # Step 3: Update last_seen_at for the existing files we actually saw
+            # this scan. Scope by remote_url, batched under the same SQLite
+            # parameter limit as the Step 1 existence check.
+            #
+            # #168: the previous implementation issued an unscoped
+            # `UPDATE available_files SET last_seen_at = :now` with NO WHERE
+            # clause, stamping every row in the table — including files from
+            # other directories not seen this scan — and corrupting the
+            # staleness signal. New files already get last_seen_at = now from the
+            # INSERT above, so only the existing rows need updating here.
+            existing_list = list(existing_urls)
+            for i in range(0, len(existing_list), batch_size):
+                batch_urls = existing_list[i : i + batch_size]
+                placeholders = ",".join([f":url{j}" for j in range(len(batch_urls))])
+                update_query = text(f"""
                     UPDATE available_files
                     SET last_seen_at = :now
-                    WHERE remote_url IN (SELECT remote_url FROM available_files WHERE 1=1)
+                    WHERE remote_url IN ({placeholders})
                 """)
-                # Actually, let's just update all records to current timestamp
-                # This is simpler and still fast
-                update_query = text("""
-                    UPDATE available_files SET last_seen_at = :now
-                """)
-                await session.execute(update_query, {"now": now})
+                params = {f"url{j}": url for j, url in enumerate(batch_urls)}
+                params["now"] = now
+                await session.execute(update_query, params)
 
             await session.commit()
 
