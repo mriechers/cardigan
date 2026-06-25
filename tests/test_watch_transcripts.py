@@ -440,8 +440,9 @@ class TestWatchLoop:
         """Test that watch loop sleeps between iterations."""
         mock_queued.return_value = set()
 
-        # Run two iterations then stop
-        mock_files.side_effect = [[], [], KeyboardInterrupt()]
+        # The initial startup scan consumes one get_transcript_files() call before the
+        # loop; then two full iterations (each sleeps), then interrupt on the third.
+        mock_files.side_effect = [[], [], [], KeyboardInterrupt()]
 
         watch_loop()
 
