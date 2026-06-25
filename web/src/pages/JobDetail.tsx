@@ -169,6 +169,9 @@ export default function JobDetail() {
   const [sstMetadata, setSstMetadata] = useState<SSTMetadata | null>(null)
   const [sstLoading, setSstLoading] = useState(false)
   const [retryingPhase, setRetryingPhase] = useState<string | null>(null)
+  // Tracks an in-flight job-level action (retry/pause/resume/cancel) so the
+  // button can show a spinner instead of only a transient toast (#219).
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [retryModal, setRetryModal] = useState<{ outputKey: string; label: string } | null>(null)
   const [retryFeedback, setRetryFeedback] = useState('')
   const [retryModel, setRetryModel] = useState<string>('')
@@ -301,13 +304,15 @@ export default function JobDetail() {
       cancel: { success: 'Job cancelled successfully', error: 'Failed to cancel job' },
     }
 
+    setActionLoading(action)
     try {
       const response = await fetch(`/api/jobs/${id}/${action}`, {
         method: 'POST',
       })
       if (response.ok) {
         toast(actionLabels[action]?.success || `Job ${action}ed successfully`, 'success')
-        // Refresh job data
+        // Refresh job data — the new status drives the persistent indicator
+        // (e.g. "Queued — waiting to start…") and re-arms the polling effect.
         const updated = await fetch(`/api/jobs/${id}`)
         if (updated.ok) {
           setJob(await updated.json())
@@ -318,6 +323,8 @@ export default function JobDetail() {
     } catch (err) {
       console.error(`Failed to ${action} job:`, err)
       toast(actionLabels[action]?.error || `Failed to ${action} job`, 'error')
+    } finally {
+      setActionLoading(null)
     }
   }
 
@@ -556,6 +563,13 @@ export default function JobDetail() {
                 • Processing {job.current_phase}...
               </span>
             )}
+            {/* Persistent indicator for the gap between a restart and the worker
+                picking the job up — otherwise the only feedback is a toast (#219). */}
+            {job.status === 'pending' && (
+              <span className="ml-2 text-pbs-400 animate-pulse">
+                • Queued — waiting to start…
+              </span>
+            )}
           </p>
         </div>
 
@@ -580,10 +594,14 @@ export default function JobDetail() {
           {(job.status === 'failed' || (job.status === 'paused' && job.error_message?.includes('TRUNCATION'))) && (
             <button
               onClick={() => handleAction('retry')}
-              className="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white rounded-md text-sm"
+              disabled={actionLoading === 'retry'}
+              className="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white rounded-md text-sm disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
               title="Retry this job"
             >
-              Retry
+              {actionLoading === 'retry' && (
+                <span className="inline-block w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+              )}
+              {actionLoading === 'retry' ? 'Retrying…' : 'Retry'}
             </button>
           )}
           {['pending', 'paused'].includes(job.status) && (
