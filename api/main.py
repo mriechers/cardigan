@@ -4,6 +4,7 @@ Cardigan v4.0 - FastAPI Application
 Main entry point for the API server.
 """
 
+import json
 import os
 
 from dotenv import load_dotenv
@@ -145,21 +146,41 @@ async def health():
         "in_progress": len(in_progress_jobs),
     }
 
-    # Get LLM status
+    # Get LLM status. Config-derived fields (primary_backend, fallback_model,
+    # phase_backends) are valid from the in-process client. But active_backend,
+    # active_model and last_run_totals are runtime state set by whichever process
+    # actually ran the job — in the multi-container deployment that's the worker,
+    # not this API process, so they're null here. Prefer the worker-published
+    # snapshot from the shared DB, falling back to in-process state for the
+    # single-process dev case (#158).
     llm_client = get_llm_client()
     llm_status = llm_client.get_status()
+
+    active_backend = llm_status.get("active_backend")
+    active_model = llm_status.get("active_model")
+    last_run = llm_status.get("last_run_totals")
+
+    runtime_item = await database.get_config("llm_runtime_status")
+    if runtime_item and runtime_item.value:
+        try:
+            runtime = json.loads(runtime_item.value)
+            active_backend = runtime.get("active_backend") or active_backend
+            active_model = runtime.get("active_model") or active_model
+            last_run = runtime.get("last_run_totals") or last_run
+        except (json.JSONDecodeError, TypeError):
+            pass
 
     return {
         "status": "ok",
         "queue": queue_stats,
         "llm": {
-            "active_backend": llm_status.get("active_backend"),
-            "active_model": llm_status.get("active_model"),
+            "active_backend": active_backend,
+            "active_model": active_model,
             "primary_backend": llm_status.get("primary_backend"),
             "fallback_model": llm_status.get("fallback_model"),
             "phase_backends": llm_status.get("phase_backends"),
         },
-        "last_run": llm_status.get("last_run_totals"),
+        "last_run": last_run,
     }
 
 

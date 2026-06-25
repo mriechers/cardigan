@@ -13,6 +13,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from api.services import database
+
 router = APIRouter()
 
 
@@ -22,6 +24,9 @@ class ComponentStatus(BaseModel):
     name: str
     running: bool
     pid: Optional[int] = None
+    # Seconds since the component's last DB heartbeat (None for API, which is
+    # detected by port, or if the component has never heartbeated).
+    heartbeat_age_seconds: Optional[float] = None
 
 
 class SystemStatus(BaseModel):
@@ -96,18 +101,47 @@ def _start_component(command: str, log_file: str) -> bool:
 
 @router.get("/status", response_model=SystemStatus)
 async def get_system_status():
-    """Get status of all system components."""
+    """Get status of all system components.
 
-    # Use port check for API since pgrep can't reliably detect itself
+    A component is reported running if EITHER a fresh DB heartbeat exists
+    (works across container boundaries — the prod/LXC case, #179) OR a local
+    process is found via pgrep/lsof (works in single-host dev). The OR means
+    neither deployment shape reports a false "down".
+    """
+    # API check: port probe — the API answers its own request in-container.
     api_pid = _check_port_in_use(8000)
+
+    # Worker/watcher: same-host process probe (dev) plus shared-DB heartbeat (prod).
     worker_pid = _find_process("run_worker.py")
     watcher_pid = _find_process("watch_transcripts.py")
+    worker_age = await database.get_heartbeat_age_seconds("worker")
+    watcher_age = await database.get_heartbeat_age_seconds("watcher")
+
+    worker_running = worker_pid is not None or database.heartbeat_is_fresh(worker_age)
+    watcher_running = watcher_pid is not None or database.heartbeat_is_fresh(watcher_age)
 
     return SystemStatus(
         api=ComponentStatus(name="API Server", running=api_pid is not None, pid=api_pid),
-        worker=ComponentStatus(name="Worker", running=worker_pid is not None, pid=worker_pid),
-        watcher=ComponentStatus(name="Transcript Watcher", running=watcher_pid is not None, pid=watcher_pid),
+        worker=ComponentStatus(name="Worker", running=worker_running, pid=worker_pid, heartbeat_age_seconds=worker_age),
+        watcher=ComponentStatus(
+            name="Transcript Watcher",
+            running=watcher_running,
+            pid=watcher_pid,
+            heartbeat_age_seconds=watcher_age,
+        ),
     )
+
+
+@router.post("/watcher/heartbeat", response_model=RestartResponse)
+async def watcher_heartbeat():
+    """Record a liveness heartbeat for the transcript watcher.
+
+    The watcher runs in its own container and reaches the API over HTTP (it has
+    no direct DB access), so it pings this endpoint each scan loop. /status reads
+    the resulting DB heartbeat to detect the watcher across container boundaries.
+    """
+    await database.record_heartbeat("watcher")
+    return RestartResponse(success=True, message="Watcher heartbeat recorded")
 
 
 @router.post("/worker/restart", response_model=RestartResponse)

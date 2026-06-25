@@ -1344,6 +1344,48 @@ async def set_config(
         return _row_to_config(row)
 
 
+# A component is considered alive if its heartbeat is newer than this. The worker
+# heartbeats every poll loop (~30s) and the watcher every scan loop, so 120s gives
+# ~3-4 missed beats of slack before we report it down. Cross-container safe: the
+# heartbeat lives in the shared DB, unlike pgrep/lsof which can't see other
+# containers (#179).
+HEARTBEAT_STALE_SECONDS = 120
+
+
+async def record_heartbeat(component: str) -> None:
+    """Record a liveness heartbeat for a system component (e.g. 'worker', 'watcher').
+
+    Writes the current UTC time to a `<component>_heartbeat` config key so other
+    containers (notably the API serving /system/status) can observe liveness via
+    shared DB state rather than same-host process probes.
+    """
+    await set_config(
+        f"{component}_heartbeat",
+        datetime.now(timezone.utc).isoformat(),
+        value_type="string",
+        description=f"Last liveness heartbeat for the {component} process",
+    )
+
+
+async def get_heartbeat_age_seconds(component: str) -> Optional[float]:
+    """Return seconds since `component` last heartbeat, or None if never/unparseable."""
+    item = await get_config(f"{component}_heartbeat")
+    if item is None or not item.value:
+        return None
+    try:
+        ts = datetime.fromisoformat(item.value)
+    except ValueError:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - ts).total_seconds()
+
+
+def heartbeat_is_fresh(age_seconds: Optional[float]) -> bool:
+    """True if a heartbeat age (from get_heartbeat_age_seconds) is within the stale window."""
+    return age_seconds is not None and age_seconds < HEARTBEAT_STALE_SECONDS
+
+
 async def list_config() -> List[ConfigItem]:
     """List all configuration items.
 

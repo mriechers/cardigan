@@ -19,6 +19,8 @@ from api.services.database import (
     clear_defer_state,
     defer_job,
     log_event,
+    record_heartbeat,
+    set_config,
     update_job_heartbeat,
     update_job_phase,
     update_job_status,
@@ -200,6 +202,24 @@ class JobWorker:
 
         while self.running:
             try:
+                # Publish liveness + LLM runtime status to the shared DB so the
+                # API container can observe this worker across container boundaries
+                # (#179 worker detection, #158 active backend/model/last_run).
+                # Best-effort: never let observability break the polling loop.
+                try:
+                    await record_heartbeat("worker")
+                    await set_config(
+                        "llm_runtime_status",
+                        json.dumps(self.llm.get_status(), default=str),
+                        value_type="json",
+                        description="Last-known LLM backend/model/run totals, published by the worker",
+                    )
+                except Exception as hb_error:
+                    logger.debug(
+                        "Heartbeat/status publish failed",
+                        extra={"worker_id": worker_id, "error": str(hb_error)},
+                    )
+
                 # Clean up completed tasks
                 done_tasks = {t for t in active_tasks if t.done()}
                 for task in done_tasks:
