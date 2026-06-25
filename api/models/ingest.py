@@ -202,6 +202,9 @@ class IngestConfig(BaseModel):
     scan_time: str = Field("00:00", description="Time of day to run scan (HH:MM)")
     last_scan_at: Optional[datetime] = Field(None, description="When last scan completed")
     last_scan_success: Optional[bool] = Field(None, description="Whether last scan succeeded")
+    last_scan_error: Optional[str] = Field(
+        None, description="Error detail from the last scan if it failed; cleared on the next successful scan"
+    )
     server_url: str = Field("https://mmingest.pbswi.wisc.edu/", description="Base URL of ingest server")
     directories: List[str] = Field(
         default_factory=lambda: ["/"], description="Root directories to scan (recurses into subdirectories)"

@@ -26,6 +26,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column('chat_sessions', 'app_version')
+    # 012's downgrade is a no-op (the chat feature was removed in v4.1 with no
+    # restore path), so chat_sessions no longer exists when we downgrade through
+    # 011 from anything at/above 012. Guard the column drop on the table's
+    # presence so `alembic downgrade base` works below 013 (#206).
+    bind = op.get_bind()
+    if sa.inspect(bind).has_table('chat_sessions'):
+        op.drop_column('chat_sessions', 'app_version')
     op.drop_column('session_stats', 'app_version')
     op.drop_column('jobs',          'app_version')

@@ -8,11 +8,10 @@ import logging
 from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from api.services.ingest_config import (
     get_ingest_config,
-    parse_scan_time,
     record_scan_result,
 )
 from api.services.ingest_scanner import get_ingest_scanner
@@ -51,8 +50,8 @@ async def run_scheduled_scan():
         # Run scan
         result = await scanner.scan()
 
-        # Record result
-        await record_scan_result(success=result.success)
+        # Record result (persists error detail on partial failure)
+        await record_scan_result(success=result.success, error=result.error_message)
 
         if result.success:
             logger.info(
@@ -65,7 +64,7 @@ async def run_scheduled_scan():
 
     except Exception as e:
         logger.error(f"Scheduled scan error: {e}", exc_info=True)
-        await record_scan_result(success=False)
+        await record_scan_result(success=False, error=str(e))
 
 
 async def configure_scheduler():
@@ -86,15 +85,15 @@ async def configure_scheduler():
         logger.info("Ingest scanning is disabled, no job scheduled")
         return
 
-    # Parse scan time (HH:MM format)
-    try:
-        hour, minute = parse_scan_time(config.scan_time)
-    except ValueError as e:
-        logger.error(f"Invalid scan_time in config: {config.scan_time} - {e}")
+    # Determine scan cadence (every N hours) from config. The legacy scheduler
+    # built a daily CronTrigger from scan_time and silently ignored
+    # scan_interval_hours, so "Ready for Work" only refreshed once a day (#211).
+    interval_hours = config.scan_interval_hours
+    if not interval_hours or interval_hours <= 0:
+        logger.error(f"Invalid scan_interval_hours in config: {interval_hours!r} - must be > 0")
         return
 
-    # Create cron trigger for daily execution at configured time
-    trigger = CronTrigger(hour=hour, minute=minute)
+    trigger = IntervalTrigger(hours=interval_hours)
 
     # Add job to scheduler
     scheduler.add_job(
@@ -105,18 +104,18 @@ async def configure_scheduler():
         replace_existing=True,
     )
 
-    # Log the scheduled time
+    # Log the cadence
     job = scheduler.get_job("ingest_scan")
     if job:
         # Get next run time - may be None if scheduler not started yet
         try:
             next_run = getattr(job, "next_run_time", None)
             if next_run:
-                logger.info(f"Ingest scan scheduled: daily at {config.scan_time} (next run: {next_run})")
+                logger.info(f"Ingest scan scheduled: every {interval_hours}h (next run: {next_run})")
             else:
-                logger.info(f"Ingest scan scheduled: daily at {config.scan_time}")
+                logger.info(f"Ingest scan scheduled: every {interval_hours}h")
         except Exception:
-            logger.info(f"Ingest scan scheduled: daily at {config.scan_time}")
+            logger.info(f"Ingest scan scheduled: every {interval_hours}h")
 
 
 async def start_scheduler():

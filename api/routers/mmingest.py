@@ -23,12 +23,20 @@ to mmingest_audit_log.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+
+# Per-request timeout (seconds) for the live Airtable lookup on /assets/{id}.
+# Kept short so a slow/unreachable Airtable can't hang a worker for the
+# AirtableClient default (60s) — the cached mmingest_files.airtable_record_id
+# is the fallback when the lookup times out.  See issue #192.
+_ASSET_AIRTABLE_TIMEOUT_S = 5.0
 
 from api.models.mmingest import (
     AssetEntry,
@@ -159,8 +167,22 @@ async def search(
                 "since": since.isoformat() if since else None,
             }
 
-            rows = (await conn.execute(search_sql, params)).fetchall()
-            total = (await conn.execute(count_sql, count_params)).scalar() or 0
+            try:
+                rows = (await conn.execute(search_sql, params)).fetchall()
+                total = (await conn.execute(count_sql, count_params)).scalar() or 0
+            except OperationalError as e:
+                # Malformed FTS5 MATCH syntax (e.g. unbalanced quotes, bad
+                # operators) raises OperationalError. That's a client error, not
+                # a server fault — return 400 instead of a 500 that crashes the
+                # worker. The query is parameter-bound, so this is not injection.
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Malformed FTS5 search query: {e.orig}. Check for "
+                        "unbalanced quotes or invalid FTS5 operators (phrase "
+                        '"..." , prefix term* , AND/OR/NOT, NEAR).'
+                    ),
+                ) from e
     finally:
         await engine.dispose()
 
@@ -248,9 +270,17 @@ async def _resolve_asset(
 async def get_asset(
     media_id: str,
     airtable_client: Annotated[AirtableClient, Depends(get_airtable_client)],
+    include_superseded: bool = Query(
+        default=False,
+        description="Include the superseded[] list of older REV versions (default: false)",
+    ),
     _scope=_require_scope("mmingest:read"),
 ) -> AssetResponse:
-    """Return the full {primary, variants, superseded} shape for a media_id.
+    """Return the {primary, variants, superseded} shape for a media_id.
+
+    superseded[] is empty by default; pass ?include_superseded=true to
+    populate it with older REV rows.  primary and variants are always
+    fully populated regardless of this flag.
 
     Airtable record_id is looked up live for the primary only (one call,
     one media_id).  Variants and superseded rows do not get Airtable calls.
@@ -264,7 +294,8 @@ async def get_asset(
     finally:
         await engine.dispose()
 
-    # 404 if nothing at all matches this media_id
+    # 404 if nothing at all matches this media_id (checks all three buckets
+    # regardless of include_superseded so a superseded-only media_id still 404s)
     if not primary_rows and not variant_rows and not superseded_rows:
         raise HTTPException(status_code=404, detail=f"No asset found for media_id={media_id!r}")
 
@@ -272,12 +303,16 @@ async def get_asset(
     at_record_id: Optional[str] = None
     if primary_rows:
         try:
-            at_results = await airtable_client.batch_search_sst_by_media_ids([media_id])
+            at_results = await asyncio.wait_for(
+                airtable_client.batch_search_sst_by_media_ids([media_id]),
+                timeout=_ASSET_AIRTABLE_TIMEOUT_S,
+            )
             at_record = at_results.get(media_id)
             if at_record:
                 at_record_id = at_record.get("id")
         except Exception:
-            # Airtable unavailable — surface the pre-cached value from DB instead
+            # Airtable unavailable or too slow (TimeoutError from wait_for) —
+            # surface the pre-cached value from DB instead of hanging/500ing.
             at_record_id = primary_rows[0]._mapping.get("airtable_record_id")
 
     primary: Optional[AssetEntry] = None
@@ -288,7 +323,9 @@ async def get_asset(
         primary = _row_to_asset_entry(primary_rows[0], airtable_record_id=at_record_id)
 
     variants = [_row_to_asset_entry(r) for r in variant_rows]
-    superseded = [_row_to_asset_entry(r) for r in superseded_rows]
+    # Gate the expensive superseded list behind the opt-in flag.
+    # The key is always present in the response shape for stability.
+    superseded = [_row_to_asset_entry(r) for r in superseded_rows] if include_superseded else []
 
     return AssetResponse(primary=primary, variants=variants, superseded=superseded)
 

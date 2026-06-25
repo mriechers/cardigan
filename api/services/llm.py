@@ -18,6 +18,7 @@ import httpx
 from api.models.events import EventCreate, EventData, EventType
 from api.services.database import log_event
 from api.services.langfuse_client import get_langfuse_client
+from api.services.secrets import get_secret
 
 # Cost cap and safety configuration - can be overridden via environment
 DEFAULT_RUN_COST_CAP = 1.0  # $1 per run max
@@ -524,45 +525,25 @@ class LLMClient:
         phase_backends = self.config.get("phase_backends", {})
         return phase_backends.get(phase, self.config.get("primary_backend", "openrouter"))
 
-    def get_next_tier(self, current_tier: int) -> Optional[int]:
-        """Get the next escalation tier, or None if at max.
-
-        Args:
-            current_tier: Current tier index
-
-        Returns:
-            Next tier index, or None if already at max
-        """
-        routing_config = self.config.get("routing", {})
-        tiers = routing_config.get("tiers", ["openrouter-cheapskate", "openrouter", "openrouter-big-brain"])
-
-        if current_tier < len(tiers) - 1:
-            return current_tier + 1
-        return None
-
-    def get_escalation_config(self) -> Dict[str, Any]:
-        """Get escalation configuration.
-
-        Returns:
-            Dict with escalation settings (enabled, on_failure, on_timeout, etc.)
-        """
-        routing_config = self.config.get("routing", {})
-        return routing_config.get(
-            "escalation",
-            {
-                "enabled": True,
-                "on_failure": True,
-                "on_timeout": True,
-                "timeout_seconds": 120,
-                "max_retries_per_tier": 1,
-            },
-        )
+    # NOTE: The auto-escalation tier ladder (get_next_tier / get_escalation_config)
+    # was removed in Epic L. Sprint 3 replaced automatic tier escalation with
+    # user-driven retry (POST .../retry with an explicit model_override), so the
+    # "cheapskate -> default -> big-brain" walk had no callers. Per-phase model
+    # selection is now direct via the phase_models config (see _resolve_model in
+    # generate()). See planning/epic-l-consolidation-plan.md for the remaining
+    # phase_backends -> phase_models consolidation.
 
     def get_api_key(self, backend_config: Dict[str, Any]) -> Optional[str]:
-        """Get API key for a backend from environment."""
+        """Get API key for a backend via the centralized secrets resolver.
+
+        Resolves through api.services.secrets.get_secret (Docker secret file -> env
+        -> macOS Keychain) instead of a bare os.getenv, so a key delivered only as a
+        Docker secret or only in the Keychain still resolves even if bootstrap hasn't
+        populated os.environ for this call path (#121).
+        """
         key_env = backend_config.get("api_key_env")
         if key_env:
-            return os.getenv(key_env)
+            return get_secret(key_env)
         return None
 
     async def chat(

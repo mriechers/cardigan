@@ -170,6 +170,11 @@ async def list_available_files(
         default=30, ge=1, le=365, description="Filter by first_seen_at within N days (default: 30)"
     ),
     exclude_with_jobs: bool = Query(default=True, description="Hide files that already have linked jobs"),
+    has_media_id: bool = Query(
+        default=True,
+        description="Only return files with a recognized PBS Media ID (default: true). "
+        "Set false to also show un-parsed files (notes, OS dupes), sorted below valid IDs.",
+    ),
 ) -> AvailableFilesResponse:
     """
     List files available for queueing.
@@ -184,6 +189,12 @@ async def list_available_files(
         search: Search term for filename or Media ID
         days: Filter to files seen within N days (default: 30)
         exclude_with_jobs: Hide files already linked to jobs (default: true)
+        has_media_id: Only return files whose filename parsed to a Media ID
+            (default: true). The scanner stores ``media_id`` only when
+            ``extract_media_id`` matches the PBS pattern, so a non-null value
+            means a recognized ID. Files like ``TLB CC IN WI.srt`` or
+            ``episode_notes.txt`` carry ``media_id = NULL`` and are noise on the
+            Ready-for-Work page; filtered out by default (#106).
 
     Returns:
         List of available files
@@ -220,8 +231,18 @@ async def list_available_files(
         if exclude_with_jobs:
             query += " AND job_id IS NULL"
 
-        # Sort by server modification time when available, otherwise first_seen
-        query += " ORDER BY COALESCE(remote_modified_at, first_seen_at) DESC LIMIT :limit"
+        # Media-ID filter: a non-null media_id means the filename parsed to a
+        # recognized PBS Media ID. Filtered in by default to keep the
+        # Ready-for-Work list free of notes / OS-duplicate noise (#106).
+        if has_media_id:
+            query += " AND media_id IS NOT NULL AND TRIM(media_id) != ''"
+
+        # Sort recognized Media IDs first (relevant when has_media_id is false),
+        # then by server modification time when available, otherwise first_seen.
+        query += (
+            " ORDER BY (media_id IS NULL OR TRIM(media_id) = '') ASC,"
+            " COALESCE(remote_modified_at, first_seen_at) DESC LIMIT :limit"
+        )
 
         result = await session.execute(text(query), params)
         rows = result.fetchall()
@@ -243,13 +264,16 @@ async def list_available_files(
             for row in rows
         ]
 
-        # Get total count of new files
-        count_query = text("""
+        # Get total count of new files. Apply the same Media-ID filter as the
+        # list query above so total_new matches what's actually shown (#106).
+        count_sql = """
             SELECT COUNT(*) as count
             FROM available_files
             WHERE status = 'new' AND file_type = :file_type
-        """)
-        result = await session.execute(count_query, {"file_type": file_type or "transcript"})
+        """
+        if has_media_id:
+            count_sql += " AND media_id IS NOT NULL AND TRIM(media_id) != ''"
+        result = await session.execute(text(count_sql), {"file_type": file_type or "transcript"})
         total_new = result.fetchone().count
 
     # Get last scan timestamp from config
@@ -301,8 +325,8 @@ async def trigger_scan(
         )
         result = await scanner.scan()
 
-        # Record scan result in config
-        await record_scan_result(success=result.success)
+        # Record scan result in config (persists error detail on partial failure)
+        await record_scan_result(success=result.success, error=result.error_message)
 
         return ScanResponse(
             success=result.success,
@@ -316,8 +340,8 @@ async def trigger_scan(
         )
     except Exception as e:
         logger.error(f"Scan failed: {e}")
-        # Record failed scan
-        await record_scan_result(success=False)
+        # Record failed scan with the error detail so the Ready screen can show why.
+        await record_scan_result(success=False, error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 

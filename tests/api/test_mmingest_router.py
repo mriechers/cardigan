@@ -21,6 +21,7 @@ system doesn't try to introspect the mock's *args/**kwargs signature.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 import sys
@@ -467,7 +468,7 @@ async def test_assets_with_variant(migrated_engine):
 
 @pytest.mark.asyncio
 async def test_assets_with_superseded_rev(migrated_engine):
-    """Gate 5: Older REV row is in superseded[], newer is primary."""
+    """Gate 5: ?include_superseded=true returns older REV in superseded[], newer is primary."""
     engine, db_path = migrated_engine
 
     async with engine.begin() as conn:
@@ -496,7 +497,7 @@ async def test_assets_with_superseded_rev(migrated_engine):
 
     mock_at = _make_mock_airtable()
     client = _make_client(db_path, mock_at)
-    resp = client.get("/api/mmingest/assets/6POL0101")
+    resp = client.get("/api/mmingest/assets/6POL0101?include_superseded=true")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -505,6 +506,109 @@ async def test_assets_with_superseded_rev(migrated_engine):
     assert data["variants"] == []
     assert len(data["superseded"]) == 1
     assert data["superseded"][0]["revision_date"] == "2026-01-01"
+
+
+# ---------------------------------------------------------------------------
+# Gate 5b — /assets/{id} superseded opt-in (#194)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_assets_superseded_default_empty(migrated_engine):
+    """#194 (default): no ?include_superseded param → superseded==[] while primary/variants intact."""
+    engine, db_path = migrated_engine
+
+    async with engine.begin() as conn:
+        # Newer REV (current primary)
+        new_id = await _insert_file(
+            conn,
+            remote_url="http://mmingest.example/6POL0101_REV20260319.mp4",
+            filename="6POL0101_REV20260319.mp4",
+            file_type="mp4",
+            media_id="6POL0101",
+            revision_date="2026-03-19",
+            variant_tag=None,
+            superseded_by=None,
+        )
+        # Older REV (superseded)
+        await _insert_file(
+            conn,
+            remote_url="http://mmingest.example/6POL0101_REV20260101.mp4",
+            filename="6POL0101_REV20260101.mp4",
+            file_type="mp4",
+            media_id="6POL0101",
+            revision_date="2026-01-01",
+            variant_tag=None,
+            superseded_by=new_id,
+        )
+        # A variant alongside the primary
+        await _insert_file(
+            conn,
+            remote_url="http://mmingest.example/6POL0101_PLEDGE.mp4",
+            filename="6POL0101_PLEDGE.mp4",
+            file_type="mp4",
+            media_id="6POL0101",
+            variant_tag="PLEDGE",
+            superseded_by=None,
+        )
+
+    mock_at = _make_mock_airtable()
+    client = _make_client(db_path, mock_at)
+    # No include_superseded param — default behaviour
+    resp = client.get("/api/mmingest/assets/6POL0101")
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    # primary and variants are fully populated
+    assert data["primary"] is not None
+    assert data["primary"]["revision_date"] == "2026-03-19"
+    assert len(data["variants"]) == 1
+    assert data["variants"][0]["variant_tag"] == "PLEDGE"
+    # superseded key is present but empty (opt-in not set)
+    assert data["superseded"] == []
+
+
+@pytest.mark.asyncio
+async def test_assets_superseded_opt_in(migrated_engine):
+    """#194 (opt-in): ?include_superseded=true returns the superseded entry populated."""
+    engine, db_path = migrated_engine
+
+    async with engine.begin() as conn:
+        # Newer REV (current primary)
+        new_id = await _insert_file(
+            conn,
+            remote_url="http://mmingest.example/6POL0101_REV20260319.mp4",
+            filename="6POL0101_REV20260319.mp4",
+            file_type="mp4",
+            media_id="6POL0101",
+            revision_date="2026-03-19",
+            variant_tag=None,
+            superseded_by=None,
+        )
+        # Older REV (superseded)
+        await _insert_file(
+            conn,
+            remote_url="http://mmingest.example/6POL0101_REV20260101.mp4",
+            filename="6POL0101_REV20260101.mp4",
+            file_type="mp4",
+            media_id="6POL0101",
+            revision_date="2026-01-01",
+            variant_tag=None,
+            superseded_by=new_id,
+        )
+
+    mock_at = _make_mock_airtable()
+    client = _make_client(db_path, mock_at)
+    resp = client.get("/api/mmingest/assets/6POL0101?include_superseded=true")
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["primary"] is not None
+    assert data["primary"]["revision_date"] == "2026-03-19"
+    assert data["variants"] == []
+    assert len(data["superseded"]) == 1
+    assert data["superseded"][0]["revision_date"] == "2026-01-01"
+    assert data["superseded"][0]["url"] == "http://mmingest.example/6POL0101_REV20260101.mp4"
 
 
 # ---------------------------------------------------------------------------
@@ -822,3 +926,106 @@ async def test_recent_default_24h_window(migrated_engine):
     # Old (48h ago) should NOT appear; new (1h ago) should appear
     assert not any(r["media_id"] == "6POL0101" for r in results)
     assert any(r["media_id"] == "6POL0102" for r in results)
+
+
+# ---------------------------------------------------------------------------
+# Sprint 1 hardening — #191 malformed FTS5 → 400
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_search_malformed_fts_returns_400(migrated_engine):
+    """#191: a malformed FTS5 query (unbalanced quote) returns a clean 400,
+    not a 500 OperationalError that crashes the worker."""
+    engine, db_path = migrated_engine
+    async with engine.begin() as conn:
+        file_id = await _insert_file(
+            conn,
+            remote_url="http://mmingest.example/6POL0101.srt",
+            filename="6POL0101.srt",
+            media_id="6POL0101",
+            prefix="6POL",
+        )
+        await _insert_sidecar(conn, file_id=file_id, body_text="politics in wisconsin")
+
+    client = _make_client(db_path, _make_mock_airtable())
+    # Unbalanced double-quote is invalid FTS5 MATCH syntax.
+    resp = client.get('/api/mmingest/search?q="unbalanced')
+
+    assert resp.status_code == 400, resp.text
+    assert "fts" in resp.json()["detail"].lower() or "query" in resp.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Sprint 1 hardening — #193 Airtable-exception fallback to cached record_id
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_assets_airtable_exception_falls_back_to_cached(migrated_engine):
+    """#193: when the live Airtable lookup raises, /assets/{id} still returns
+    200 with the pre-cached airtable_record_id from mmingest_files."""
+    engine, db_path = migrated_engine
+    async with engine.begin() as conn:
+        await _insert_file(
+            conn,
+            remote_url="http://mmingest.example/6POL0101.mp4",
+            filename="6POL0101.mp4",
+            file_type="mp4",
+            media_id="6POL0101",
+            prefix="6POL",
+            variant_tag=None,
+            superseded_by=None,
+            airtable_record_id="recCACHED001",
+        )
+
+    mock_at = MagicMock(spec=["batch_search_sst_by_media_ids"])
+    mock_at.batch_search_sst_by_media_ids = AsyncMock(side_effect=RuntimeError("airtable down"))
+    client = _make_client(db_path, mock_at)
+    resp = client.get("/api/mmingest/assets/6POL0101")
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["primary"]["airtable_record_id"] == "recCACHED001"
+
+
+# ---------------------------------------------------------------------------
+# Sprint 1 hardening — #192 slow Airtable times out and falls back to cached
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_assets_airtable_timeout_falls_back_to_cached(migrated_engine, monkeypatch):
+    """#192: a slow Airtable lookup is bounded by a short timeout and falls
+    back to the cached record_id instead of hanging the worker."""
+    import api.routers.mmingest as mm
+
+    engine, db_path = migrated_engine
+    async with engine.begin() as conn:
+        await _insert_file(
+            conn,
+            remote_url="http://mmingest.example/6POL0101.mp4",
+            filename="6POL0101.mp4",
+            file_type="mp4",
+            media_id="6POL0101",
+            prefix="6POL",
+            variant_tag=None,
+            superseded_by=None,
+            airtable_record_id="recCACHED002",
+        )
+
+    async def _slow_lookup(_media_ids):
+        await asyncio.sleep(0.5)
+        return {"6POL0101": {"id": "recLIVE_SHOULD_NOT_WIN"}}
+
+    mock_at = MagicMock(spec=["batch_search_sst_by_media_ids"])
+    mock_at.batch_search_sst_by_media_ids = AsyncMock(side_effect=_slow_lookup)
+
+    client = _make_client(db_path, mock_at)
+    # Shrink the per-request Airtable timeout so the test is fast. Must patch
+    # AFTER _make_client, which reload()s the router module and would otherwise
+    # reset the constant back to its 5.0 default.
+    monkeypatch.setattr(mm, "_ASSET_AIRTABLE_TIMEOUT_S", 0.05, raising=False)
+    resp = client.get("/api/mmingest/assets/6POL0101")
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["primary"]["airtable_record_id"] == "recCACHED002"

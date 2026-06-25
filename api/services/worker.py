@@ -727,6 +727,10 @@ Extract any name or spelling corrections that should be added to the glossary. S
             transcript_metrics = calculate_transcript_metrics(
                 transcript_content, long_form_threshold_minutes=threshold_minutes
             )
+            # Prefer SRT-parsed duration over the word-count estimate so every
+            # downstream consumer (routing, prompt context, persisted
+            # duration_minutes) reports the same, accurate value (#126).
+            transcript_metrics = self._resolve_duration_into_metrics(transcript_metrics, self._find_srt_file(job))
             logger.info(
                 "Transcript metrics calculated",
                 extra={
@@ -1437,6 +1441,23 @@ Extract any name or spelling corrections that should be added to the glossary. S
 
         # Fall back to transcript metrics (estimated from word count)
         return transcript_metrics.get("estimated_duration_minutes", 0)
+
+    def _resolve_duration_into_metrics(
+        self, transcript_metrics: Dict[str, Any], srt_path: Optional[Path]
+    ) -> Dict[str, Any]:
+        """Override the word-count duration estimate with the SRT-parsed value.
+
+        The five duration consumers (tier routing, prompt context, the persisted
+        ``duration_minutes`` column, SEO/manager prompts) all read
+        ``transcript_metrics["estimated_duration_minutes"]``. When an SRT is
+        available it is far more accurate than the word-count estimate, so write
+        the best-available duration back into the metrics here, once, so every
+        consumer agrees (#126). No-op when no SRT is found.
+        """
+        best = self._get_content_duration_minutes(transcript_metrics, srt_path)
+        if best:
+            transcript_metrics["estimated_duration_minutes"] = best
+        return transcript_metrics
 
     def _detect_content_type(
         self,
