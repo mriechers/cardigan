@@ -140,6 +140,114 @@ async def test_qa_fail_already_escalated_pauses(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_escalated_output_threaded_into_revalidation(monkeypatch):
+    """Re-validation must judge the ESCALATED output, not the stale pre-escalation one.
+
+    Regression guard for the Critical-1 bug: the escalation loop ran a phase on a
+    stronger model but never wrote the new output back into `context`, so the
+    re-validation built its prompt from the ORIGINAL failing output. This test does
+    NOT stub away that context side-effect — it asserts that by the time the
+    validator re-runs, `context["seo_output"]` holds the escalated output.
+    """
+    w = _make_worker()
+
+    monkeypatch.setattr(worker_mod, "get_job", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        worker_mod,
+        "resolve_escalated_model",
+        AsyncMock(return_value="anthropic/claude-sonnet-4-6"),
+    )
+    pause = AsyncMock()
+    monkeypatch.setattr(worker_mod, "pause_and_suggest", pause)
+
+    captured: dict = {}
+
+    async def fake_run_phase(job_id, phase_name, context, project_path, model_override=None):
+        if phase_name == "validator":
+            # Re-validation: snapshot what context holds for the escalated phase
+            # at the moment the validator is (re-)built.
+            captured["seo_output_at_revalidation"] = context.get("seo_output")
+            return {"success": True, "output": "{}", "model": "validator-model"}
+        # Escalated phase run produces NEW output. Like the real _run_phase, this
+        # stub does NOT mutate context itself — the gate is responsible for threading.
+        return {"success": True, "output": "ESCALATED-OUTPUT", "model": "strong-model"}
+
+    monkeypatch.setattr(w, "_run_phase", fake_run_phase)
+    monkeypatch.setattr(w, "_parse_validation_result", lambda out: {"overall": "pass"})
+
+    validation_result = {
+        "overall": "fail",
+        "phase_results": {"seo": {"status": "fail", "flags": ["x"]}},
+    }
+
+    outcome = await w._finalize_with_qa_gate(
+        job_id=5,
+        # Seed context with the STALE pre-escalation output the validator first failed on.
+        context={"seo_output": "STALE-OUTPUT"},
+        project_path="/tmp/proj",
+        validation_result=validation_result,
+        phase_order=["seo", "validator"],
+    )
+
+    assert outcome == "completed"
+    pause.assert_not_called()
+    # The re-validation must have seen the ESCALATED output, not the stale one.
+    assert captured["seo_output_at_revalidation"] == "ESCALATED-OUTPUT"
+
+
+@pytest.mark.asyncio
+async def test_validator_excluded_from_escalation_loop(monkeypatch):
+    """The validator is not re-run as a downstream escalation phase (#243 Minor-3).
+
+    `phase_order` includes `validator`, and `select_escalation_phases` would return
+    it as a downstream phase. The gate must exclude it from the escalation loop so
+    only the dedicated re-validation runs the validator (exactly once here).
+    """
+    w = _make_worker()
+
+    monkeypatch.setattr(worker_mod, "get_job", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        worker_mod,
+        "resolve_escalated_model",
+        AsyncMock(return_value="anthropic/claude-sonnet-4-6"),
+    )
+    pause = AsyncMock()
+    monkeypatch.setattr(worker_mod, "pause_and_suggest", pause)
+
+    escalated_phases: list = []
+
+    async def fake_run_phase(job_id, phase_name, context, project_path, model_override=None):
+        if model_override is not None:
+            escalated_phases.append(phase_name)
+        return {"success": True, "output": "{}", "model": "m"}
+
+    monkeypatch.setattr(w, "_run_phase", fake_run_phase)
+    monkeypatch.setattr(w, "_parse_validation_result", lambda out: {"overall": "pass"})
+
+    # validator itself is flagged AND in phase_order -> would be selected without the filter.
+    validation_result = {
+        "overall": "fail",
+        "phase_results": {
+            "seo": {"status": "fail", "flags": ["x"]},
+            "validator": {"status": "fail", "flags": ["y"]},
+        },
+    }
+
+    outcome = await w._finalize_with_qa_gate(
+        job_id=6,
+        context={},
+        project_path="/tmp/proj",
+        validation_result=validation_result,
+        phase_order=["seo", "validator"],
+    )
+
+    assert outcome == "completed"
+    # The validator was never escalated with a model_override.
+    assert "validator" not in escalated_phases
+    assert escalated_phases == ["seo"]
+
+
+@pytest.mark.asyncio
 async def test_qa_pass_completes_without_escalation(monkeypatch):
     """Validator pass -> straight to 'completed', no escalation machinery touched."""
     w = _make_worker()

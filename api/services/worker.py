@@ -1102,12 +1102,16 @@ Extract any name or spelling corrections that should be added to the glossary. S
             # Create manifest
             await self._create_manifest(job, project_path, phases, tracker)
 
-            run_summary = await end_run_tracking(job_id)
-
             # QA-fail escalation gate (Trigger A, #243): a validator `overall: "fail"`
             # must NOT silently land as `completed`. The gate escalates flagged phases
             # once and re-validates; on persistent/unresolvable failure it pauses the
             # job (via pause_and_suggest) instead of completing it.
+            #
+            # The cost tracker must stay ALIVE across the gate so the escalated
+            # `_run_phase` re-runs and the re-validation LLM call are billed into
+            # this job's run total (and the cost-cap check still applies during
+            # escalation). `end_run_tracking` is therefore called AFTER the gate
+            # returns, not before it (#243 fix).
             outcome = await self._finalize_with_qa_gate(
                 job_id,
                 context,
@@ -1115,6 +1119,8 @@ Extract any name or spelling corrections that should be added to the glossary. S
                 validation_data,
                 [p.get("name") for p in (phases or [])],
             )
+
+            run_summary = await end_run_tracking(job_id)
 
             if outcome == "completed":
                 # Mark job completed
@@ -1261,7 +1267,10 @@ Extract any name or spelling corrections that should be added to the glossary. S
             )
             return "paused"
 
-        phases = select_escalation_phases(validation_result, phase_order)
+        # The dedicated re-validation below re-runs the validator, so exclude it
+        # from the escalation loop — otherwise the validator would run up to 3x
+        # and its escalated output would be immediately overwritten (#243 fix).
+        phases = [p for p in select_escalation_phases(validation_result, phase_order) if p != "validator"]
         exclude = cfg.get("exclude_variants", ["fast", "fable"])
         reran = False
         for phase_name in phases:
@@ -1271,7 +1280,12 @@ Extract any name or spelling corrections that should be added to the glossary. S
                 # Already at the strongest family / catalog unavailable for this phase.
                 continue
             res = await self._run_phase(job_id, phase_name, context, project_path, model_override=target)
-            reran = reran or bool(res and res.get("success"))
+            if res and res.get("success"):
+                # Thread the escalated output back into context so the
+                # re-validation below judges the ESCALATED work, not the stale
+                # pre-escalation output (mirrors the main phase loop) (#243 fix).
+                context[f"{phase_name}_output"] = res.get("output", "")
+                reran = True
 
         if not reran:
             await pause_and_suggest(
