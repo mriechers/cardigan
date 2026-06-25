@@ -33,6 +33,7 @@ from api.services.escalation import (
 )
 from api.services.llm import (
     BackendUnavailableError,
+    CreditExhaustedError,
     LLMResponse,
     end_run_tracking,
     get_llm_client,
@@ -933,6 +934,18 @@ Extract any name or spelling corrections that should be added to the glossary. S
                     )
                     return
 
+                if phase_result.get("credit_exhausted"):
+                    # OpenRouter is out of credit (Trigger B, #243). Pause the job
+                    # with an actionable message instead of raising (which would
+                    # mark it failed and burn a retry). The user adds credit and
+                    # retries from where it stopped.
+                    logger.warning(
+                        "Job paused — OpenRouter credit exhausted",
+                        extra={"job_id": job_id, "phase": phase_name, "project_name": project_name},
+                    )
+                    await self._pause_for_credit(job_id)
+                    return
+
                 if not phase_result["success"]:
                     raise Exception(f"Phase {phase_name} failed: {phase_result.get('error')}")
 
@@ -1015,10 +1028,14 @@ Extract any name or spelling corrections that should be added to the glossary. S
                                     f"{completeness.source_word_count:,} words). "
                                     f"Retry to escalate to a more capable model."
                                 )
-                                await update_job_status(
+                                # Route truncation through the shared terminal
+                                # helper (Trigger C, #243) for a consistent
+                                # ``[truncation] ...`` paused message. The later
+                                # ``if truncation_paused`` block records the cost.
+                                await pause_and_suggest(
                                     job_id,
-                                    JobStatus.paused,
-                                    error_message=truncation_msg,
+                                    trigger="truncation",
+                                    message=truncation_msg,
                                 )
                                 truncation_paused = True
                                 break  # Exit phase loop cleanly (no exception)
@@ -1088,6 +1105,18 @@ Extract any name or spelling corrections that should be added to the glossary. S
                     if not opt_phase_updated:
                         phases.append(phase_data)
                     await update_job_phase(job_id, phases)
+
+                    # Credit exhaustion is NEVER non-fatal, even in an optional
+                    # phase (Trigger B, #243). Pause-and-suggest before the swallow
+                    # below would otherwise hide the credit problem and let the job
+                    # complete on partial output.
+                    if phase_result.get("credit_exhausted"):
+                        logger.warning(
+                            "Job paused — OpenRouter credit exhausted (optional phase)",
+                            extra={"job_id": job_id, "phase": phase_name, "project_name": project_name},
+                        )
+                        await self._pause_for_credit(job_id)
+                        return
 
                     # Optional phase failure is logged but doesn't fail the job
                     if not phase_result["success"]:
@@ -1723,6 +1752,27 @@ Extract any name or spelling corrections that should be added to the glossary. S
         ceiling_hours = cfg.get("ceiling_hours", 6)
         return backoff_minutes, ceiling_hours
 
+    async def _pause_for_credit(self, job_id: int) -> None:
+        """Terminal pause for OpenRouter credit exhaustion (Trigger B, #243).
+
+        Routes through the shared ``pause_and_suggest`` helper (status=paused,
+        actionable message, retry count untouched — credit problems must never
+        consume a retry) then records the attempt's cost without clobbering the
+        pause reason. Mirrors the truncation and QA-gate paused terminal paths.
+        """
+        await pause_and_suggest(
+            job_id,
+            trigger="credit",
+            message="OpenRouter credit exhausted — add credit, then retry.",
+        )
+        run_summary = await end_run_tracking(job_id)
+        if run_summary:
+            await update_job_status(
+                job_id,
+                JobStatus.paused,
+                actual_cost=run_summary["total_cost"],
+            )
+
     async def _run_phase(
         self,
         job_id: int,
@@ -1863,6 +1913,24 @@ Extract any name or spelling corrections that should be added to the glossary. S
                 "input_tokens": response.input_tokens,
                 "output_tokens": response.output_tokens,
                 "model": response.model,
+            }
+
+        except CreditExhaustedError as e:
+            # OpenRouter has no credit/quota left (Trigger B, #243). This is NOT a
+            # generic phase failure — caught BEFORE the generic ``except Exception``
+            # below so it isn't flattened into ``{"success": False, "error": ...}``
+            # (which would mark the job failed and consume a retry). Tag the result
+            # so the pipeline can route it to pause-and-suggest instead.
+            logger.warning(
+                "Phase halted — OpenRouter credit exhausted",
+                extra={"job_id": job_id, "phase": phase_name, "backend": e.backend, "detail": e.detail},
+            )
+            return {
+                "success": False,
+                "credit_exhausted": True,
+                "error": e.detail,
+                "cost": 0,
+                "tokens": 0,
             }
 
         except BackendUnavailableError as e:

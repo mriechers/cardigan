@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
+from api.models.job import JobStatus
 from api.services.worker import JobWorker, WorkerConfig
 
 
@@ -674,3 +675,183 @@ class TestResolveDurationIntoMetrics:
         result = worker._resolve_duration_into_metrics(metrics, None)
 
         assert result["estimated_duration_minutes"] == 25.0
+
+
+class TestCreditExhaustionAndTruncation:
+    """Triggers B (credit) + C (truncation) routing onto pause_and_suggest (#243)."""
+
+    @pytest.mark.asyncio
+    @patch("api.services.worker.get_llm_client")
+    @patch("api.services.worker.log_event")
+    @patch("api.services.worker.AGENTS_DIR")
+    async def test_run_phase_tags_credit_exhausted(
+        self, mock_agents_dir, mock_log_event, mock_get_llm, mock_llm_client, tmp_path
+    ):
+        """_run_phase must catch CreditExhaustedError BEFORE the generic handler
+        and return a tagged dict (not a flattened {'success': False, 'error': ...})."""
+        from api.services.llm import CreditExhaustedError
+
+        mock_get_llm.return_value = mock_llm_client
+        mock_llm_client.chat = AsyncMock(
+            side_effect=CreditExhaustedError("OpenRouter credit exhausted", backend="openrouter")
+        )
+        mock_log_event.return_value = None
+        mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
+
+        worker = JobWorker()
+        result = await worker._run_phase(
+            job_id=1, phase_name="analyst", context={"transcript": "x"}, project_path=tmp_path
+        )
+
+        assert result["success"] is False
+        assert result["credit_exhausted"] is True
+        assert "credit" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    @patch("api.services.worker.get_llm_client")
+    @patch("api.services.worker.update_job_status")
+    @patch("api.services.worker.update_job_phase")
+    @patch("api.services.worker.update_job_heartbeat")
+    @patch("api.services.worker.log_event")
+    @patch("api.services.worker.start_run_tracking")
+    @patch("api.services.worker.end_run_tracking")
+    @patch("api.services.worker.pause_and_suggest")
+    @patch("api.services.worker.TRANSCRIPTS_DIR")
+    @patch("api.services.worker.OUTPUT_DIR")
+    @patch("api.services.worker.AGENTS_DIR")
+    async def test_process_job_credit_exhausted_pauses_not_failed(
+        self,
+        mock_agents_dir,
+        mock_output_dir,
+        mock_transcripts_dir,
+        mock_pause,
+        mock_end_tracking,
+        mock_start_tracking,
+        mock_log_event,
+        mock_update_heartbeat,
+        mock_update_phase,
+        mock_update_status,
+        mock_get_llm,
+        mock_llm_client,
+        tmp_path,
+        sample_job,
+    ):
+        """Credit exhaustion on the first phase routes to pause_and_suggest(trigger='credit')
+        and the job is NEVER marked failed (no raise, no consumed retry)."""
+        from api.services.llm import CreditExhaustedError
+
+        mock_get_llm.return_value = mock_llm_client
+        mock_llm_client.chat = AsyncMock(
+            side_effect=CreditExhaustedError("OpenRouter credit exhausted", backend="openrouter")
+        )
+        mock_pause.return_value = None
+        mock_update_status.return_value = None
+        mock_update_phase.return_value = None
+        mock_update_heartbeat.return_value = None
+        mock_log_event.return_value = None
+        mock_start_tracking.return_value = MagicMock(total_cost=0, total_tokens=0)
+        mock_end_tracking.return_value = {"total_cost": 0.0, "total_tokens": 0}
+
+        mock_transcripts_dir.__truediv__ = lambda self, name: tmp_path / name
+        mock_output_dir.__truediv__ = lambda self, name: tmp_path / name
+        mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
+        (tmp_path / sample_job["transcript_file"]).write_text("Test transcript content")
+
+        worker = JobWorker()
+        await worker.process_job(sample_job)
+
+        mock_pause.assert_awaited_once()
+        assert mock_pause.await_args.kwargs["trigger"] == "credit"
+
+        statuses = []
+        for c in mock_update_status.call_args_list:
+            s = c.args[1] if len(c.args) > 1 else c.kwargs.get("status")
+            statuses.append(getattr(s, "value", s))
+        assert "failed" not in statuses
+
+    @pytest.mark.asyncio
+    @patch("api.services.completeness.check_completeness")
+    @patch("api.services.worker.get_llm_client")
+    @patch("api.services.worker.update_job_status")
+    @patch("api.services.worker.update_job_phase")
+    @patch("api.services.worker.update_job_heartbeat")
+    @patch("api.services.worker.log_event")
+    @patch("api.services.worker.start_run_tracking")
+    @patch("api.services.worker.end_run_tracking")
+    @patch("api.services.worker.pause_and_suggest")
+    @patch("api.services.worker.TRANSCRIPTS_DIR")
+    @patch("api.services.worker.OUTPUT_DIR")
+    @patch("api.services.worker.AGENTS_DIR")
+    async def test_process_job_truncation_routes_through_pause_and_suggest(
+        self,
+        mock_agents_dir,
+        mock_output_dir,
+        mock_transcripts_dir,
+        mock_pause,
+        mock_end_tracking,
+        mock_start_tracking,
+        mock_log_event,
+        mock_update_heartbeat,
+        mock_update_phase,
+        mock_update_status,
+        mock_get_llm,
+        mock_check_completeness,
+        mock_llm_client,
+        mock_llm_response,
+        tmp_path,
+        sample_job,
+    ):
+        """Truncation detection pauses via pause_and_suggest(trigger='truncation')."""
+        mock_get_llm.return_value = mock_llm_client
+        mock_llm_client.chat = AsyncMock(return_value=mock_llm_response)
+        mock_pause.return_value = None
+        mock_update_status.return_value = None
+        mock_update_phase.return_value = None
+        mock_update_heartbeat.return_value = None
+        mock_log_event.return_value = None
+        mock_start_tracking.return_value = MagicMock(total_cost=0, total_tokens=0)
+        mock_end_tracking.return_value = {"total_cost": 0.02, "total_tokens": 1000}
+
+        truncated = MagicMock()
+        truncated.is_complete = False
+        truncated.skipped = False
+        truncated.coverage_ratio = 0.4
+        truncated.output_word_count = 100
+        truncated.source_word_count = 250
+        truncated.to_dict.return_value = {"coverage_ratio": 0.4}
+        mock_check_completeness.return_value = truncated
+
+        mock_transcripts_dir.__truediv__ = lambda self, name: tmp_path / name
+        mock_output_dir.__truediv__ = lambda self, name: tmp_path / name
+        mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
+        (tmp_path / sample_job["transcript_file"]).write_text("Test transcript content " * 50)
+
+        worker = JobWorker()
+        await worker.process_job(sample_job)
+
+        mock_pause.assert_awaited_once()
+        assert mock_pause.await_args.kwargs["trigger"] == "truncation"
+
+    @pytest.mark.asyncio
+    @patch("api.services.worker.get_llm_client")
+    @patch("api.services.worker.update_job_status")
+    @patch("api.services.worker.end_run_tracking")
+    @patch("api.services.worker.pause_and_suggest")
+    async def test_pause_for_credit_helper(
+        self, mock_pause, mock_end_tracking, mock_update_status, mock_get_llm, mock_llm_client
+    ):
+        """Shared terminal helper (used by main loop AND optional-phase path) pauses
+        with trigger='credit' and records cost without marking the job failed."""
+        mock_get_llm.return_value = mock_llm_client
+        mock_pause.return_value = None
+        mock_end_tracking.return_value = {"total_cost": 0.05}
+        mock_update_status.return_value = None
+
+        worker = JobWorker()
+        await worker._pause_for_credit(job_id=7)
+
+        mock_pause.assert_awaited_once()
+        assert mock_pause.await_args.kwargs["trigger"] == "credit"
+        assert "credit" in mock_pause.await_args.kwargs["message"].lower()
+        # Cost recorded as a paused partial write, never failed.
+        assert mock_update_status.await_args.args[1] == JobStatus.paused
