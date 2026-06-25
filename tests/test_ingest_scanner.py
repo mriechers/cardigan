@@ -1273,3 +1273,162 @@ class TestBatchedUpsert:
             500,
             1,
         ], f"Expected INSERT batch sizes [500, 500, 1], got {insert_batch_sizes}"
+
+
+class TestIngestScannerDataIntegrity:
+    """Regression tests for #168 (data corruption + scope gap from PR #162).
+
+    Bug 1: the last_seen_at UPDATE ran table-wide (no WHERE), resetting the
+    staleness signal for every row instead of only files seen in the current
+    scan. Bug 2: scan() gave each top-level directory a fresh visited_urls set,
+    so a subdir shared by two configured roots was re-fetched per root. The same
+    fresh-set gap existed on the per-Media-ID entry point (#165 item 1).
+    """
+
+    def _make_files(self, n: int) -> list[RemoteFile]:
+        return [
+            RemoteFile(
+                filename=f"2WLI{i:04d}HD.srt",
+                url=f"https://test.com/2WLI{i:04d}HD.srt",
+                directory_path="/",
+                file_type="transcript",
+                media_id=f"2WLI{i:04d}HD",
+                file_size_bytes=1024,
+                modified_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            )
+            for i in range(n)
+        ]
+
+    @pytest.mark.asyncio
+    async def test_last_seen_update_is_scoped_to_files_seen_this_scan(self):
+        """The last_seen_at UPDATE must carry a WHERE clause bound to the seen URLs.
+
+        Before #168's fix the surviving statement was
+        ``UPDATE available_files SET last_seen_at = :now`` with no WHERE, so a
+        scan of one directory stamped every row in the table — corrupting the
+        staleness signal for files from unrelated directories/scans.
+        """
+        files = self._make_files(3)
+        # Two of the three already exist in the DB; one is new.
+        existing = {files[0].url, files[1].url}
+
+        update_statements: list[tuple[str, dict]] = []
+
+        async def mock_execute(query, params=None):
+            sql = str(query)
+            mock_result = MagicMock()
+            if "SELECT remote_url" in sql:
+                rows = []
+                for url in existing:
+                    row = MagicMock()
+                    row.remote_url = url
+                    rows.append(row)
+                mock_result.fetchall.return_value = rows
+            else:
+                mock_result.fetchall.return_value = []
+            if "UPDATE available_files" in sql:
+                update_statements.append((sql, params if isinstance(params, dict) else {}))
+            return mock_result
+
+        mock_session = AsyncMock()
+        mock_session.execute = mock_execute
+        mock_session.commit = AsyncMock()
+
+        with patch("api.services.ingest_scanner.get_session") as mock_get_session:
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_get_session.return_value.__aexit__ = AsyncMock()
+
+            scanner = IngestScanner()
+            await scanner._track_files_batch(files)
+
+        assert update_statements, "expected a last_seen_at UPDATE for the existing files"
+        for sql, params in update_statements:
+            lowered = sql.lower()
+            assert "where" in lowered, f"last_seen_at UPDATE has no WHERE clause (table-wide!): {sql}"
+            assert "remote_url" in lowered
+            bound_urls = {v for k, v in params.items() if k.startswith("url")}
+            assert bound_urls, "expected remote_url params bound to the UPDATE"
+            assert bound_urls <= existing, f"UPDATE touched URLs not seen this scan: {bound_urls - existing}"
+
+    @pytest.mark.asyncio
+    async def test_visited_urls_shared_across_top_level_directories(self):
+        """A subdir reachable from two configured roots is fetched once, not per-root."""
+        scanner = IngestScanner(base_url="https://test.com", directories=["/a/", "/b/"])
+
+        a_html = (
+            '<html><body><a href="https://test.com/shared/">shared/</a>'
+            '<a href="a_file.srt">a_file.srt</a></body></html>'
+        )
+        b_html = (
+            '<html><body><a href="https://test.com/shared/">shared/</a>'
+            '<a href="b_file.srt">b_file.srt</a></body></html>'
+        )
+        shared_html = '<html><body><a href="shared_file.srt">shared_file.srt</a></body></html>'
+
+        mock_responses = {
+            "https://test.com/a/": a_html,
+            "https://test.com/b/": b_html,
+            "https://test.com/shared/": shared_html,
+        }
+        get_call_counts: dict[str, int] = {}
+
+        async def mock_get(url, auth=None):
+            get_call_counts[url] = get_call_counts.get(url, 0) + 1
+            resp = MagicMock()
+            resp.text = mock_responses.get(url, "<html></html>")
+            resp.raise_for_status = MagicMock()
+            return resp
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_instance = AsyncMock()
+            mock_instance.get = mock_get
+            mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_client.return_value = mock_instance
+
+            with patch.object(scanner, "_track_files_batch", return_value=(0, 0, 0)):
+                result = await scanner.scan()
+
+        assert result.success is True
+        assert get_call_counts.get("https://test.com/shared/", 0) == 1, (
+            "shared/ reachable from both /a/ and /b/ should be fetched once across the scan, "
+            f"got {get_call_counts.get('https://test.com/shared/', 0)} fetches"
+        )
+
+    @pytest.mark.asyncio
+    async def test_visited_urls_shared_across_media_id_directories(self):
+        """check_ingest_server_for_media_id shares one visited set across directories (#165)."""
+        scanner = IngestScanner(base_url="https://test.com", directories=["/a/", "/b/"])
+
+        a_html = (
+            '<html><body><a href="https://test.com/shared/">shared/</a>'
+            '<a href="2WLI1209HD.srt">2WLI1209HD.srt</a></body></html>'
+        )
+        b_html = '<html><body><a href="https://test.com/shared/">shared/</a></body></html>'
+        shared_html = '<html><body><a href="other.srt">other.srt</a></body></html>'
+
+        mock_responses = {
+            "https://test.com/a/": a_html,
+            "https://test.com/b/": b_html,
+            "https://test.com/shared/": shared_html,
+        }
+        get_call_counts: dict[str, int] = {}
+
+        async def mock_get(url, auth=None):
+            get_call_counts[url] = get_call_counts.get(url, 0) + 1
+            resp = MagicMock()
+            resp.text = mock_responses.get(url, "<html></html>")
+            resp.raise_for_status = MagicMock()
+            return resp
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_instance = AsyncMock()
+            mock_instance.get = mock_get
+            mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_client.return_value = mock_instance
+
+            files = await scanner.check_ingest_server_for_media_id("2WLI1209HD")
+
+        assert any(f.filename == "2WLI1209HD.srt" for f in files)
+        assert get_call_counts.get("https://test.com/shared/", 0) == 1
