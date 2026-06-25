@@ -115,6 +115,7 @@ jobs_table = Table(
     Column("max_retries", Integer, server_default="3"),
     Column("error_message", Text, nullable=True),
     Column("error_timestamp", DateTime, nullable=True),
+    Column("auto_escalated_at", DateTime, nullable=True),
     Column("manifest_path", Text, nullable=True),
     Column("logs_path", Text, nullable=True),
     Column("last_heartbeat", DateTime, nullable=True),
@@ -601,6 +602,9 @@ async def update_job(job_id: int, job_update: JobUpdate) -> Optional[Job]:
                 update_values["error_timestamp"] = None
             else:
                 update_values["error_timestamp"] = datetime.now(timezone.utc)
+
+        if job_update.auto_escalated_at is not None:
+            update_values["auto_escalated_at"] = job_update.auto_escalated_at
 
         if job_update.estimated_cost is not None:
             update_values["estimated_cost"] = job_update.estimated_cost
@@ -1481,6 +1485,7 @@ def _row_to_job(row) -> Job:
         max_retries=row.max_retries,
         error_message=row.error_message,
         error_timestamp=row.error_timestamp,
+        auto_escalated_at=getattr(row, "auto_escalated_at", None),
         manifest_path=row.manifest_path,
         logs_path=row.logs_path,
         last_heartbeat=row.last_heartbeat,

@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
+from api.models.job import JobStatus, JobUpdate
+from api.services.database import update_job
+
 FAMILY_ORDER = ["haiku", "sonnet", "opus"]
 
 
@@ -25,3 +30,18 @@ def bump_family(family: str | None) -> str | None:
         return None
     idx = FAMILY_ORDER.index(family)
     return FAMILY_ORDER[idx + 1] if idx + 1 < len(FAMILY_ORDER) else None
+
+
+async def pause_and_suggest(job_id: int, *, trigger: str, message: str, mark_escalated: bool = False) -> None:
+    """Terminal handler shared by all failure triggers (QA-fail, credit, truncation).
+
+    Leaves the job visibly NOT completed: status=paused with a structured,
+    actionable error_message. Optionally stamps the escalate-once marker.
+    """
+    update = JobUpdate(
+        status=JobStatus.paused,
+        error_message=f"[{trigger}] {message}",
+    )
+    if mark_escalated:
+        update.auto_escalated_at = datetime.now(timezone.utc)
+    await update_job(job_id, update)
