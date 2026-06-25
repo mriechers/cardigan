@@ -60,6 +60,9 @@ class SessionEvent(BaseModel):
     timestamp: datetime
     event_type: EventType
     data: Optional[EventData] = None
+    # Cost-epoch tag (migration 011). Exposed so API consumers can filter events
+    # by epoch without dropping to raw SQL (#118).
+    app_version: Optional[str] = None
 
     class Config:
         from_attributes = True

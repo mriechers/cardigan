@@ -120,10 +120,14 @@ def watch_loop():
     print(f"[Watch] Watching {TRANSCRIPTS_DIR} for new transcripts...")
     print("[Watch] Press Ctrl+C to stop")
 
-    seen_files = get_queued_files() | set(get_transcript_files())
+    # Guard the initial scan as well as the loop: a Ctrl+C during the very first
+    # get_transcript_files() (startup) must exit cleanly too. Previously this line
+    # sat outside the try, so an interrupt during startup escaped watch_loop (and,
+    # under test, leaked out of pytest as exit-code 2). See test_watch_loop_keyboard_interrupt.
+    try:
+        seen_files = get_queued_files() | set(get_transcript_files())
 
-    while True:
-        try:
+        while True:
             current_files = set(get_transcript_files())
             new_files = current_files - seen_files
 
@@ -134,9 +138,8 @@ def watch_loop():
             seen_files = seen_files | current_files
             time.sleep(POLL_INTERVAL)
 
-        except KeyboardInterrupt:
-            print("\n[Watch] Stopped.")
-            break
+    except KeyboardInterrupt:
+        print("\n[Watch] Stopped.")
 
 
 def main():
