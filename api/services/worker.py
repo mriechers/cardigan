@@ -2155,6 +2155,43 @@ Please format this transcript section:
                 return_exceptions=True,
             )
 
+            # Credit exhaustion anywhere in the batch must pause the job (Trigger B,
+            # #243), not fail it. Detect it BEFORE the generic exception flatten below,
+            # and return the same credit-tagged dict ``_run_phase`` returns for the
+            # non-chunked case so the main loop routes it through ``_pause_for_credit``.
+            credit_error = next(
+                (r for r in chunk_results if isinstance(r, CreditExhaustedError)),
+                None,
+            )
+            if credit_error is not None:
+                # Sum cost from any chunks that completed before the batch hit the wall.
+                partial_cost = sum(r["cost"] for r in chunk_results if not isinstance(r, Exception))
+                logger.warning(
+                    "Chunked formatter halted — OpenRouter credit exhausted",
+                    extra={
+                        "job_id": job_id,
+                        "backend": credit_error.backend,
+                        "detail": credit_error.detail,
+                    },
+                )
+                await log_event(
+                    EventCreate(
+                        job_id=job_id,
+                        event_type=EventType.phase_failed,
+                        data=EventData(
+                            phase="formatter",
+                            extra={"error": credit_error.detail, "credit_exhausted": True},
+                        ),
+                    )
+                )
+                return {
+                    "success": False,
+                    "credit_exhausted": True,
+                    "error": credit_error.detail,
+                    "cost": partial_cost,
+                    "tokens": 0,
+                }
+
             # Check for failures
             for i, result in enumerate(chunk_results):
                 if isinstance(result, Exception):

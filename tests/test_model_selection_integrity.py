@@ -221,6 +221,55 @@ async def test_chunked_formatter_records_real_model(monkeypatch, tmp_path):
     assert "chunked" not in result["model"].split()[0]  # real id, not the opaque string
 
 
+@pytest.mark.asyncio
+async def test_chunked_formatter_tags_credit_exhausted(monkeypatch, tmp_path):
+    """A CreditExhaustedError in any chunk must surface as a credit-tagged dict.
+
+    Without the tag, the gather()-flatten turns it into a generic
+    ``{"success": False, "error": "Chunk i failed: ..."}`` and the main loop
+    raises → job marked failed → the actionable "add credit, then retry" pause
+    is lost. The chunked path must mirror ``_run_phase``'s non-chunked behavior.
+    """
+    from types import SimpleNamespace
+
+    from api.services import worker as worker_mod
+    from api.services.chunking import TranscriptChunk
+    from api.services.llm import CreditExhaustedError
+    from api.services.worker import JobWorker
+
+    w = JobWorker.__new__(JobWorker)
+    w.llm = MagicMock()
+    w.llm.get_backend_for_phase = MagicMock(return_value="openrouter")
+    w.llm.get_backend_config = MagicMock(return_value={"timeout": 120})
+
+    async def fake_chat(**kwargs):
+        # The second chunk hits the credit wall; the first would succeed.
+        if "b" in next(m["content"] for m in kwargs["messages"] if m["role"] == "user"):
+            raise CreditExhaustedError("Insufficient credit", backend="openrouter")
+        return SimpleNamespace(
+            content="formatted", cost=0.01, total_tokens=10, input_tokens=6, output_tokens=4, model="m"
+        )
+
+    w.llm.chat = fake_chat
+    monkeypatch.setattr(worker_mod, "log_event", AsyncMock())
+    monkeypatch.setattr(w, "_load_agent_prompt", lambda phase: "system")
+
+    chunks = [
+        TranscriptChunk(index=0, content="a", start_timecode="0", end_timecode="1", word_count=1, overlap_prefix=""),
+        TranscriptChunk(index=1, content="b", start_timecode="1", end_timecode="2", word_count=1, overlap_prefix="a"),
+    ]
+    result = await w._run_formatter_chunked(
+        job_id=1,
+        chunks=chunks,
+        context={"analyst_output": ""},
+        project_path=tmp_path,
+        chunking_config={"max_parallel": 2},
+    )
+
+    assert result["success"] is False
+    assert result["credit_exhausted"] is True
+
+
 def test_revalidation_updates_validator_model():
     """After re-validation, the validator entry in phases[] must reflect the model that judged."""
     # Pure helper test: the update logic lives in a small helper we add.
