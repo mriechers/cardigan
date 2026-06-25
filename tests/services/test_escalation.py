@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -81,3 +83,13 @@ async def test_resolve_escalated_model_bumps_and_resolves():
 @pytest.mark.asyncio
 async def test_resolve_escalated_model_none_when_opus():
     assert await escalation.resolve_escalated_model("anthropic/claude-opus-4-8", ["fast"]) is None
+
+
+def test_config_has_qa_escalation_and_sonnet_validator():
+    cfg = json.loads((Path(__file__).resolve().parents[2] / "config" / "llm-config.json").read_text())
+    qa = cfg["qa_escalation"]
+    assert qa["on_validation_fail"] is True
+    assert qa["max_auto_escalations"] == 1
+    assert qa["exclude_variants"] == ["fast", "fable"]
+    # validator no longer on the cheapskate tier
+    assert cfg["phase_backends"]["validator"] != "openrouter-cheapskate"
