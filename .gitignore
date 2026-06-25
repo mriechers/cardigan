@@ -27,6 +27,7 @@ data/judge_archive/findings.md
 # IDE
 .idea/
 .vscode/
+*.code-workspace
 *.swp
 
 # Superpowers brainstorm session runtime state (server.pid, server.log, server-stopped)

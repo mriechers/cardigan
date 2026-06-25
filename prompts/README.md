@@ -13,7 +13,7 @@ Each file is a freestanding markdown document. The worker loads it verbatim (wit
 | `seo.md` | `seo` | Generates the SEO metadata (title, short/long description, keywords, social copy) from the formatted transcript and analyst notes. |
 | `validator.md` | `validator` | QA-reviews the outputs of the prior phases against SST and the brainstorming doc; flags issues for retry or escalation. Sprint 2 replaced the older `manager` agent with this. |
 | `timestamp.md` | `timestamp` | Generates chapter timestamps from the formatted transcript. Auto-triggers for content ≥10 minutes; can be manually triggered for shorter content. |
-| `copy_editor.md` | `copy_editor` | Interactive copy-editing agent used through Claude Desktop / MCP, not by the worker. Not part of the auto-pipeline. |
+| `copy_editor.md` | `copy_editor` | Interactive copy-editing agent used through Claude Desktop / MCP, not by the worker. Not part of the auto-pipeline. **For the Claude Code dispatchable version (REST-API transport), see `.claude/agents/copy_editor.md`** — a subagent must live under `.claude/agents/` to be discoverable, so it can't move here. |
 | `ap_style_bot.md` | (none) | Legacy/experimental prompt. Not currently invoked by the worker. Kept for reference; safe to remove if confirmed unused. |
 
 ## How to refine a prompt
