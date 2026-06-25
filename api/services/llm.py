@@ -18,6 +18,7 @@ import httpx
 from api.models.events import EventCreate, EventData, EventType
 from api.services.database import log_event
 from api.services.langfuse_client import get_langfuse_client
+from api.services.secrets import get_secret
 
 # Cost cap and safety configuration - can be overridden via environment
 DEFAULT_RUN_COST_CAP = 1.0  # $1 per run max
@@ -534,10 +535,16 @@ class LLMClient:
     # phase_backends -> phase_models consolidation.
 
     def get_api_key(self, backend_config: Dict[str, Any]) -> Optional[str]:
-        """Get API key for a backend from environment."""
+        """Get API key for a backend via the centralized secrets resolver.
+
+        Resolves through api.services.secrets.get_secret (Docker secret file -> env
+        -> macOS Keychain) instead of a bare os.getenv, so a key delivered only as a
+        Docker secret or only in the Keychain still resolves even if bootstrap hasn't
+        populated os.environ for this call path (#121).
+        """
         key_env = backend_config.get("api_key_env")
         if key_env:
-            return os.getenv(key_env)
+            return get_secret(key_env)
         return None
 
     async def chat(

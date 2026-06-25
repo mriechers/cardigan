@@ -16,10 +16,12 @@ from api.services.database import (
     create_job,
     defer_job,
     delete_job,
+    get_app_version,
     get_config,
     get_events_for_job,
     get_job,
     get_next_pending_job,
+    get_session,
     get_stale_jobs,
     init_db,
     list_config,
@@ -737,26 +739,20 @@ async def test_create_job_with_explicit_path_no_sanitization(test_db):
 
 
 @pytest.mark.asyncio
+async def test_get_app_version_reads_env_at_call_time(monkeypatch):
+    """get_app_version() honors CARDIGAN_VERSION read at call time (#119)."""
+    monkeypatch.setenv("CARDIGAN_VERSION", "v9.9-probe")
+    assert get_app_version() == "v9.9-probe"
+
+
+@pytest.mark.asyncio
 async def test_create_job_sets_default_app_version(test_db, monkeypatch):
     """Newly created jobs are tagged with CARDIGAN_VERSION env (default v4.1)."""
     monkeypatch.setenv("CARDIGAN_VERSION", "v4.2-test")
-    # APP_VERSION is read at module import, so we re-read from os.environ via a helper
-    import importlib
-
-    import api.services.database as db_mod
-
-    # Save current engine state (set up by test_db fixture)
-    saved_engine = db_mod._engine
-    saved_factory = db_mod._async_session_factory
-
-    importlib.reload(db_mod)  # picks up the patched env var; resets engine globals
-
-    # Restore engine state so the reloaded module can reach the test DB
-    db_mod._engine = saved_engine
-    db_mod._async_session_factory = saved_factory
-
-    job = await db_mod.create_job(
-        db_mod.JobCreate(
+    # get_app_version() reads the env at call time, so monkeypatch.setenv alone
+    # suffices — no importlib.reload + engine save/restore needed (#119).
+    job = await create_job(
+        JobCreate(
             project_name="ver-test",
             project_path="/projects/ver-test",
             transcript_file="/transcripts/ver-test.txt",
@@ -768,30 +764,16 @@ async def test_create_job_sets_default_app_version(test_db, monkeypatch):
 @pytest.mark.asyncio
 async def test_log_event_sets_default_app_version(test_db, monkeypatch):
     monkeypatch.setenv("CARDIGAN_VERSION", "v4.2-test")
-    import importlib
+    job = await create_job(JobCreate(project_name="ev", project_path="/p/ev", transcript_file="/t/ev.txt"))
+    event = await log_event(EventCreate(job_id=job.id, event_type=EventType.job_started, data=None))
 
-    import api.services.database as db_mod
+    # The SessionEvent model now exposes app_version directly (#118), no raw SQL needed.
+    assert event.app_version == "v4.2-test"
 
-    # Save current engine state (set up by test_db fixture)
-    saved_engine = db_mod._engine
-    saved_factory = db_mod._async_session_factory
-
-    importlib.reload(db_mod)  # picks up the patched env var; resets engine globals
-
-    # Restore engine state so the reloaded module can reach the test DB
-    db_mod._engine = saved_engine
-    db_mod._async_session_factory = saved_factory
-
-    job = await db_mod.create_job(
-        db_mod.JobCreate(project_name="ev", project_path="/p/ev", transcript_file="/t/ev.txt")
-    )
-    event = await db_mod.log_event(
-        db_mod.EventCreate(job_id=job.id, event_type=db_mod.EventType.job_started, data=None)
-    )
-    # Read raw row to inspect column
+    # Belt-and-braces: the column itself carries the tag too.
     from sqlalchemy import text
 
-    async with db_mod.get_session() as s:
+    async with get_session() as s:
         row = (
             await s.execute(
                 text("SELECT app_version FROM session_stats WHERE id = :id"),
