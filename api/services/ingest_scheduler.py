@@ -50,8 +50,8 @@ async def run_scheduled_scan():
         # Run scan
         result = await scanner.scan()
 
-        # Record result
-        await record_scan_result(success=result.success)
+        # Record result (persists error detail on partial failure)
+        await record_scan_result(success=result.success, error=result.error_message)
 
         if result.success:
             logger.info(
@@ -64,7 +64,7 @@ async def run_scheduled_scan():
 
     except Exception as e:
         logger.error(f"Scheduled scan error: {e}", exc_info=True)
-        await record_scan_result(success=False)
+        await record_scan_result(success=False, error=str(e))
 
 
 async def configure_scheduler():

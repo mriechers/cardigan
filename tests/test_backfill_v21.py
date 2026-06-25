@@ -91,10 +91,14 @@ async def test_backfill_inserts_v21_jobs_with_new_ids(live_and_source_dbs):
     assert summary["session_stats_inserted"] == 2
 
     c = sqlite3.connect(paths["live"]).cursor()
-    rows = list(c.execute("SELECT app_version, COUNT(*) FROM jobs GROUP BY app_version ORDER BY 1"))
-    # One v4.1 row (existing), two v2.1 rows (backfilled)
-    assert ("v2.1", 2) in rows
-    assert ("v4.1", 1) in rows
+    counts = dict(c.execute("SELECT app_version, COUNT(*) FROM jobs GROUP BY app_version"))
+    # Two backfilled rows tagged v2.1, plus exactly one pre-existing job that keeps
+    # its current-app version. Assert the invariant structurally rather than against a
+    # hardcoded version string: the ambient version is "v4.2-test" in CI (not "v4.1"),
+    # which made the old ("v4.1", 1) assertion a stable-but-broken full-sweep failure
+    # (#200). Decoupled from the app_version symbol so #119's rename can't break it.
+    assert counts.get("v2.1") == 2
+    assert sum(n for v, n in counts.items() if v != "v2.1") == 1
 
 
 @pytest.mark.asyncio

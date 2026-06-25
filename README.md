@@ -1,5 +1,4 @@
-# The Metadata Neighborhood
-
+# Cardigan
 **PBS Wisconsin Digital Editorial Assistant v3.5**
 
 ![CI](https://github.com/MarkOnFire/ai-editorial-assistant-v3/actions/workflows/ci.yml/badge.svg)
@@ -11,7 +10,7 @@ A production-ready system for processing video transcripts and generating SEO-op
 
 ## Overview
 
-The Metadata Neighborhood transforms raw video transcripts into polished, SEO-ready metadata with minimal human intervention. Transcripts enter a four-phase LLM pipeline that extracts themes, formats descriptions, performs keyword analysis, and runs quality checks. The results are surfaced through a React dashboard for monitoring and a Claude Desktop MCP integration for human-in-the-loop editing.
+Cardigan transforms raw video transcripts into polished, SEO-ready metadata with minimal human intervention. Transcripts enter a four-phase LLM pipeline that extracts themes, formats descriptions, performs keyword analysis, and runs quality checks. The results are surfaced through a React dashboard for monitoring and a Claude Desktop MCP integration for human-in-the-loop editing.
 
 The system is designed around a single principle: editorial teams should spend their time on editorial judgment, not formatting boilerplate.
 

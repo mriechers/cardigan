@@ -270,9 +270,17 @@ async def _resolve_asset(
 async def get_asset(
     media_id: str,
     airtable_client: Annotated[AirtableClient, Depends(get_airtable_client)],
+    include_superseded: bool = Query(
+        default=False,
+        description="Include the superseded[] list of older REV versions (default: false)",
+    ),
     _scope=_require_scope("mmingest:read"),
 ) -> AssetResponse:
-    """Return the full {primary, variants, superseded} shape for a media_id.
+    """Return the {primary, variants, superseded} shape for a media_id.
+
+    superseded[] is empty by default; pass ?include_superseded=true to
+    populate it with older REV rows.  primary and variants are always
+    fully populated regardless of this flag.
 
     Airtable record_id is looked up live for the primary only (one call,
     one media_id).  Variants and superseded rows do not get Airtable calls.
@@ -286,7 +294,8 @@ async def get_asset(
     finally:
         await engine.dispose()
 
-    # 404 if nothing at all matches this media_id
+    # 404 if nothing at all matches this media_id (checks all three buckets
+    # regardless of include_superseded so a superseded-only media_id still 404s)
     if not primary_rows and not variant_rows and not superseded_rows:
         raise HTTPException(status_code=404, detail=f"No asset found for media_id={media_id!r}")
 
@@ -314,7 +323,9 @@ async def get_asset(
         primary = _row_to_asset_entry(primary_rows[0], airtable_record_id=at_record_id)
 
     variants = [_row_to_asset_entry(r) for r in variant_rows]
-    superseded = [_row_to_asset_entry(r) for r in superseded_rows]
+    # Gate the expensive superseded list behind the opt-in flag.
+    # The key is always present in the response shape for stability.
+    superseded = [_row_to_asset_entry(r) for r in superseded_rows] if include_superseded else []
 
     return AssetResponse(primary=primary, variants=variants, superseded=superseded)
 

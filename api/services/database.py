@@ -61,7 +61,16 @@ def _default_app_version() -> str:
 # Source of truth: git tag → setuptools_scm → api/__version__ → here.
 # Override at runtime via CARDIGAN_VERSION env var (set in docker-compose.yml).
 # See docs/VERSIONING.md for release/bump policy.
-APP_VERSION = os.getenv("CARDIGAN_VERSION") or _default_app_version()
+#
+# Read at call time (not captured as a module constant) so tests can vary it with
+# monkeypatch.setenv alone, without importlib.reload + manual engine save/restore (#119).
+def get_app_version() -> str:
+    """Return the cost-epoch tag for rows written by this process.
+
+    CARDIGAN_VERSION env override, else derived from the package version.
+    """
+    return os.getenv("CARDIGAN_VERSION") or _default_app_version()
+
 
 from api.models.config import ConfigItem, ConfigValueType
 from api.models.events import EventCreate, EventData, EventType, SessionEvent
@@ -359,7 +368,7 @@ async def create_job(job: JobCreate, app_version: Optional[str] = None) -> Job:
             "phases": json.dumps(initial_phases),
             "retry_count": 0,
             "max_retries": 3,
-            "app_version": app_version if app_version is not None else APP_VERSION,
+            "app_version": app_version if app_version is not None else get_app_version(),
         }
 
         # Insert job
@@ -1214,7 +1223,7 @@ async def log_event(event: EventCreate, app_version: Optional[str] = None) -> Se
             "timestamp": datetime.now(timezone.utc),
             "event_type": event.event_type.value,
             "data": data_json,
-            "app_version": app_version if app_version is not None else APP_VERSION,
+            "app_version": app_version if app_version is not None else get_app_version(),
         }
 
         stmt = session_stats_table.insert().values(**values)
@@ -1456,6 +1465,7 @@ def _row_to_event(row) -> SessionEvent:
         timestamp=row.timestamp,
         event_type=EventType(row.event_type),
         data=event_data,
+        app_version=getattr(row, "app_version", None),
     )
 
 
