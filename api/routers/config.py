@@ -4,20 +4,19 @@ Provides endpoints for viewing and updating LLM routing configuration.
 """
 
 import json
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from api.services.config_path import resolve_config_path
 from api.services.cost_estimator import estimate_job_cost
 from api.services.llm import get_llm_client
 from api.services.model_roster import get_available_models, invalidate_cache
 
 router = APIRouter(prefix="/config", tags=["config"])
 
-# Config file path
-CONFIG_PATH = Path("config/llm-config.json")
+CONFIG_PATH = resolve_config_path()
 
 
 class PhaseBackendsUpdate(BaseModel):
