@@ -211,6 +211,31 @@ async def test_update_job(test_db):
 
 
 @pytest.mark.asyncio
+async def test_update_job_clears_error_timestamp_on_retry(test_db):
+    """Clearing error_message to '' (retry path) must also clear error_timestamp.
+
+    Regression for #159: a successful retry left the stale failure timestamp in
+    place because update_job re-stamped error_timestamp whenever error_message
+    was not None — including the empty-string clear.
+    """
+    job = await create_job(
+        JobCreate(
+            project_name="test",
+            project_path="/projects/test",
+            transcript_file="/transcripts/test.txt",
+        )
+    )
+    # Fail the job — error_timestamp gets set
+    failed = await update_job(job.id, JobUpdate(status=JobStatus.failed, error_message="boom"))
+    assert failed.error_timestamp is not None
+
+    # Retry: status back to pending, error_message cleared to ""
+    retried = await update_job(job.id, JobUpdate(status=JobStatus.pending, error_message=""))
+    assert retried.error_message == ""
+    assert retried.error_timestamp is None
+
+
+@pytest.mark.asyncio
 async def test_delete_job(test_db):
     """Test deleting a job."""
     # Create job
