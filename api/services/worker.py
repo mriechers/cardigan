@@ -18,12 +18,18 @@ from api.services.database import (
     claim_next_job,
     clear_defer_state,
     defer_job,
+    get_job,
     log_event,
     record_heartbeat,
     set_config,
     update_job_heartbeat,
     update_job_phase,
     update_job_status,
+)
+from api.services.escalation import (
+    pause_and_suggest,
+    resolve_escalated_model,
+    select_escalation_phases,
 )
 from api.services.llm import (
     BackendUnavailableError,
@@ -858,6 +864,9 @@ Extract any name or spelling corrections that should be added to the glossary. S
             }
 
             truncation_paused = False
+            # Holds the parsed validator verdict (set when the validator phase runs);
+            # consumed by the QA-fail escalation gate at completion time.
+            validation_data: Optional[dict] = None
 
             for phase_name in self.PHASES:
                 # Check if phase already completed
@@ -1093,33 +1102,66 @@ Extract any name or spelling corrections that should be added to the glossary. S
             # Create manifest
             await self._create_manifest(job, project_path, phases, tracker)
 
-            # Mark job completed
             run_summary = await end_run_tracking(job_id)
-            await update_job_status(
+
+            # QA-fail escalation gate (Trigger A, #243): a validator `overall: "fail"`
+            # must NOT silently land as `completed`. The gate escalates flagged phases
+            # once and re-validates; on persistent/unresolvable failure it pauses the
+            # job (via pause_and_suggest) instead of completing it.
+            outcome = await self._finalize_with_qa_gate(
                 job_id,
-                JobStatus.completed,
-                actual_cost=run_summary["total_cost"] if run_summary else 0,
+                context,
+                project_path,
+                validation_data,
+                [p.get("name") for p in (phases or [])],
             )
-            # Job finished: clear any deferral bookkeeping so a future reprocess
-            # starts a fresh capacity-wait ceiling rather than inheriting this one.
-            await clear_defer_state(job_id)
 
-            # Archive the transcript file (non-fatal if this fails)
-            try:
-                self._archive_transcript(job)
-            except Exception as archive_err:
-                logger.warning(
-                    "Failed to archive transcript (non-fatal)", extra={"job_id": job_id, "error": str(archive_err)}
+            if outcome == "completed":
+                # Mark job completed
+                await update_job_status(
+                    job_id,
+                    JobStatus.completed,
+                    actual_cost=run_summary["total_cost"] if run_summary else 0,
                 )
+                # Job finished: clear any deferral bookkeeping so a future reprocess
+                # starts a fresh capacity-wait ceiling rather than inheriting this one.
+                await clear_defer_state(job_id)
 
-            logger.info(
-                "Job completed successfully",
-                extra={
-                    "job_id": job_id,
-                    "project_name": project_name,
-                    "total_cost": run_summary["total_cost"] if run_summary else 0,
-                },
-            )
+                # Archive the transcript file (non-fatal if this fails). Only on
+                # completion — a paused job may be reviewed/retried and still needs
+                # its source transcript, so we must NOT move it away on pause.
+                try:
+                    self._archive_transcript(job)
+                except Exception as archive_err:
+                    logger.warning(
+                        "Failed to archive transcript (non-fatal)", extra={"job_id": job_id, "error": str(archive_err)}
+                    )
+
+                logger.info(
+                    "Job completed successfully",
+                    extra={
+                        "job_id": job_id,
+                        "project_name": project_name,
+                        "total_cost": run_summary["total_cost"] if run_summary else 0,
+                    },
+                )
+            else:
+                # Gate already paused the job with an actionable error_message;
+                # do NOT mark it completed and do NOT archive the transcript.
+                # Record the attempt's cost without clobbering the pause reason.
+                await update_job_status(
+                    job_id,
+                    JobStatus.paused,
+                    actual_cost=run_summary["total_cost"] if run_summary else 0,
+                )
+                logger.info(
+                    "Job paused by QA gate (not completed)",
+                    extra={
+                        "job_id": job_id,
+                        "project_name": project_name,
+                        "total_cost": run_summary["total_cost"] if run_summary else 0,
+                    },
+                )
 
         except Exception as e:
             logger.error(
@@ -1166,6 +1208,97 @@ Extract any name or spelling corrections that should be added to the glossary. S
                     logger.warning("Heartbeat cleanup error", extra={"job_id": job_id, "error": str(e)})
                 self._heartbeat_task = None
             self._current_job_id = None
+
+    def _phase_model(self, job, phase_name: str) -> Optional[str]:
+        """Return the model the named phase actually ran on, from the job's
+        persisted phases. Handles both JobPhase objects and dict entries.
+
+        Returns None if the job/phase is unknown (the caller then treats the
+        family as unresolvable and skips escalation for that phase).
+        """
+        if job is None:
+            return None
+        phases = getattr(job, "phases", None) or []
+        for p in phases:
+            name = p.get("name") if isinstance(p, dict) else getattr(p, "name", None)
+            if name == phase_name:
+                return p.get("model") if isinstance(p, dict) else getattr(p, "model", None)
+        return None
+
+    async def _finalize_with_qa_gate(
+        self,
+        job_id: int,
+        context: Dict[str, Any],
+        project_path,
+        validation_result: Optional[dict],
+        phase_order: list,
+    ) -> str:
+        """Decide the terminal state after all phases run (Trigger A, #243).
+
+        Returns 'completed' or 'paused'. On any pause path the job is left
+        visibly NOT completed via ``pause_and_suggest`` (status=paused with an
+        actionable error_message).
+
+        Policy:
+          - validator overall != "fail" (or gate disabled) -> 'completed'
+          - "fail" + already auto-escalated once            -> 'paused'
+          - "fail" (first time) -> escalate flagged phases once on a stronger
+            model, re-validate, then 'completed' (pass) or 'paused' (still fail
+            / no stronger model available).
+        """
+        cfg = self.llm.config.get("qa_escalation", {})
+        overall = (validation_result or {}).get("overall")
+
+        if overall != "fail" or not cfg.get("on_validation_fail", True):
+            return "completed"
+
+        job = await get_job(job_id)
+        if job is not None and getattr(job, "auto_escalated_at", None) is not None:
+            await pause_and_suggest(
+                job_id,
+                trigger="qa_fail",
+                message="QA failed again after escalation — review or retry on a stronger model.",
+            )
+            return "paused"
+
+        phases = select_escalation_phases(validation_result, phase_order)
+        exclude = cfg.get("exclude_variants", ["fast", "fable"])
+        reran = False
+        for phase_name in phases:
+            current_model = self._phase_model(job, phase_name)
+            target = await resolve_escalated_model(current_model, exclude)
+            if target is None:
+                # Already at the strongest family / catalog unavailable for this phase.
+                continue
+            res = await self._run_phase(job_id, phase_name, context, project_path, model_override=target)
+            reran = reran or bool(res and res.get("success"))
+
+        if not reran:
+            await pause_and_suggest(
+                job_id,
+                trigger="qa_fail",
+                message="QA failed and no stronger model was available — review or retry.",
+                mark_escalated=True,
+            )
+            return "paused"
+
+        # Re-validate once on the configured default validator model.
+        reval = await self._run_phase(job_id, "validator", context, project_path)
+        verdict = (
+            self._parse_validation_result(reval.get("output", ""))
+            if reval and reval.get("success")
+            else {"overall": "fail"}
+        )
+        if verdict.get("overall") == "pass":
+            return "completed"
+
+        await pause_and_suggest(
+            job_id,
+            trigger="qa_fail",
+            message="QA failed after escalation — review or retry on a stronger model.",
+            mark_escalated=True,
+        )
+        return "paused"
 
     async def _fetch_sst_context(self, job: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Fetch SST metadata from Airtable if job has linked record.
