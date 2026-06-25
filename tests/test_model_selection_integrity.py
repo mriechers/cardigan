@@ -42,8 +42,7 @@ def test_resolve_config_path_uses_env(monkeypatch, tmp_path):
     target = tmp_path / "shared" / "llm-config.json"
     monkeypatch.setenv("LLM_CONFIG_PATH", str(target))
     # Seed default content so seeding logic has a source.
-    monkeypatch.setattr("api.services.config_path.DEFAULT_CONFIG",
-                        tmp_path / "default.json")
+    monkeypatch.setattr("api.services.config_path.DEFAULT_CONFIG", tmp_path / "default.json")
     (tmp_path / "default.json").write_text('{"primary_backend": "openrouter"}')
 
     resolved = resolve_config_path()
@@ -54,6 +53,7 @@ def test_resolve_config_path_uses_env(monkeypatch, tmp_path):
 
 def test_resolve_config_path_defaults_relative(monkeypatch):
     from api.services.config_path import resolve_config_path
+
     monkeypatch.delenv("LLM_CONFIG_PATH", raising=False)
     assert str(resolve_config_path()).endswith("config/llm-config.json")
 
@@ -76,22 +76,34 @@ async def test_chunked_formatter_passes_model_override(monkeypatch, tmp_path):
 
     async def fake_chat(**kwargs):
         seen_models.append(kwargs.get("model"))
-        return SimpleNamespace(content="formatted", cost=0.01, total_tokens=10,
-                               input_tokens=6, output_tokens=4,
-                               model="anthropic/claude-sonnet-4.6")
+        return SimpleNamespace(
+            content="formatted",
+            cost=0.01,
+            total_tokens=10,
+            input_tokens=6,
+            output_tokens=4,
+            model="anthropic/claude-sonnet-4.6",
+        )
 
     w.llm.chat = fake_chat
     monkeypatch.setattr(worker_mod, "log_event", AsyncMock())
     monkeypatch.setattr(w, "_load_agent_prompt", lambda phase: "system")
 
     chunks = [
-        TranscriptChunk(index=0, content="a", start_timecode="00:00:00", end_timecode="00:00:05", word_count=1, overlap_prefix=""),
-        TranscriptChunk(index=1, content="b", start_timecode="00:00:05", end_timecode="00:00:10", word_count=1, overlap_prefix="a"),
+        TranscriptChunk(
+            index=0, content="a", start_timecode="00:00:00", end_timecode="00:00:05", word_count=1, overlap_prefix=""
+        ),
+        TranscriptChunk(
+            index=1, content="b", start_timecode="00:00:05", end_timecode="00:00:10", word_count=1, overlap_prefix="a"
+        ),
     ]
 
     await w._run_formatter_chunked(
-        job_id=1, chunks=chunks, context={"analyst_output": ""},
-        project_path=tmp_path, chunking_config={"max_parallel": 2},
+        job_id=1,
+        chunks=chunks,
+        context={"analyst_output": ""},
+        project_path=tmp_path,
+        chunking_config={"max_parallel": 2},
         model_override="anthropic/claude-sonnet-4.6",
     )
 
@@ -113,19 +125,30 @@ async def test_chunked_formatter_records_real_model(monkeypatch, tmp_path):
     w.llm.get_backend_config = MagicMock(return_value={"timeout": 120})
 
     async def fake_chat(**kwargs):
-        return SimpleNamespace(content="formatted", cost=0.01, total_tokens=10,
-                               input_tokens=6, output_tokens=4,
-                               model="anthropic/claude-sonnet-4.6")
+        return SimpleNamespace(
+            content="formatted",
+            cost=0.01,
+            total_tokens=10,
+            input_tokens=6,
+            output_tokens=4,
+            model="anthropic/claude-sonnet-4.6",
+        )
 
     w.llm.chat = fake_chat
     monkeypatch.setattr(worker_mod, "log_event", AsyncMock())
     monkeypatch.setattr(w, "_load_agent_prompt", lambda phase: "system")
 
-    chunks = [TranscriptChunk(index=0, content="a", start_timecode="00:00:00",
-                              end_timecode="00:00:05", word_count=1, overlap_prefix="")]
+    chunks = [
+        TranscriptChunk(
+            index=0, content="a", start_timecode="00:00:00", end_timecode="00:00:05", word_count=1, overlap_prefix=""
+        )
+    ]
     result = await w._run_formatter_chunked(
-        job_id=1, chunks=chunks, context={"analyst_output": ""},
-        project_path=tmp_path, chunking_config={"max_parallel": 1},
+        job_id=1,
+        chunks=chunks,
+        context={"analyst_output": ""},
+        project_path=tmp_path,
+        chunking_config={"max_parallel": 1},
         model_override="anthropic/claude-sonnet-4.6",
     )
     assert "claude-sonnet-4.6" in result["model"]

@@ -4,6 +4,7 @@ api and worker run as separate containers; both must read/write the SAME
 config file so Settings changes made on the API take effect on the worker.
 Point LLM_CONFIG_PATH at a path on a shared volume in production.
 """
+
 import os
 import shutil
 from pathlib import Path
