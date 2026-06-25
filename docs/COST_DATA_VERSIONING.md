@@ -131,6 +131,21 @@ GROUP BY app_version, phase
 ORDER BY app_version, cost DESC;
 ```
 
+### Note on cost rollups (per-job vs per-event)
+
+The two queries above measure different things and can disagree for the same
+epoch. The v2.1 archive is the canonical example:
+
+- **`$1.70`** — `SUM(jobs.actual_cost)`, the per-job rollup.
+- **`$2.26`** — `SUM(json_extract(session_stats.data,'$.cost'))` summed across
+  `phase_completed` events, the per-event total.
+
+They differ because in v2.1 only 33 of 152 jobs had `actual_cost` populated
+(job-level cost tracking was less reliable then), whereas the per-event sum
+captures phase costs even when the job-level rollup was missed. **The per-event
+number is the more complete measurement;** prefer it when reconciling dashboards,
+and don't expect the two totals to match for older epochs.
+
 ## What `app_version` does *not* capture
 
 Quality. Cost is half the picture; whether the cost was worth it is
