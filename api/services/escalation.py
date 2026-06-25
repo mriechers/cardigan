@@ -45,3 +45,13 @@ async def pause_and_suggest(job_id: int, *, trigger: str, message: str, mark_esc
     if mark_escalated:
         update.auto_escalated_at = datetime.now(timezone.utc)
     await update_job(job_id, update)
+
+
+def select_escalation_phases(validation_result: dict, phase_order: list) -> list:
+    """Earliest validator-flagged phase + every downstream phase in run order."""
+    results = (validation_result or {}).get("phase_results", {})
+    flagged = {name for name, r in results.items() if r.get("status") == "fail" or r.get("flags")}
+    for i, name in enumerate(phase_order):
+        if name in flagged:
+            return phase_order[i:]
+    return []
