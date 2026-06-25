@@ -301,8 +301,8 @@ async def trigger_scan(
         )
         result = await scanner.scan()
 
-        # Record scan result in config
-        await record_scan_result(success=result.success)
+        # Record scan result in config (persists error detail on partial failure)
+        await record_scan_result(success=result.success, error=result.error_message)
 
         return ScanResponse(
             success=result.success,
@@ -316,8 +316,8 @@ async def trigger_scan(
         )
     except Exception as e:
         logger.error(f"Scan failed: {e}")
-        # Record failed scan
-        await record_scan_result(success=False)
+        # Record failed scan with the error detail so the Ready screen can show why.
+        await record_scan_result(success=False, error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
