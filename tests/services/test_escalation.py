@@ -1,6 +1,9 @@
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
 from api.models.job import JobCreate, JobStatus
+from api.services import escalation
 from api.services.database import create_job, get_job
 from api.services.escalation import bump_family, parse_model_family, pause_and_suggest, select_escalation_phases
 from tests.api.test_database import test_db  # noqa: F401
@@ -63,3 +66,18 @@ def test_selects_earliest_flagged_plus_downstream():
 def test_no_flags_returns_empty():
     vr = {"overall": "pass", "phase_results": {"formatter": {"status": "pass", "flags": []}}}
     assert select_escalation_phases(vr, PHASE_ORDER) == []
+
+
+@pytest.mark.asyncio
+async def test_resolve_escalated_model_bumps_and_resolves():
+    with patch.object(
+        escalation.model_roster, "newest_in_family", AsyncMock(return_value="anthropic/claude-sonnet-4-6")
+    ) as m:
+        got = await escalation.resolve_escalated_model("anthropic/claude-4.5-haiku-20251001", ["fast", "fable"])
+    assert got == "anthropic/claude-sonnet-4-6"
+    m.assert_awaited_once_with("sonnet", ["fast", "fable"])
+
+
+@pytest.mark.asyncio
+async def test_resolve_escalated_model_none_when_opus():
+    assert await escalation.resolve_escalated_model("anthropic/claude-opus-4-8", ["fast"]) is None

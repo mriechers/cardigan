@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from api.models.job import JobStatus, JobUpdate
+from api.services import model_roster
 from api.services.database import update_job
 
 FAMILY_ORDER = ["haiku", "sonnet", "opus"]
@@ -55,3 +56,13 @@ def select_escalation_phases(validation_result: dict, phase_order: list) -> list
         if name in flagged:
             return phase_order[i:]
     return []
+
+
+async def resolve_escalated_model(current_model: str | None, exclude_variants: list) -> str | None:
+    """Bump current_model's family one step and resolve the newest catalog model
+    in that family. None if already opus / unknown family / catalog unavailable.
+    """
+    target_family = bump_family(parse_model_family(current_model))
+    if target_family is None:
+        return None
+    return await model_roster.newest_in_family(target_family, exclude_variants)
