@@ -355,7 +355,9 @@ export default function ReadyForWork() {
 
         {/* File List */}
         <div className="divide-y divide-surface-700">
-          {loading ? (
+          {/* Skeleton only on first load — refetches after scan/queue/ignore set
+              loading=true too, and showing the loader then is the blink in #160. */}
+          {loading && files.length === 0 ? (
             <div className="py-12 text-center">
               <p className="text-surface-400 animate-pulse">Loading available files...</p>
             </div>
