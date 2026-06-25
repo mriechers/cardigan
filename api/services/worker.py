@@ -1833,8 +1833,21 @@ If a caption is garbled or unclear, include your best reconstruction rather than
 SPELLING: Always use "partisan" (not "partizan"), "bipartisan" (not "bipartisan"). Program names like "Inside Wisconsin Politics" are NOT italicized."""
 
                 if chunk.index == 0:
-                    # First chunk: normal formatter prompt
+                    # First chunk: normal formatter prompt (generates the metadata header).
                     user_message = f"{verbatim_instruction}\n\n"
+                    if total_chunks > 1:
+                        # Chunk 0 only sees the first slice of a long transcript. Without
+                        # this it concludes the transcript is truncated and emits false
+                        # "incomplete / needs_review" review notes that survive the merge
+                        # and trip the validator into a spurious QA failure (job 12).
+                        user_message += (
+                            f"IMPORTANT: This is section 1 of {total_chunks} of a long transcript "
+                            "being processed in parts. Later sections cover the rest of the "
+                            "transcript. Your section legitimately ends partway through — do NOT "
+                            "assess overall transcript completeness, do NOT claim the transcript "
+                            "is truncated, incomplete, or cut off, and do NOT set a 'needs_review' "
+                            "status on that basis. Format only the dialogue in this section.\n\n"
+                        )
                     user_message += "Using the following analysis as guidance:\n\n"
                     if sst_section:
                         user_message += sst_section

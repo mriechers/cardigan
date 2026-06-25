@@ -111,6 +111,72 @@ async def test_chunked_formatter_passes_model_override(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_chunked_formatter_first_chunk_told_it_is_a_section(monkeypatch, tmp_path):
+    """Chunk 0 of a multi-chunk run must be told it's 'section 1 of N'.
+
+    Regression for the job-12 bug: without this, chunk 0 sees its slice end
+    mid-transcript, concludes the transcript is truncated, and emits false
+    'incomplete / needs_review' review notes that trip the validator.
+    """
+    from types import SimpleNamespace
+
+    from api.services import worker as worker_mod
+    from api.services.chunking import TranscriptChunk
+    from api.services.worker import JobWorker
+
+    w = JobWorker.__new__(JobWorker)
+    w.llm = MagicMock()
+    w.llm.get_backend_for_phase = MagicMock(return_value="openrouter")
+    w.llm.get_backend_config = MagicMock(return_value={"timeout": 120})
+
+    captured = []
+
+    async def fake_chat(**kwargs):
+        captured.append(next(m["content"] for m in kwargs["messages"] if m["role"] == "user"))
+        return SimpleNamespace(
+            content="formatted", cost=0.01, total_tokens=10, input_tokens=6, output_tokens=4, model="m"
+        )
+
+    w.llm.chat = fake_chat
+    monkeypatch.setattr(worker_mod, "log_event", AsyncMock())
+    monkeypatch.setattr(w, "_load_agent_prompt", lambda phase: "system")
+
+    # --- multi-chunk: chunk 0 must carry the "section 1 of N" caveat ---
+    chunks = [
+        TranscriptChunk(index=0, content="a", start_timecode="0", end_timecode="1", word_count=1, overlap_prefix=""),
+        TranscriptChunk(index=1, content="b", start_timecode="1", end_timecode="2", word_count=1, overlap_prefix="a"),
+    ]
+    await w._run_formatter_chunked(
+        job_id=1,
+        chunks=chunks,
+        context={"analyst_output": ""},
+        project_path=tmp_path,
+        chunking_config={"max_parallel": 2},
+    )
+    # Identify chunk 0 by content: continuation chunks carry the "Continue formatting
+    # from where the previous section left off" phrase; chunk 0 does not.
+    chunk0_prompt = next(p for p in captured if "Continue formatting from where the previous" not in p)
+    assert "section 1 of 2" in chunk0_prompt
+    assert "do NOT assess overall transcript completeness" in chunk0_prompt
+    assert "needs_review" in chunk0_prompt
+
+    # --- single chunk: no caveat (it really is the whole transcript) ---
+    captured.clear()
+    solo = [
+        TranscriptChunk(index=0, content="a", start_timecode="0", end_timecode="1", word_count=1, overlap_prefix=""),
+    ]
+    await w._run_formatter_chunked(
+        job_id=2,
+        chunks=solo,
+        context={"analyst_output": ""},
+        project_path=tmp_path,
+        chunking_config={"max_parallel": 1},
+    )
+    assert len(captured) == 1
+    assert "section 1 of" not in captured[0]
+
+
+@pytest.mark.asyncio
 async def test_chunked_formatter_records_real_model(monkeypatch, tmp_path):
     """The chunked formatter result must report the model that ran, not 'chunked (...)'."""
     from types import SimpleNamespace
