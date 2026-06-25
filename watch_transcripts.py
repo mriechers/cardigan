@@ -37,6 +37,19 @@ def get_queued_files() -> set:
     return queued
 
 
+def send_heartbeat() -> None:
+    """Ping the API so it can record watcher liveness in the shared DB.
+
+    The watcher has no direct DB access (it talks to the API over HTTP), so this
+    is how /api/system/status detects it across container boundaries (#179).
+    Best-effort: a failed ping must never interrupt the watch loop.
+    """
+    try:
+        httpx.post(f"{API_BASE}/api/system/watcher/heartbeat", timeout=5)
+    except Exception:
+        pass
+
+
 def get_transcript_files() -> list:
     """Get all transcript files in the transcripts folder."""
     files = []
@@ -128,6 +141,7 @@ def watch_loop():
         seen_files = get_queued_files() | set(get_transcript_files())
 
         while True:
+            send_heartbeat()
             current_files = set(get_transcript_files())
             new_files = current_files - seen_files
 

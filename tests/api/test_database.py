@@ -19,14 +19,17 @@ from api.services.database import (
     get_app_version,
     get_config,
     get_events_for_job,
+    get_heartbeat_age_seconds,
     get_job,
     get_next_pending_job,
     get_session,
     get_stale_jobs,
+    heartbeat_is_fresh,
     init_db,
     list_config,
     list_jobs,
     log_event,
+    record_heartbeat,
     reset_stuck_jobs,
     run_stuck_job_cleanup,
     sanitize_path_component,
@@ -233,6 +236,26 @@ async def test_update_job_clears_error_timestamp_on_retry(test_db):
     retried = await update_job(job.id, JobUpdate(status=JobStatus.pending, error_message=""))
     assert retried.error_message == ""
     assert retried.error_timestamp is None
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_record_and_age(test_db):
+    """record_heartbeat writes a timestamp that get_heartbeat_age_seconds reads back fresh (#179)."""
+    # No heartbeat yet -> age is None, not fresh
+    assert await get_heartbeat_age_seconds("worker") is None
+    assert heartbeat_is_fresh(None) is False
+
+    await record_heartbeat("worker")
+    age = await get_heartbeat_age_seconds("worker")
+    assert age is not None
+    assert age < 5  # just written
+    assert heartbeat_is_fresh(age) is True
+
+    # A stale age is not fresh
+    assert heartbeat_is_fresh(10_000) is False
+
+    # Components are tracked independently
+    assert await get_heartbeat_age_seconds("watcher") is None
 
 
 @pytest.mark.asyncio
