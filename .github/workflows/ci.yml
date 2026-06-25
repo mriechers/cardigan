@@ -26,7 +26,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
       - name: Install lint tools
-        run: pip install ruff black
+        run: pip install -r requirements-dev.txt
       - name: Ruff check
         run: ruff check .
       - name: Black check
@@ -65,23 +65,18 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt -r requirements-dev.txt
       - name: Create required directories
         run: mkdir -p OUTPUT transcripts logs
       - name: Run database migrations
         run: alembic upgrade head
       - name: Run tests
-        run: |
-          # Exit code 2 = KeyboardInterrupt during cleanup (all tests pass but async teardown hangs).
-          # This is safe to ignore when the test summary shows 0 failures.
-          set +e
-          timeout 60 pytest --tb=short -q
-          rc=$?
-          set -e
-          if [ $rc -eq 0 ] || [ $rc -eq 2 ] || [ $rc -eq 124 ]; then
-            exit 0
-          fi
-          exit $rc
+        # Per-test timeout (pytest-timeout) guards against a single hung test stalling
+        # the job: that test is killed and reported as a failure, so a real hang turns
+        # CI red instead of being masked. The old `timeout 60` + swallow-exit-2/124 hack
+        # is gone now that the mid-suite hang (#102) and the teardown KeyboardInterrupt
+        # leak are fixed — the suite exits 0 cleanly.
+        run: pytest --tb=short -q --timeout=60 --timeout-method=thread
 
   build-frontend:
     name: Frontend Build
