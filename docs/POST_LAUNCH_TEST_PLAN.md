@@ -189,7 +189,7 @@ still 200. Revoke the throwaway key afterwards:
 ## §7 — Soak / acceptance envelope  *(optional, long-running)*
 
 For a deeper go/no-go, run the 24h soak harness (full runbook in
-`planning/sprint-5-staging-soak.md`):
+`planning/archive/sprint-5-staging-soak.md`):
 
 ```bash
 CONSUMER_KEY=<key> bash scripts/sprint5_soak_monitor.sh    # 24h background monitor
