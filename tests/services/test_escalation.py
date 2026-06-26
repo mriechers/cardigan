@@ -7,7 +7,14 @@ import pytest
 from api.models.job import JobCreate, JobStatus
 from api.services import escalation
 from api.services.database import create_job, get_job
-from api.services.escalation import bump_family, parse_model_family, pause_and_suggest, select_escalation_phases
+from api.services.escalation import (
+    bump_family,
+    classify_qa_failure,
+    nonfixable_review_message,
+    parse_model_family,
+    pause_and_suggest,
+    select_escalation_phases,
+)
 from tests.api.test_database import test_db  # noqa: F401
 
 PHASE_ORDER = ["analyst", "formatter", "seo", "validator", "timestamp"]
@@ -93,3 +100,63 @@ def test_config_has_qa_escalation_and_sonnet_validator():
     assert qa["exclude_variants"] == ["fast", "fable"]
     # validator no longer on the cheapskate tier
     assert cfg["phase_backends"]["validator"] != "openrouter-cheapskate"
+
+
+# ---------------------------------------------------------------------------
+# classify_qa_failure / nonfixable_review_message (#276)
+# ---------------------------------------------------------------------------
+
+
+def _vr(formatter_flags=None, seo_flags=None):
+    return {
+        "overall": "fail",
+        "phase_results": {
+            "analyst": {"status": "pass", "flags": []},
+            "formatter": {"status": "fail" if formatter_flags else "pass", "flags": formatter_flags or []},
+            "seo": {"status": "fail" if seo_flags else "pass", "flags": seo_flags or []},
+        },
+    }
+
+
+def test_classify_review_notes_only_skips():
+    out = classify_qa_failure(_vr(formatter_flags=["Review notes appear in transcript body"]), {})
+    assert out["escalate"] is False
+    assert out["nonfixable"] and not out["fixable"]
+
+
+def test_classify_needs_review_text_skips():
+    out = classify_qa_failure(_vr(formatter_flags=["Status field 'needs_review' indicates incomplete processing"]), {})
+    assert out["escalate"] is False
+
+
+def test_classify_artifact_marker_skips_vague_flag():
+    # Flag text is vague, but the formatter OUTPUT carries the contract marker.
+    vr = _vr(formatter_flags=["something is off"])
+    ctx = {"formatter_output": "# Formatted Transcript\n<!-- REVIEW NOTES:\n- verify spelling\n-->\n"}
+    out = classify_qa_failure(vr, ctx)
+    assert out["escalate"] is False
+
+
+def test_classify_mixed_escalates():
+    out = classify_qa_failure(
+        _vr(formatter_flags=["Review notes appear in transcript body"], seo_flags=["title exceeds 60 characters"]),
+        {},
+    )
+    assert out["escalate"] is True
+    assert out["fixable"] and out["nonfixable"]
+
+
+def test_classify_truncation_only_escalates():
+    out = classify_qa_failure(_vr(formatter_flags=["content ends abruptly mid-sentence (truncation)"]), {})
+    assert out["escalate"] is True
+
+
+def test_classify_empty_failsafe_escalates():
+    assert classify_qa_failure({}, {})["escalate"] is True
+    assert classify_qa_failure(None, None)["escalate"] is True
+
+
+def test_nonfixable_review_message_includes_flags():
+    msg = nonfixable_review_message(["Review notes appear in transcript body"])
+    assert "human review" in msg.lower()
+    assert "Review notes appear in transcript body" in msg
