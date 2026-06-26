@@ -22,6 +22,7 @@ from api.services.database import (
     log_event,
     record_heartbeat,
     set_config,
+    update_job,
     update_job_heartbeat,
     update_job_phase,
     update_job_status,
@@ -137,6 +138,37 @@ def apply_validator_model(phases: list, model: Optional[str]) -> list:
     for p in phases:
         if p.get("name") == "validator" and model:
             p["model"] = model
+    return phases
+
+
+def apply_escalated_phase_models(phases: Optional[list], escalated: Dict[str, dict]) -> Optional[list]:
+    """Refresh persisted ``phases[]`` with the model/cost from escalated re-runs (#243).
+
+    The escalated ``_run_phase`` calls in the QA gate don't update the job's
+    persisted ``phases[]`` (only the main loop does), so per-phase attribution
+    would otherwise stay stale at the pre-escalation model. ``escalated`` maps
+    ``phase_name -> {"model": ..., "cost": ...}``. Handles both ``JobPhase``
+    objects and dict entries. Returns the (mutated) ``phases`` list.
+    """
+    if not phases:
+        return phases
+    for p in phases:
+        name = p.get("name") if isinstance(p, dict) else getattr(p, "name", None)
+        info = escalated.get(name) if name else None
+        if not info:
+            continue
+        model = info.get("model")
+        cost = info.get("cost")
+        if isinstance(p, dict):
+            if model:
+                p["model"] = model
+            if cost is not None:
+                p["cost"] = cost
+        else:
+            if model:
+                p.model = model
+            if cost is not None:
+                p.cost = cost
     return phases
 
 
@@ -1281,6 +1313,8 @@ Extract any name or spelling corrections that should be added to the glossary. S
             model, re-validate, then 'completed' (pass) or 'paused' (still fail
             / no stronger model available).
         """
+        from api.models.job import JobUpdate
+
         cfg = self.llm.config.get("qa_escalation", {})
         overall = (validation_result or {}).get("overall")
 
@@ -1302,6 +1336,9 @@ Extract any name or spelling corrections that should be added to the glossary. S
         phases = [p for p in select_escalation_phases(validation_result, phase_order) if p != "validator"]
         exclude = cfg.get("exclude_variants", ["fast", "fable"])
         reran = False
+        # Track escalated per-phase model/cost so we can refresh the persisted
+        # phases[] attribution after the gate resolves (Minor-A, #243).
+        escalated_models: Dict[str, dict] = {}
         for phase_name in phases:
             current_model = self._phase_model(job, phase_name)
             target = await resolve_escalated_model(current_model, exclude)
@@ -1314,6 +1351,7 @@ Extract any name or spelling corrections that should be added to the glossary. S
                 # re-validation below judges the ESCALATED work, not the stale
                 # pre-escalation output (mirrors the main phase loop) (#243 fix).
                 context[f"{phase_name}_output"] = res.get("output", "")
+                escalated_models[phase_name] = {"model": res.get("model") or target, "cost": res.get("cost")}
                 reran = True
 
         if not reran:
@@ -1327,11 +1365,24 @@ Extract any name or spelling corrections that should be added to the glossary. S
 
         # Re-validate once on the configured default validator model.
         reval = await self._run_phase(job_id, "validator", context, project_path)
-        verdict = (
-            self._parse_validation_result(reval.get("output", ""))
-            if reval and reval.get("success")
-            else {"overall": "fail"}
+        if reval and reval.get("success"):
+            verdict = self._parse_validation_result(reval.get("output", ""))
+            escalated_models["validator"] = {"model": reval.get("model"), "cost": reval.get("cost")}
+        else:
+            verdict = {"overall": "fail"}
+
+        # Persist the LATEST validation verdict so a completed-after-escalation job
+        # no longer reports the stale pre-escalation "fail" (MUST-FIX 1, #243). Also
+        # refresh per-phase model/cost attribution for the escalated re-runs
+        # (Minor-A). update_job is a partial update, so the subsequent
+        # pause_and_suggest (status/error/escalation marker) won't clobber this.
+        refreshed = await get_job(job_id)
+        phases_update = apply_escalated_phase_models(
+            list(refreshed.phases) if refreshed and refreshed.phases else None,
+            escalated_models,
         )
+        await update_job(job_id, JobUpdate(validation_result=verdict, phases=phases_update))
+
         if verdict.get("overall") == "pass":
             return "completed"
 

@@ -38,6 +38,7 @@ async def test_qa_fail_then_pass_completes(monkeypatch):
     )
     pause = AsyncMock()
     monkeypatch.setattr(worker_mod, "pause_and_suggest", pause)
+    monkeypatch.setattr(worker_mod, "update_job", AsyncMock())
     run_phase = AsyncMock(
         return_value={"success": True, "output": "{}", "model": "anthropic/claude-4.5-haiku-20251001"}
     )
@@ -82,6 +83,7 @@ async def test_qa_persistent_fail_pauses(monkeypatch):
     )
     pause = AsyncMock()
     monkeypatch.setattr(worker_mod, "pause_and_suggest", pause)
+    monkeypatch.setattr(worker_mod, "update_job", AsyncMock())
     monkeypatch.setattr(
         w,
         "_run_phase",
@@ -159,6 +161,7 @@ async def test_escalated_output_threaded_into_revalidation(monkeypatch):
     )
     pause = AsyncMock()
     monkeypatch.setattr(worker_mod, "pause_and_suggest", pause)
+    monkeypatch.setattr(worker_mod, "update_job", AsyncMock())
 
     captured: dict = {}
 
@@ -213,6 +216,7 @@ async def test_validator_excluded_from_escalation_loop(monkeypatch):
     )
     pause = AsyncMock()
     monkeypatch.setattr(worker_mod, "pause_and_suggest", pause)
+    monkeypatch.setattr(worker_mod, "update_job", AsyncMock())
 
     escalated_phases: list = []
 

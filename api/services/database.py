@@ -242,6 +242,32 @@ async def init_db() -> None:
     # Create tables if they don't exist (fresh database)
     async with _engine.begin() as conn:
         await conn.run_sync(metadata.create_all)
+        # Defense-in-depth: backfill columns added to the ORM schema that may be
+        # absent on a pre-existing / hand-maintained SQLite DB. metadata.create_all
+        # NEVER ALTERs an existing table, so a deploy whose DB predates a newly
+        # added column would raise OperationalError on first write to it (#243:
+        # auto_escalated_at). Idempotent — skips any column already present.
+        await conn.run_sync(_ensure_jobs_columns)
+
+
+# Columns added to the ``jobs`` ORM schema after the table's original creation.
+# name -> SQLite column type (kept in sync with the Column() declarations above;
+# SQLAlchemy's DateTime renders as DATETIME in the SQLite dialect).
+_JOBS_BACKFILL_COLUMNS: dict[str, str] = {
+    "auto_escalated_at": "DATETIME",
+}
+
+
+def _ensure_jobs_columns(sync_conn) -> None:
+    """Add any missing ``jobs`` columns from ``_JOBS_BACKFILL_COLUMNS`` (idempotent).
+
+    Safe on both fresh DBs (column already created by ``metadata.create_all`` ->
+    skipped) and pre-existing DBs (column missing -> added via ALTER TABLE).
+    """
+    existing = {row[1] for row in sync_conn.exec_driver_sql("PRAGMA table_info(jobs)").fetchall()}
+    for column, ddl_type in _JOBS_BACKFILL_COLUMNS.items():
+        if column not in existing:
+            sync_conn.exec_driver_sql(f"ALTER TABLE jobs ADD COLUMN {column} {ddl_type}")
 
 
 async def close_db() -> None:
