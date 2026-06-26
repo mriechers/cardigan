@@ -1,6 +1,17 @@
-# PBS Wisconsin Transcript Glossary
+# PBS Wisconsin Transcript Glossary — Cardigan Project Layer
 
 Authoritative spelling and naming reference for all transcript processing agents (analyst, formatter, copy-editor). When in doubt, this file is correct — do NOT "autocorrect" names to more common spellings.
+
+> **Glossary architecture (base → project).** This is the **Cardigan project layer**. It
+> **extends** the workspace **base** glossary at `automations/transcripts/glossary.md`
+> (relative to the pbswi workspace root) with Cardigan-specific terms and overrides. On
+> conflict, entries here **win** over the base. Put cross-project PBS Wisconsin proper
+> nouns in the base; keep Cardigan-only names here.
+>
+> Build task (not yet wired — see `SPIKE-NOTES.md`): the pipeline should **merge base +
+> this file** when constructing whisper `initial_prompt` for `/transcribe` and the formatter
+> correction context. Today no code loads this file; it is consumed manually by the Claude
+> Desktop editor workflow.
 
 ## How to Use This Glossary
 
@@ -95,6 +106,7 @@ Names and terms corrected during human editorial review. These represent cases w
 | Correct | Model Tendency | Context |
 |---------|---------------|---------|
 | Sean Duffy | Shawn Duffy | Former WI congressman; model confuses with IWP host Shawn Johnson |
+| Erica Ayisi | Erika Aisi | PBS Wisconsin reporter (Here & Now); whisperX phonetic miss |
 
 ## Name Disambiguation
 
