@@ -1072,6 +1072,57 @@ Extract any name or spelling corrections that should be added to the glossary. S
                                 truncation_paused = True
                                 break  # Exit phase loop cleanly (no exception)
 
+                # === Seam-gap check after formatter phase ===
+                # Catches localized chunk-boundary drops that the global coverage
+                # ratio can't see (issue #269). Runs only if the completeness
+                # check above didn't already pause the job.
+                if phase_name == "formatter" and not truncation_paused:
+                    from api.services.seam_coverage import find_dropped_spans, format_gap_message
+
+                    seam_config = self.llm.config.get("routing", {}).get("seam_coverage", {})
+                    if seam_config.get("enabled", True):
+                        formatter_output = phase_result.get("output", "")
+                        transcript_file = job.get("transcript_file", "")
+                        is_srt = transcript_file.lower().endswith(".srt")
+
+                        seam = find_dropped_spans(
+                            source_transcript=transcript_content,
+                            formatter_output=formatter_output,
+                            is_srt=is_srt,
+                            min_run=seam_config.get("min_run", 4),
+                            per_caption_floor=seam_config.get("per_caption_floor", 0.5),
+                        )
+
+                        context["seam_coverage"] = seam.to_dict()
+
+                        if seam.has_gap:
+                            gap_msg = format_gap_message(seam)
+                            logger.warning(
+                                "Seam gap detected in formatter output",
+                                extra={
+                                    "job_id": job_id,
+                                    "dropped_spans": seam.to_dict()["dropped_spans"],
+                                },
+                            )
+                            await log_event(
+                                EventCreate(
+                                    job_id=job_id,
+                                    event_type=EventType.phase_failed,
+                                    data=EventData(
+                                        phase="seam_coverage",
+                                        extra=seam.to_dict(),
+                                    ),
+                                )
+                            )
+                            if seam_config.get("pause_on_gap", True):
+                                await update_job_status(
+                                    job_id,
+                                    JobStatus.paused,
+                                    error_message=gap_msg,
+                                )
+                                truncation_paused = True
+                                break  # Exit phase loop cleanly (no exception)
+
             # Handle truncation pause — exit before optional phases
             if truncation_paused:
                 logger.info(
@@ -1848,6 +1899,18 @@ Extract any name or spelling corrections that should be added to the glossary. S
             project_path: Path to project output directory
             model_override: Optional model ID to override the phase default
         """
+        # Normalize live-caption speaker markers before formatting: split any
+        # caption with an interior ">>" so the formatter sees one turn per
+        # caption (issue #269 — fixes mid-cue turn-order inversion and speaker
+        # misattribution). Word-preserving, so downstream checks are unaffected.
+        if phase_name == "formatter":
+            seg_config = self.llm.config.get("routing", {}).get("speaker_segmentation", {})
+            transcript_file = context.get("transcript_file", "")
+            if seg_config.get("enabled", True) and transcript_file.lower().endswith(".srt"):
+                from api.services.speaker_segmentation import split_interior_speaker_changes
+
+                context["transcript"] = split_interior_speaker_changes(context.get("transcript", ""))
+
         # Check for chunked formatter processing
         if phase_name == "formatter":
             chunking_config = self.llm.config.get("routing", {}).get("chunking", {})
@@ -2031,6 +2094,20 @@ Extract any name or spelling corrections that should be added to the glossary. S
             )
             return {"success": False, "error": str(e), "cost": 0, "tokens": 0}
 
+    @staticmethod
+    def _section_tail(content: str, max_chars: int = 200) -> str:
+        """Last line of a chunk's content, used as a 'format through to here'
+        anchor. Handles SRT (last caption text) and plain text (last line)."""
+        from api.services.utils import parse_srt
+
+        caps = parse_srt(content)
+        if caps:
+            text = " ".join(caps[-1].text.split())
+        else:
+            lines = [ln.strip() for ln in content.strip().splitlines() if ln.strip()]
+            text = lines[-1] if lines else ""
+        return text[:max_chars]
+
     async def _run_formatter_chunked(
         self,
         job_id: int,
@@ -2105,9 +2182,29 @@ If the speaker said it, those exact words must appear in the output. Do NOT subs
 If a caption is garbled or unclear, include your best reconstruction rather than dropping it. NEVER silently omit content.
 SPELLING: Always use "partisan" (not "partizan"), "bipartisan" (not "bipartisan"). Program names like "Inside Wisconsin Politics" are NOT italicized."""
 
+                # Coverage mandate + tail anchor: the model must format the whole
+                # section through to its last line. On job 12 chunk 1 silently
+                # dropped ~96s from the middle of its section (#269); it knew where
+                # the previous section ended (overlap) but had no target for where
+                # its own section must reach.
+                section_tail = self._section_tail(chunk.content)
+                coverage_mandate = (
+                    "COVERAGE MANDATE: Format EVERY line of the section below, in order, from its "
+                    "first line through to its last. Do NOT skip, summarize, or jump over any "
+                    "portion of the section.\n"
+                )
+                tail_anchor = (
+                    "This section ENDS with the following line — your formatted output MUST reach "
+                    f"and include it (do not stop before it):\n---\n{section_tail}\n---\n"
+                    if section_tail
+                    else ""
+                )
+
                 if chunk.index == 0:
                     # First chunk: normal formatter prompt (generates the metadata header).
                     user_message = f"{verbatim_instruction}\n\n"
+                    if total_chunks > 1:
+                        user_message += coverage_mandate + tail_anchor + "\n"
                     if total_chunks > 1:
                         # Chunk 0 only sees the first slice of a long transcript. Without
                         # this it concludes the transcript is truncated and emits false
@@ -2148,6 +2245,7 @@ Using the following analysis as guidance:
 {analysis}
 ---
 
+{coverage_mandate}{tail_anchor}
 Please format this transcript section:
 
 ---

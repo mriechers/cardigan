@@ -151,6 +151,15 @@
       "min_source_words": 500,
       "pause_on_truncation": true
     },
+    "seam_coverage": {
+      "enabled": true,
+      "min_run": 4,
+      "per_caption_floor": 0.5,
+      "pause_on_gap": true
+    },
+    "speaker_segmentation": {
+      "enabled": true
+    },
     "chunking": {
       "enabled": true,
       "threshold_words": 3000,
