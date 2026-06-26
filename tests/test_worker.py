@@ -252,6 +252,65 @@ async def test_validator_excluded_from_escalation_loop(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_passing_revalidation_verdict_is_persisted(monkeypatch):
+    """After fail→escalate→pass, update_job must persist validation_result.overall='pass'.
+
+    Regression guard for MUST-FIX 1 (#243): if the persist line
+    ``await update_job(job_id, JobUpdate(validation_result=verdict, …))`` is removed
+    from _finalize_with_qa_gate, this assertion fails while all other gate tests
+    remain green — confirming the guard uniquely locks in that behaviour.
+    """
+    w = _make_worker()
+
+    mock_update_job = AsyncMock()
+    monkeypatch.setattr(worker_mod, "get_job", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        worker_mod,
+        "resolve_escalated_model",
+        AsyncMock(return_value="anthropic/claude-sonnet-4-6"),
+    )
+    monkeypatch.setattr(worker_mod, "pause_and_suggest", AsyncMock())
+    monkeypatch.setattr(worker_mod, "update_job", mock_update_job)
+    monkeypatch.setattr(
+        w,
+        "_run_phase",
+        AsyncMock(return_value={"success": True, "output": "{}", "model": "strong-model"}),
+    )
+    monkeypatch.setattr(w, "_parse_validation_result", lambda out: {"overall": "pass"})
+
+    validation_result = {
+        "overall": "fail",
+        "phase_results": {"seo": {"status": "fail", "flags": ["x"]}},
+    }
+
+    outcome = await w._finalize_with_qa_gate(
+        job_id=7,
+        context={"seo_output": "stale-output"},
+        project_path="/tmp/proj",
+        validation_result=validation_result,
+        phase_order=["seo", "validator"],
+    )
+
+    assert outcome == "completed"
+
+    # Scan every update_job call for one carrying validation_result.overall == 'pass'.
+    # If the persist line is deleted, mock_update_job is never called with a matching
+    # JobUpdate and this assertion fails.
+    persist_calls = [
+        c
+        for c in mock_update_job.await_args_list
+        if len(c.args) >= 2
+        and hasattr(c.args[1], "validation_result")
+        and isinstance(c.args[1].validation_result, dict)
+        and c.args[1].validation_result.get("overall") == "pass"
+    ]
+    assert persist_calls, (
+        "update_job was never called with a JobUpdate carrying "
+        "validation_result.overall='pass'; the MUST-FIX 1 persist line may have been removed"
+    )
+
+
+@pytest.mark.asyncio
 async def test_qa_pass_completes_without_escalation(monkeypatch):
     """Validator pass -> straight to 'completed', no escalation machinery touched."""
     w = _make_worker()
