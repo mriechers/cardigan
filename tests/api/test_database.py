@@ -975,3 +975,71 @@ async def test_clear_defer_state(test_db):
     assert row.defer_count == 0
     assert row.retry_after is None
     assert row.first_deferred_at is None
+
+
+@pytest.mark.asyncio
+async def test_init_backfills_auto_escalated_at_on_preexisting_db():
+    """init_db ensure-column adds auto_escalated_at to a pre-existing jobs table (#243).
+
+    metadata.create_all never ALTERs an existing table, so on cardigan01's
+    hand-maintained SQLite the first ``update_job(auto_escalated_at=...)`` would
+    raise OperationalError, turning an escalation-exhausted PAUSE into a hard
+    FAILED job. This test simulates that DB (jobs table missing the column),
+    re-runs init_db's ensure-column guard, and asserts the column is added and
+    the previously-failing write now succeeds.
+
+    RED (without the _ensure_jobs_columns call in init_db): the final
+    update_job(auto_escalated_at=...) raises OperationalError 'no such column'.
+    GREEN (with the guard): column is backfilled and the write succeeds.
+    """
+    from datetime import datetime, timezone
+
+    from sqlalchemy import text
+
+    import api.services.database as db_mod
+
+    orig_engine = db_mod._engine
+    orig_factory = db_mod._async_session_factory
+    orig_db_path = os.environ.get("DATABASE_PATH")
+    db_mod._engine = None
+    db_mod._async_session_factory = None
+
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    os.environ["DATABASE_PATH"] = db_path
+
+    try:
+        # 1. Build a "pre-existing" DB whose jobs table LACKS auto_escalated_at.
+        await init_db()
+        async with db_mod.get_session() as s:
+            await s.execute(text("ALTER TABLE jobs DROP COLUMN auto_escalated_at"))
+        async with db_mod.get_session() as s:
+            cols = [r[1] for r in (await s.execute(text("PRAGMA table_info(jobs)"))).fetchall()]
+        assert "auto_escalated_at" not in cols, "fixture must start without the column"
+
+        # 2. Re-run init_db (fresh engine) so the ensure-column guard executes
+        #    against the pre-existing, column-less table.
+        await close_db()
+        db_mod._engine = None
+        db_mod._async_session_factory = None
+        await init_db()
+
+        async with db_mod.get_session() as s:
+            cols = [r[1] for r in (await s.execute(text("PRAGMA table_info(jobs)"))).fetchall()]
+        assert "auto_escalated_at" in cols, "ensure-column guard must backfill the column"
+
+        # 3. The write that previously raised OperationalError now succeeds.
+        job = await create_job(JobCreate(project_name="esc", transcript_file="t.txt", project_path=db_path))
+        updated = await update_job(job.id, JobUpdate(auto_escalated_at=datetime.now(timezone.utc)))
+        assert updated is not None
+        assert updated.auto_escalated_at is not None
+    finally:
+        await close_db()
+        db_mod._engine = orig_engine
+        db_mod._async_session_factory = orig_factory
+        if orig_db_path is not None:
+            os.environ["DATABASE_PATH"] = orig_db_path
+        try:
+            os.unlink(db_path)
+        except Exception:
+            pass

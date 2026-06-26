@@ -64,6 +64,19 @@ class BackendUnavailableError(Exception):
         self.retry_after_s = retry_after_s
 
 
+class CreditExhaustedError(Exception):
+    """OpenRouter reports insufficient credit/quota (HTTP 402 or credit body).
+
+    Never swallowed (even in an optional phase) and never consumes a retry —
+    the worker routes it to pause-and-suggest: 'add credit, then retry'.
+    """
+
+    def __init__(self, detail: str, backend: Optional[str] = None):
+        super().__init__(detail)
+        self.detail = detail
+        self.backend = backend
+
+
 def _parse_unavailable_503(response: "httpx.Response") -> tuple[str, Optional[int], bool]:
     """Extract (detail, retry_after_s, retryable) from a 503 response.
 
@@ -661,6 +674,13 @@ class LLMClient:
 
         return response
 
+    async def _post_openrouter(
+        self, endpoint: str, headers: Dict[str, str], payload: Dict[str, Any]
+    ) -> "httpx.Response":
+        """Seam: perform the raw HTTP POST to OpenRouter. Extracted for testability."""
+        client = await self.get_client()
+        return await client.post(endpoint, headers=headers, json=payload)
+
     async def _call_openrouter(
         self,
         config: Dict[str, Any],
@@ -670,8 +690,6 @@ class LLMClient:
         **kwargs,
     ) -> LLMResponse:
         """Make OpenRouter API call."""
-        client = await self.get_client()
-
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -685,21 +703,25 @@ class LLMClient:
             **kwargs,
         }
 
-        response = await client.post(
-            config["endpoint"],
-            headers=headers,
-            json=payload,
-        )
+        response = await self._post_openrouter(config["endpoint"], headers, payload)
 
         # Log error details before raising
         if response.status_code >= 400:
             try:
                 error_body = response.json()
-                print(f"[LLM] OpenRouter API error status={response.status_code} model={model} error={error_body}")
             except Exception:
-                print(
-                    f"[LLM] OpenRouter API error (non-JSON) status={response.status_code} "
-                    f"model={model} response={response.text[:500]}"
+                error_body = {"raw": response.text[:500]}
+            print(f"[LLM] OpenRouter API error status={response.status_code} model={model} error={error_body}")
+
+            body_str = str(error_body).lower()
+            if (
+                response.status_code == 402
+                or "insufficient" in body_str
+                or ("credit" in body_str and ("exhaust" in body_str or "quota" in body_str or "balance" in body_str))
+            ):
+                raise CreditExhaustedError(
+                    "OpenRouter credit exhausted — add credit, then retry.",
+                    backend=self.active_backend,
                 )
 
         response.raise_for_status()
