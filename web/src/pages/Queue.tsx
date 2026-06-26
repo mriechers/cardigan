@@ -372,7 +372,10 @@ export default function Queue() {
       </div>
 
       {/* Jobs Table */}
-      {loading ? (
+      {/* Skeleton only on the very first load (no data yet). Background polls
+          and action-triggered refetches set loading=true too, and showing the
+          skeleton then would tear the list down and back — the blink in #160. */}
+      {loading && jobs.length === 0 ? (
         <SkeletonQueue />
       ) : (
         <div className="bg-surface-800 rounded-lg border border-surface-700 overflow-hidden">

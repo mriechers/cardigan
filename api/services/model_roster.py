@@ -174,3 +174,28 @@ def invalidate_cache() -> None:
     """Clear the model roster cache, forcing a refresh on next call."""
     _cache["models"] = None
     _cache["expires"] = 0.0
+
+
+async def newest_in_family(family: str, exclude_variants: list) -> Optional[str]:
+    """Newest anthropic/* model id in `family` by OpenRouter `created`, excluding
+    any id containing an excluded variant token (e.g. 'fast', 'fable').
+
+    Returns None on fetch failure or no match — callers fall through to
+    pause-and-suggest rather than guessing.
+    """
+    raw = await fetch_openrouter_models()
+    if not raw:
+        return None
+    family = family.lower()
+    candidates = []
+    for m in raw:
+        mid = (m.get("id") or "").lower()
+        if not mid.startswith("anthropic/") or family not in mid:
+            continue
+        if any(v.lower() in mid for v in exclude_variants):
+            continue
+        candidates.append((m.get("created") or 0, m["id"]))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda c: c[0], reverse=True)
+    return candidates[0][1]

@@ -125,6 +125,7 @@ class JobUpdate(BaseModel):
     validation_result: Optional[Dict[str, Any]] = Field(
         None, description="Structured validation result from validator phase"
     )
+    auto_escalated_at: Optional[datetime] = None
 
 
 class JobOutputs(BaseModel):
@@ -177,6 +178,7 @@ class Job(BaseModel):
         default=None,
         description="Structured validation result from validator phase: {phase_results: {phase: {status, flags}}, overall}",
     )
+    auto_escalated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
