@@ -116,7 +116,7 @@ CREATE TABLE chat_messages (
 
 ### 1.5 Prototype Strategy
 
-See `planning/PROTOTYPE_EMBEDDED_CHAT.md` for detailed 1-sprint prototype specification.
+See `planning/archive/PROTOTYPE_EMBEDDED_CHAT.md` (archived) for detailed 1-sprint prototype specification.
 
 ### 1.6 Estimated Effort
 

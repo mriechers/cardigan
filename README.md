@@ -503,7 +503,6 @@ Edit `config/llm-config.json` to customize:
 | [AIRTABLE_CHEATSHEET.md](docs/AIRTABLE_CHEATSHEET.md) | Airtable table IDs and query patterns |
 | [REMOTE_ACCESS.md](docs/REMOTE_ACCESS.md) | Remote access configuration |
 | [FEATURE_REMOTE_INGEST_WATCHER.md](docs/FEATURE_REMOTE_INGEST_WATCHER.md) | Ingest watcher feature specification |
-| [ROADMAP_v3.1.md](docs/ROADMAP_v3.1.md) | Development roadmap |
 
 ---
 
