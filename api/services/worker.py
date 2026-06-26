@@ -1821,6 +1821,20 @@ Extract any name or spelling corrections that should be added to the glossary. S
             )
             return {"success": False, "error": str(e), "cost": 0, "tokens": 0}
 
+    @staticmethod
+    def _section_tail(content: str, max_chars: int = 200) -> str:
+        """Last line of a chunk's content, used as a 'format through to here'
+        anchor. Handles SRT (last caption text) and plain text (last line)."""
+        from api.services.utils import parse_srt
+
+        caps = parse_srt(content)
+        if caps:
+            text = " ".join(caps[-1].text.split())
+        else:
+            lines = [ln.strip() for ln in content.strip().splitlines() if ln.strip()]
+            text = lines[-1] if lines else ""
+        return text[:max_chars]
+
     async def _run_formatter_chunked(
         self,
         job_id: int,
@@ -1895,9 +1909,29 @@ If the speaker said it, those exact words must appear in the output. Do NOT subs
 If a caption is garbled or unclear, include your best reconstruction rather than dropping it. NEVER silently omit content.
 SPELLING: Always use "partisan" (not "partizan"), "bipartisan" (not "bipartisan"). Program names like "Inside Wisconsin Politics" are NOT italicized."""
 
+                # Coverage mandate + tail anchor: the model must format the whole
+                # section through to its last line. On job 12 chunk 1 silently
+                # dropped ~96s from the middle of its section (#269); it knew where
+                # the previous section ended (overlap) but had no target for where
+                # its own section must reach.
+                section_tail = self._section_tail(chunk.content)
+                coverage_mandate = (
+                    "COVERAGE MANDATE: Format EVERY line of the section below, in order, from its "
+                    "first line through to its last. Do NOT skip, summarize, or jump over any "
+                    "portion of the section.\n"
+                )
+                tail_anchor = (
+                    "This section ENDS with the following line — your formatted output MUST reach "
+                    f"and include it (do not stop before it):\n---\n{section_tail}\n---\n"
+                    if section_tail
+                    else ""
+                )
+
                 if chunk.index == 0:
                     # First chunk: normal formatter prompt (generates the metadata header).
                     user_message = f"{verbatim_instruction}\n\n"
+                    if total_chunks > 1:
+                        user_message += coverage_mandate + tail_anchor + "\n"
                     if total_chunks > 1:
                         # Chunk 0 only sees the first slice of a long transcript. Without
                         # this it concludes the transcript is truncated and emits false
@@ -1938,6 +1972,7 @@ Using the following analysis as guidance:
 {analysis}
 ---
 
+{coverage_mandate}{tail_anchor}
 Please format this transcript section:
 
 ---
