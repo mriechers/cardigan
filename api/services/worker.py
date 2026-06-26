@@ -1014,6 +1014,57 @@ Extract any name or spelling corrections that should be added to the glossary. S
                                 truncation_paused = True
                                 break  # Exit phase loop cleanly (no exception)
 
+                # === Seam-gap check after formatter phase ===
+                # Catches localized chunk-boundary drops that the global coverage
+                # ratio can't see (issue #269). Runs only if the completeness
+                # check above didn't already pause the job.
+                if phase_name == "formatter" and not truncation_paused:
+                    from api.services.seam_coverage import find_dropped_spans, format_gap_message
+
+                    seam_config = self.llm.config.get("routing", {}).get("seam_coverage", {})
+                    if seam_config.get("enabled", True):
+                        formatter_output = phase_result.get("output", "")
+                        transcript_file = job.get("transcript_file", "")
+                        is_srt = transcript_file.lower().endswith(".srt")
+
+                        seam = find_dropped_spans(
+                            source_transcript=transcript_content,
+                            formatter_output=formatter_output,
+                            is_srt=is_srt,
+                            min_run=seam_config.get("min_run", 4),
+                            per_caption_floor=seam_config.get("per_caption_floor", 0.5),
+                        )
+
+                        context["seam_coverage"] = seam.to_dict()
+
+                        if seam.has_gap:
+                            gap_msg = format_gap_message(seam)
+                            logger.warning(
+                                "Seam gap detected in formatter output",
+                                extra={
+                                    "job_id": job_id,
+                                    "dropped_spans": seam.to_dict()["dropped_spans"],
+                                },
+                            )
+                            await log_event(
+                                EventCreate(
+                                    job_id=job_id,
+                                    event_type=EventType.phase_failed,
+                                    data=EventData(
+                                        phase="seam_coverage",
+                                        extra=seam.to_dict(),
+                                    ),
+                                )
+                            )
+                            if seam_config.get("pause_on_gap", True):
+                                await update_job_status(
+                                    job_id,
+                                    JobStatus.paused,
+                                    error_message=gap_msg,
+                                )
+                                truncation_paused = True
+                                break  # Exit phase loop cleanly (no exception)
+
             # Handle truncation pause — exit before optional phases
             if truncation_paused:
                 logger.info(

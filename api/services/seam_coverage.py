@@ -75,6 +75,27 @@ class SeamCoverageResult:
         }
 
 
+def format_gap_message(result: "SeamCoverageResult") -> str:
+    """Operator-facing summary of detected seam gaps (empty if none).
+
+    Used for the job pause / validator-flag message so an editor sees exactly
+    which spans of source dialogue are missing from the formatter output.
+    """
+    if not result.has_gap or not result.dropped_spans:
+        return ""
+
+    spans = "; ".join(
+        f"{s.start_timecode}–{s.end_timecode} " f'({s.caption_count} captions, e.g. "{s.sample_text}")'
+        for s in result.dropped_spans
+    )
+    n = len(result.dropped_spans)
+    return (
+        f"SEAM GAP DETECTED: Formatter output is missing {n} "
+        f"section{'s' if n != 1 else ''} of source dialogue: {spans}. "
+        "Likely a chunk-boundary drop — retry to escalate / re-chunk."
+    )
+
+
 def _tokens(text: str, min_token_len: int) -> List[str]:
     return [t for t in _TOKEN_RE.findall(text.lower()) if len(t) >= min_token_len]
 

@@ -15,6 +15,7 @@ from api.services.seam_coverage import (
     DroppedSpan,
     SeamCoverageResult,
     find_dropped_spans,
+    format_gap_message,
 )
 
 # ---------------------------------------------------------------------------
@@ -164,3 +165,32 @@ def test_non_srt_and_empty_input_are_graceful():
     assert find_dropped_spans("", "", is_srt=True).has_gap is False
     plain = find_dropped_spans("just some prose", "output", is_srt=False)
     assert plain.has_gap is False
+
+
+def test_format_gap_message_lists_each_span():
+    """The operator-facing pause message names each dropped span's timecodes,
+    caption count, and a sample, so an editor knows exactly what's missing."""
+    result = SeamCoverageResult(
+        has_gap=True,
+        captions_checked=375,
+        dropped_spans=[
+            DroppedSpan(
+                start_timecode="00:11:10,170",
+                end_timecode="00:12:46,233",
+                caption_count=28,
+                sample_text="about Hong maybe being the nominee in Wisconsin",
+            )
+        ],
+    )
+
+    msg = format_gap_message(result)
+
+    assert "SEAM GAP DETECTED" in msg
+    assert "00:11:10" in msg and "00:12:46" in msg
+    assert "28" in msg
+    assert "about Hong maybe being the nominee" in msg
+
+
+def test_format_gap_message_empty_when_no_gap():
+    """No gap → empty string (nothing to surface)."""
+    assert format_gap_message(SeamCoverageResult(has_gap=False)) == ""
