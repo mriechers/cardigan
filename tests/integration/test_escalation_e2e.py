@@ -12,6 +12,7 @@ import json
 import os
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from typing import Generator
 
 import pytest
@@ -168,8 +169,14 @@ async def e2e_env(monkeypatch, tmp_path):
     db_mod._async_session_factory = None
 
     # --- Build patched LLM config ---
-    repo = "/Users/mriechers/Developer/pbswi/cardigan-v4-impl243"
-    with open(f"{repo}/config/llm-config.json") as f:
+    # Derive the repo root from this file's location so the test is portable
+    # (CI checks out to a different path than any local worktree).
+    repo_root = Path(__file__).resolve().parents[2]
+    # process_job loads prompts/ and archives to transcripts/ relative to cwd, so
+    # run from the repo root regardless of where pytest was invoked (monkeypatch
+    # restores the original cwd on teardown).
+    monkeypatch.chdir(repo_root)
+    with open(repo_root / "config" / "llm-config.json") as f:
         cfg = json.load(f)
 
     # Caller will patch endpoint; use a placeholder URL that will be replaced
