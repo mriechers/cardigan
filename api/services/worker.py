@@ -28,6 +28,8 @@ from api.services.database import (
     update_job_status,
 )
 from api.services.escalation import (
+    classify_qa_failure,
+    nonfixable_review_message,
     pause_and_suggest,
     resolve_escalated_model,
     select_escalation_phases,
@@ -1380,6 +1382,21 @@ Extract any name or spelling corrections that should be added to the glossary. S
                 message="QA failed again after escalation — review or retry on a stronger model.",
             )
             return "paused"
+
+        # Non-model-fixable guard (#276): if every failing flag is something a
+        # stronger model cannot fix (formatter review-notes / needs_review /
+        # missing media_id), skip the futile escalation pass and route straight
+        # to a cheap, honest human-review pause.
+        if cfg.get("skip_escalation_when_nonfixable", True):
+            classed = classify_qa_failure(validation_result, context)
+            if not classed["escalate"]:
+                await pause_and_suggest(
+                    job_id,
+                    trigger="qa_review",
+                    message=nonfixable_review_message(classed["nonfixable"]),
+                    mark_escalated=True,
+                )
+                return "paused"
 
         # The dedicated re-validation below re-runs the validator, so exclude it
         # from the escalation loop — otherwise the validator would run up to 3x

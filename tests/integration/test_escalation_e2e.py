@@ -78,23 +78,26 @@ def _make_handler(state: _MockState):
 
             if is_validator:
                 state.validator_calls += 1
-                if state.scenario == "persistfail":
+                if state.scenario in ("persistfail", "nonfixable"):
                     overall = "fail"
                 else:
                     overall = "fail" if state.validator_calls == 1 else "pass"
-                content = json.dumps(
-                    {
-                        "overall": overall,
-                        "phase_results": {
-                            "analyst": {"status": "pass", "flags": []},
-                            "formatter": {"status": "pass", "flags": []},
-                            "seo": {
-                                "status": "fail" if overall == "fail" else "pass",
-                                "flags": ["weak keyword density"] if overall == "fail" else [],
-                            },
+                if state.scenario == "nonfixable":
+                    phase_results = {
+                        "analyst": {"status": "pass", "flags": []},
+                        "formatter": {"status": "fail", "flags": ["Review notes appear in transcript body"]},
+                        "seo": {"status": "pass", "flags": []},
+                    }
+                else:
+                    phase_results = {
+                        "analyst": {"status": "pass", "flags": []},
+                        "formatter": {"status": "pass", "flags": []},
+                        "seo": {
+                            "status": "fail" if overall == "fail" else "pass",
+                            "flags": ["weak keyword density"] if overall == "fail" else [],
                         },
                     }
-                )
+                content = json.dumps({"overall": overall, "phase_results": phase_results})
             else:
                 content = "Mock phase output. The meeting covered budget and policy in full."
 
@@ -315,6 +318,22 @@ async def test_persistent_fail(e2e_env):
     vr = j.validation_result
     assert vr is not None and vr.get("overall") == "fail", f"persisted overall must be 'fail', got {vr}"
     assert j.retry_count == 0, f"retry_count must stay 0 (pause doesn't consume a retry), got {j.retry_count}"
+
+
+@pytest.mark.asyncio
+async def test_nonfixable_skips_escalation(e2e_env):
+    """Review-notes-only QA fail -> paused (qa_review) WITHOUT an escalation pass."""
+    tmp_path, cfg, cfg_path = e2e_env
+    j, state = await _run_scenario("nonfixable", tmp_path, cfg, cfg_path)
+
+    assert j.status.value == "paused", f"expected paused, got {j.status!r} / {j.error_message!r}"
+    assert j.error_message is not None and j.error_message.startswith(
+        "[qa_review]"
+    ), f"error_message must start with [qa_review], got {j.error_message!r}"
+    # No escalation: validator ran exactly once (no re-validation); single pipeline pass.
+    assert state.validator_calls == 1, f"expected 1 validator call, got {state.validator_calls}: {state.phase_log}"
+    assert state.all_calls < 6, f"expected single-pass (<6 calls), got {state.all_calls}: {state.phase_log}"
+    assert j.auto_escalated_at is not None, "mark_escalated must stamp the marker (prevents resume re-loop)"
 
 
 @pytest.mark.asyncio

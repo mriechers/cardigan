@@ -97,6 +97,7 @@ def test_config_has_qa_escalation_and_sonnet_validator():
     qa = cfg["qa_escalation"]
     assert qa["on_validation_fail"] is True
     assert qa["max_auto_escalations"] == 1
+    assert qa["skip_escalation_when_nonfixable"] is True
     assert qa["exclude_variants"] == ["fast", "fable"]
     # validator no longer on the cheapskate tier
     assert cfg["phase_backends"]["validator"] != "openrouter-cheapskate"
