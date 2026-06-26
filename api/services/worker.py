@@ -1644,6 +1644,18 @@ Extract any name or spelling corrections that should be added to the glossary. S
             project_path: Path to project output directory
             model_override: Optional model ID to override the phase default
         """
+        # Normalize live-caption speaker markers before formatting: split any
+        # caption with an interior ">>" so the formatter sees one turn per
+        # caption (issue #269 — fixes mid-cue turn-order inversion and speaker
+        # misattribution). Word-preserving, so downstream checks are unaffected.
+        if phase_name == "formatter":
+            seg_config = self.llm.config.get("routing", {}).get("speaker_segmentation", {})
+            transcript_file = context.get("transcript_file", "")
+            if seg_config.get("enabled", True) and transcript_file.lower().endswith(".srt"):
+                from api.services.speaker_segmentation import split_interior_speaker_changes
+
+                context["transcript"] = split_interior_speaker_changes(context.get("transcript", ""))
+
         # Check for chunked formatter processing
         if phase_name == "formatter":
             chunking_config = self.llm.config.get("routing", {}).get("chunking", {})

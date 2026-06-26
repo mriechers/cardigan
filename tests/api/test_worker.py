@@ -783,3 +783,75 @@ class TestProcessJobSeamGap:
         assert any(
             "SEAM GAP DETECTED" in str(c.kwargs.get("error_message", "")) for c in paused
         ), "paused status should carry the SEAM GAP message"
+
+
+class TestProcessJobSpeakerSegmentation:
+    """Worker-level test that interior `>>` markers are split before the formatter
+    LLM sees them (issue #269)."""
+
+    @pytest.mark.asyncio
+    @patch("api.services.worker.get_llm_client")
+    @patch("api.services.worker.update_job_status")
+    @patch("api.services.worker.update_job_phase")
+    @patch("api.services.worker.update_job_heartbeat")
+    @patch("api.services.worker.log_event")
+    @patch("api.services.worker.start_run_tracking")
+    @patch("api.services.worker.end_run_tracking")
+    @patch("api.services.worker.TRANSCRIPTS_DIR")
+    @patch("api.services.worker.OUTPUT_DIR")
+    @patch("api.services.worker.AGENTS_DIR")
+    async def test_formatter_receives_split_captions(
+        self,
+        mock_agents_dir,
+        mock_output_dir,
+        mock_transcripts_dir,
+        mock_end_tracking,
+        mock_start_tracking,
+        mock_log_event,
+        mock_update_heartbeat,
+        mock_update_phase,
+        mock_update_status,
+        mock_get_llm,
+        mock_llm_client,
+        mock_llm_response,
+        tmp_path,
+    ):
+        """The formatter phase's LLM input must contain the split form of an
+        interior-`>>` caption, not the original joined caption."""
+        mock_get_llm.return_value = mock_llm_client
+        mock_llm_client.chat = AsyncMock(return_value=mock_llm_response)
+        mock_start_tracking.return_value = MagicMock(total_cost=0, total_tokens=0)
+        mock_end_tracking.return_value = {"total_cost": 0.01, "total_tokens": 2000}
+
+        mock_transcripts_dir.__truediv__ = lambda self, name: tmp_path / name
+        mock_output_dir.__truediv__ = lambda self, name: tmp_path / name
+        mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
+
+        srt = (
+            "1\n00:00:01,000 --> 00:00:02,000\nPlain opener line here.\n\n"
+            "2\n00:00:02,000 --> 00:00:04,000\nAlpha speaks now. >> Beta replies instead.\n\n"
+        )
+        job = {
+            "id": 100,
+            "project_name": "Seg Test",
+            "transcript_file": "segtest.srt",
+            "status": "in_progress",
+            "priority": 10,
+            "queued_at": datetime.now(timezone.utc).isoformat(),
+            "phases": [],
+        }
+        (tmp_path / job["transcript_file"]).write_text(srt, encoding="utf-8")
+
+        worker = JobWorker()
+        await worker.process_job(job)
+
+        # Find the formatter phase's LLM call and read its user message.
+        formatter_msgs = [
+            c.kwargs["messages"] for c in mock_llm_client.chat.call_args_list if c.kwargs.get("phase") == "formatter"
+        ]
+        assert formatter_msgs, "formatter phase should have called the LLM"
+        user_text = "\n".join(m["content"] for m in formatter_msgs[0] if m["role"] == "user")
+
+        # Split form present; original joined caption absent.
+        assert ">> Beta replies instead." in user_text
+        assert "Alpha speaks now. >> Beta replies instead." not in user_text

@@ -151,6 +151,9 @@
       "per_caption_floor": 0.5,
       "pause_on_gap": true
     },
+    "speaker_segmentation": {
+      "enabled": true
+    },
     "chunking": {
       "enabled": true,
       "threshold_words": 3000,
