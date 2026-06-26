@@ -857,8 +857,6 @@ class TestCreditExhaustionAndTruncation:
         assert mock_update_status.await_args.args[1] == JobStatus.paused
 
 
-
-
 class TestProcessJobSeamGap:
     """Worker-level test for the seam-gap pause path wired into the formatter phase."""
 
