@@ -334,3 +334,76 @@ async def test_qa_pass_completes_without_escalation(monkeypatch):
     get_job.assert_not_called()
     run_phase.assert_not_called()
     pause.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_escalated_pass_stamps_auto_escalated_at(monkeypatch):
+    """After fail->escalate->pass, update_job must carry auto_escalated_at (Part C, #243).
+
+    This test is RED against pre-Part-C code because the update_job call in
+    _finalize_with_qa_gate did not set auto_escalated_at on the pass branch.
+    """
+    w = _make_worker()
+
+    mock_update_job = AsyncMock()
+    monkeypatch.setattr(worker_mod, "get_job", AsyncMock(return_value=None))
+    monkeypatch.setattr(worker_mod, "resolve_escalated_model", AsyncMock(return_value="anthropic/claude-sonnet-4-6"))
+    monkeypatch.setattr(worker_mod, "pause_and_suggest", AsyncMock())
+    monkeypatch.setattr(worker_mod, "update_job", mock_update_job)
+    monkeypatch.setattr(
+        w, "_run_phase", AsyncMock(return_value={"success": True, "output": "{}", "model": "strong-model"})
+    )
+    monkeypatch.setattr(w, "_parse_validation_result", lambda out: {"overall": "pass"})
+
+    validation_result = {
+        "overall": "fail",
+        "phase_results": {"seo": {"status": "fail", "flags": ["x"]}},
+    }
+
+    outcome = await w._finalize_with_qa_gate(
+        job_id=10,
+        context={"seo_output": "stale"},
+        project_path="/tmp/proj",
+        validation_result=validation_result,
+        phase_order=["seo", "validator"],
+    )
+
+    assert outcome == "completed"
+
+    # The update_job call on the pass branch must carry a non-None auto_escalated_at.
+    stamped_calls = [
+        c
+        for c in mock_update_job.await_args_list
+        if len(c.args) >= 2 and hasattr(c.args[1], "auto_escalated_at") and c.args[1].auto_escalated_at is not None
+    ]
+    assert stamped_calls, (
+        "update_job was never called with auto_escalated_at set; "
+        "the Part-C stamp in _finalize_with_qa_gate may be missing"
+    )
+
+
+@pytest.mark.asyncio
+async def test_pass_without_escalation_does_not_stamp_auto_escalated_at(monkeypatch):
+    """First-pass validation (no escalation) must NOT set auto_escalated_at."""
+    w = _make_worker()
+
+    mock_update_job = AsyncMock()
+    monkeypatch.setattr(worker_mod, "get_job", AsyncMock(return_value=None))
+    monkeypatch.setattr(worker_mod, "update_job", mock_update_job)
+    monkeypatch.setattr(worker_mod, "pause_and_suggest", AsyncMock())
+
+    outcome = await w._finalize_with_qa_gate(
+        job_id=11,
+        context={},
+        project_path="/tmp/proj",
+        validation_result={"overall": "pass"},
+        phase_order=["seo", "validator"],
+    )
+
+    assert outcome == "completed"
+    # No escalation happened -> update_job is never called from this gate path.
+    for c in mock_update_job.await_args_list:
+        if len(c.args) >= 2 and hasattr(c.args[1], "auto_escalated_at"):
+            assert (
+                c.args[1].auto_escalated_at is None
+            ), "auto_escalated_at should not be stamped for a job that passed without escalation"

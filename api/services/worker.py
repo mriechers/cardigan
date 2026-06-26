@@ -1381,7 +1381,14 @@ Extract any name or spelling corrections that should be added to the glossary. S
             list(refreshed.phases) if refreshed and refreshed.phases else None,
             escalated_models,
         )
-        await update_job(job_id, JobUpdate(validation_result=verdict, phases=phases_update))
+        await update_job(
+            job_id,
+            JobUpdate(
+                validation_result=verdict,
+                phases=phases_update,
+                auto_escalated_at=datetime.now(timezone.utc) if verdict.get("overall") == "pass" else None,
+            ),
+        )
 
         if verdict.get("overall") == "pass":
             return "completed"
