@@ -674,3 +674,112 @@ class TestResolveDurationIntoMetrics:
         result = worker._resolve_duration_into_metrics(metrics, None)
 
         assert result["estimated_duration_minutes"] == 25.0
+
+
+class TestProcessJobSeamGap:
+    """Worker-level test for the seam-gap pause path wired into the formatter phase."""
+
+    # 14 distinctive captions; the formatter "drops" the contiguous block 6-9.
+    _CAPTIONS = [
+        "Madison reporters gathered outside the Capitol rotunda",
+        "Governor Evers proposed expanding rural broadband funding",
+        "Republicans criticized the broadband subsidy proposal sharply",
+        "Senator Johnson defended existing telecommunications infrastructure spending",
+        "Advocates demanded faster fiber deployment across northern counties",
+        "Treasurer Godlewski announced surprising pension investment returns",  # DROP
+        "Auditors questioned the pension accounting methodology thoroughly",  # DROP
+        "Lawmakers debated transparency reforms during heated committee hearings",  # DROP
+        "Witnesses testified about contractor billing irregularities extensively",  # DROP
+        "Mayor Rhodes welcomed the downtown revitalization grant enthusiastically",
+        "Developers unveiled ambitious waterfront housing density plans",
+        "Neighbors objected to increased traffic congestion concerns",
+        "Council postponed the zoning variance vote indefinitely",
+        "Anchors thanked viewers before the evening broadcast concluded",
+    ]
+    _DROPPED = {5, 6, 7, 8}  # 0-indexed → SRT captions 6,7,8,9 (a 4-block)
+
+    def _source_srt(self) -> str:
+        blocks = []
+        for i, text in enumerate(self._CAPTIONS, start=1):
+            blocks.append(f"{i}\n00:00:{i:02d},000 --> 00:00:{i:02d},900\n{text}\n\n")
+        return "".join(blocks)
+
+    def _formatter_output_with_gap(self) -> str:
+        kept = [t for i, t in enumerate(self._CAPTIONS) if i not in self._DROPPED]
+        body = "\n\n".join(f"**Speaker:** {t}." for t in kept)
+        return (
+            "<!-- model: test -->\n# Formatted Transcript\n**Project:** Test\n---\n\n"
+            f"{body}\n\n**Status:** ready_for_editing"
+        )
+
+    @pytest.mark.asyncio
+    @patch("api.services.worker.get_llm_client")
+    @patch("api.services.worker.update_job_status")
+    @patch("api.services.worker.update_job_phase")
+    @patch("api.services.worker.update_job_heartbeat")
+    @patch("api.services.worker.log_event")
+    @patch("api.services.worker.start_run_tracking")
+    @patch("api.services.worker.end_run_tracking")
+    @patch("api.services.worker.TRANSCRIPTS_DIR")
+    @patch("api.services.worker.OUTPUT_DIR")
+    @patch("api.services.worker.AGENTS_DIR")
+    async def test_seam_gap_pauses_job_before_optional_phases(
+        self,
+        mock_agents_dir,
+        mock_output_dir,
+        mock_transcripts_dir,
+        mock_end_tracking,
+        mock_start_tracking,
+        mock_log_event,
+        mock_update_heartbeat,
+        mock_update_phase,
+        mock_update_status,
+        mock_get_llm,
+        mock_llm_client,
+        tmp_path,
+    ):
+        """A formatter output missing a contiguous caption block pauses the job
+        with a SEAM GAP message. Kept short so the global completeness check
+        skips (under its 500-word floor) and the seam check is what fires."""
+        mock_get_llm.return_value = mock_llm_client
+
+        # Every phase returns the gapped formatter output; the formatter phase's
+        # output is what the seam check reads.
+        response = MagicMock()
+        response.content = self._formatter_output_with_gap()
+        response.cost = 0.001
+        response.total_tokens = 500
+        response.model = "test-model"
+        mock_llm_client.chat = AsyncMock(return_value=response)
+
+        mock_update_status.return_value = None
+        mock_update_phase.return_value = None
+        mock_update_heartbeat.return_value = None
+        mock_log_event.return_value = None
+        mock_start_tracking.return_value = MagicMock(total_cost=0, total_tokens=0)
+        mock_end_tracking.return_value = {"total_cost": 0.01, "total_tokens": 2000}
+
+        mock_transcripts_dir.__truediv__ = lambda self, name: tmp_path / name
+        mock_output_dir.__truediv__ = lambda self, name: tmp_path / name
+        mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
+
+        job = {
+            "id": 99,
+            "project_name": "Seam Test",
+            "transcript_file": "seamtest.srt",
+            "status": "in_progress",
+            "priority": 10,
+            "queued_at": datetime.now(timezone.utc).isoformat(),
+            "phases": [],
+        }
+        (tmp_path / job["transcript_file"]).write_text(self._source_srt(), encoding="utf-8")
+
+        worker = JobWorker()
+        await worker.process_job(job)
+
+        # A paused status update carrying the seam message must have been issued.
+        paused = [c for c in mock_update_status.call_args_list if getattr(c.args[1], "value", c.args[1]) == "paused"]
+        assert paused, "expected the job to be paused on a seam gap"
+        assert any(
+            "SEAM GAP DETECTED" in str(c.kwargs.get("error_message", "")) for c in paused
+        ), "paused status should carry the SEAM GAP message"
