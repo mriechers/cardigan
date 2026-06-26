@@ -47,6 +47,18 @@ class DiarizationResponse(BaseModel):
     segments: list[DiarizationSegment]
 
 
+class TranscriptSegment(BaseModel):
+    start: float
+    end: float
+    text: str
+
+
+class TranscriptionResponse(BaseModel):
+    duration_seconds: float
+    language: str
+    segments: list[TranscriptSegment]
+
+
 @app.get("/health")
 def health():
     """Health check. Returns ready=True only when the WhisperX model is loaded."""
@@ -179,5 +191,77 @@ async def diarize(file: UploadFile = File(...)):
     except Exception as e:
         logger.exception(f"Diarization failed: {e}")
         raise HTTPException(status_code=500, detail=f"Diarization failed: {e}")
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+
+@app.post("/transcribe", response_model=TranscriptionResponse)
+async def transcribe(file: UploadFile = File(...)):
+    """Transcribe an uploaded audio/video file with WhisperX.
+
+    Runs transcription + alignment (no speaker diarization) and returns
+    aligned segments carrying their text — enough for the caller to build an
+    SRT. This is the transcription counterpart to ``/diarize``, which drops the
+    text and only returns speaker spans.
+    """
+    import whisperx
+
+    if _model is None:
+        raise HTTPException(status_code=503, detail="Model not loaded yet")
+
+    suffix = Path(file.filename or "upload").suffix.lower()
+    allowed = {".wav", ".mp3", ".m4a", ".flac", ".mp4", ".mkv", ".mov", ".webm"}
+    if suffix not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type: {suffix}. Allowed: {sorted(allowed)}",
+        )
+
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(await file.read())
+        tmp_path = tmp.name
+
+    try:
+        logger.info(f"Transcribing file: {file.filename} ({suffix})")
+
+        audio = whisperx.load_audio(tmp_path)
+        result = _model.transcribe(audio, batch_size=4)
+        language = result.get("language", "en")
+        logger.info(f"Transcription complete: {len(result['segments'])} segments ({language})")
+
+        align_model, align_metadata = whisperx.load_align_model(
+            language_code=language,
+            device=DEVICE,
+        )
+        result = whisperx.align(
+            result["segments"],
+            align_model,
+            align_metadata,
+            audio,
+            DEVICE,
+            return_char_alignments=False,
+        )
+        logger.info("Alignment complete")
+
+        segments = []
+        duration_seconds = 0.0
+        for seg in result["segments"]:
+            text = (seg.get("text") or "").strip()
+            if not text:
+                continue
+            start = round(seg.get("start", 0.0), 3)
+            end = round(seg.get("end", 0.0), 3)
+            segments.append(TranscriptSegment(start=start, end=end, text=text))
+            duration_seconds = max(duration_seconds, end)
+
+        return TranscriptionResponse(
+            duration_seconds=round(duration_seconds, 1),
+            language=language,
+            segments=segments,
+        )
+
+    except Exception as e:
+        logger.exception(f"Transcription failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")
     finally:
         Path(tmp_path).unlink(missing_ok=True)
