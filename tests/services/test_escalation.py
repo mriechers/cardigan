@@ -138,13 +138,30 @@ def test_classify_artifact_marker_skips_vague_flag():
     assert out["escalate"] is False
 
 
-def test_classify_mixed_escalates():
+def test_classify_mixed_with_nonfixable_skips():
+    # A single non-fixable flag makes escalation futile even when a model-fixable
+    # flag sits beside it (the job still can't pass) -> skip escalation.
+    # Live evidence: jobs 15-19 each escalated to Opus and still failed.
     out = classify_qa_failure(
         _vr(formatter_flags=["Review notes appear in transcript body"], seo_flags=["title exceeds 60 characters"]),
         {},
     )
-    assert out["escalate"] is True
+    assert out["escalate"] is False
     assert out["fixable"] and out["nonfixable"]
+
+
+def test_classify_caption_quality_only_skips():
+    # Caption-quality / verification flags with NO literal "review notes" line —
+    # still non-fixable (no source data, external verification, missing tooling).
+    out = classify_qa_failure(
+        _vr(
+            formatter_flags=["Speaker identity unresolved — no name in source transcript"],
+            seo_flags=["Speaker's official title unverified; SEMRush validation not completed"],
+        ),
+        {},
+    )
+    assert out["escalate"] is False
+    assert out["nonfixable"] and not out["fixable"]
 
 
 def test_classify_truncation_only_escalates():

@@ -70,15 +70,27 @@ classify_qa_failure(validation_result: dict, context: dict) -> dict
   `status == "fail"` or it carries a non-empty `flags` list).
 - A flag is **non-fixable** if EITHER:
   - its text matches a curated substring pattern (case-insensitive):
-    `NONFIXABLE_FLAG_PATTERNS = ["review note", "needs_review", "needs review",
-    "media id", "media_id"]`, OR
+    `NONFIXABLE_FLAG_PATTERNS` — review-notes/`needs_review`/`media_id`, plus the
+    caption-quality / verification-reminder vocabulary observed on Here & Now web
+    clips: `unresolved`, `not identified`, `unidentified`, `cannot be determined`,
+    `unverified`, `unconfirmed`, `semrush`, `excerpt`, OR
   - the corresponding `context["{phase}_output"]` contains a formatter contract
     marker: `<!-- REVIEW NOTES` or `**Status:** needs_review` (also matched loosely
     as `status: needs_review`).
-- `escalate = any(flag is fixable)`. Skip escalation **only when ALL** failing flags
-  are non-fixable.
-- **Fail safe:** empty/missing `validation_result`, no failing flags, or any unknown
-  phrasing → `escalate = True` (preserve today's behavior).
+- `escalate = not nonfixable`. **Skip escalation whenever ANY failing flag is
+  non-fixable** — a job passes only if *every* flag clears, so a single non-fixable
+  flag makes escalation futile no matter how many fixable flags ride along.
+- **Fail safe:** empty/missing `validation_result`, no failing flags, or all-fixable
+  → `escalate = True` (give the stronger model a shot; preserve today's behavior).
+
+> **Revision (2026-06-27):** the original rule skipped escalation *only when ALL*
+> flags were non-fixable, so *mixed* failures still escalated. Live jobs 15–19
+> (Here & Now web clips) proved that wrong — each had a non-fixable flag beside a
+> fixable one, escalated to Opus, and *still failed*, wasting ~$0.10–0.12 apiece.
+> The rule is now "skip if ANY non-fixable flag," which is strictly better: mixed
+> jobs pause cheaply instead of escalate-then-pause, while all-fixable jobs still
+> escalate. The pattern list was broadened with the caption-quality vocabulary so
+> jobs lacking a literal review-notes line are still recognized.
 
 Pure, side-effect-free, no I/O — trivially unit-testable.
 
@@ -100,9 +112,9 @@ if cfg.get("skip_escalation_when_nonfixable", True):
         return "paused"
 ```
 
-Mixed (some fixable) or unrecognized failures fall through to the existing
-escalation path unchanged. `mark_escalated=True` keeps a later manual resume from
-re-entering escalation.
+All-fixable or unrecognized failures (no non-fixable flag) fall through to the
+existing escalation path unchanged. `mark_escalated=True` keeps a later manual
+resume from re-entering escalation.
 
 ### 3. Honest messaging + distinct trigger
 

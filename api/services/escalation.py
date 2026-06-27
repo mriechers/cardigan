@@ -76,6 +76,18 @@ NONFIXABLE_FLAG_PATTERNS = [
     "needs review",
     "media id",
     "media_id",
+    # Caption-quality / verification-reminder flags observed on Here & Now web
+    # clips (live jobs 15-19): a stronger model cannot supply missing source
+    # data, external verification, or unavailable tooling.
+    "unresolved",
+    "not identified",
+    "unidentified",
+    "cannot be determined",
+    "could not be determined",
+    "unverified",
+    "unconfirmed",
+    "semrush",
+    "excerpt",
 ]
 
 # Markers the formatter writes into its OWN output when it surfaces an
@@ -117,7 +129,12 @@ def classify_qa_failure(validation_result: dict | None, context: dict | None = N
             is_nonfixable = artifact_nonfixable or any(p in ftext for p in NONFIXABLE_FLAG_PATTERNS)
             (nonfixable if is_nonfixable else fixable).append(flag)
 
-    escalate = bool(fixable) or not nonfixable
+    # Escalation can only yield a PASS if EVERY flag clears, so a single
+    # non-fixable flag makes escalation futile regardless of how many fixable
+    # flags sit beside it -> skip whenever ANY non-fixable flag is present.
+    # (Live evidence: jobs 15-19 each escalated to Opus and still failed.)
+    # Empty/all-fixable -> escalate (fail safe / give the stronger model a shot).
+    escalate = not nonfixable
     return {"escalate": escalate, "fixable": fixable, "nonfixable": nonfixable}
 
 
