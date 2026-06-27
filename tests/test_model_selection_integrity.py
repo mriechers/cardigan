@@ -177,6 +177,69 @@ async def test_chunked_formatter_first_chunk_told_it_is_a_section(monkeypatch, t
 
 
 @pytest.mark.asyncio
+async def test_continuation_chunk_has_coverage_mandate_and_tail_anchor(monkeypatch, tmp_path):
+    """Continuation chunks must be told to format every line through to the
+    section's last line, and be given that last line as an explicit anchor.
+
+    Regression for the job-12 chunk-1 elision (#269): the model dropped ~96s
+    from the middle of its section. It had where the PREVIOUS section ended
+    (overlap) but no target for where its OWN section must reach.
+    """
+    from types import SimpleNamespace
+
+    from api.services import worker as worker_mod
+    from api.services.chunking import TranscriptChunk
+    from api.services.worker import JobWorker
+
+    w = JobWorker.__new__(JobWorker)
+    w.llm = MagicMock()
+    w.llm.get_backend_for_phase = MagicMock(return_value="openrouter")
+    w.llm.get_backend_config = MagicMock(return_value={"timeout": 120})
+
+    captured = []
+
+    async def fake_chat(**kwargs):
+        captured.append(next(m["content"] for m in kwargs["messages"] if m["role"] == "user"))
+        return SimpleNamespace(
+            content="formatted", cost=0.01, total_tokens=10, input_tokens=6, output_tokens=4, model="m"
+        )
+
+    w.llm.chat = fake_chat
+    monkeypatch.setattr(worker_mod, "log_event", AsyncMock())
+    monkeypatch.setattr(w, "_load_agent_prompt", lambda phase: "system")
+
+    chunks = [
+        TranscriptChunk(
+            index=0, content="opening line here", start_timecode="0", end_timecode="1", word_count=3, overlap_prefix=""
+        ),
+        TranscriptChunk(
+            index=1,
+            content="middle of the section.\nFINAL closing remark here.",
+            start_timecode="1",
+            end_timecode="2",
+            word_count=7,
+            overlap_prefix="opening line here",
+        ),
+    ]
+    await w._run_formatter_chunked(
+        job_id=1,
+        chunks=chunks,
+        context={"analyst_output": ""},
+        project_path=tmp_path,
+        chunking_config={"max_parallel": 2},
+    )
+
+    cont = next(p for p in captured if "Continue formatting from where the previous" in p)
+    # Coverage mandate: format every line of the section.
+    assert "every line" in cont.lower()
+    # Tail anchor: an explicit instruction to reach the section's last line,
+    # followed by that line itself.
+    assert "reach and include" in cont.lower()
+    anchor_pos = cont.lower().index("reach and include")
+    assert "FINAL closing remark here." in cont[anchor_pos:]
+
+
+@pytest.mark.asyncio
 async def test_chunked_formatter_records_real_model(monkeypatch, tmp_path):
     """The chunked formatter result must report the model that ran, not 'chunked (...)'."""
     from types import SimpleNamespace
@@ -219,6 +282,55 @@ async def test_chunked_formatter_records_real_model(monkeypatch, tmp_path):
     )
     assert "claude-sonnet-4.6" in result["model"]
     assert "chunked" not in result["model"].split()[0]  # real id, not the opaque string
+
+
+@pytest.mark.asyncio
+async def test_chunked_formatter_tags_credit_exhausted(monkeypatch, tmp_path):
+    """A CreditExhaustedError in any chunk must surface as a credit-tagged dict.
+
+    Without the tag, the gather()-flatten turns it into a generic
+    ``{"success": False, "error": "Chunk i failed: ..."}`` and the main loop
+    raises → job marked failed → the actionable "add credit, then retry" pause
+    is lost. The chunked path must mirror ``_run_phase``'s non-chunked behavior.
+    """
+    from types import SimpleNamespace
+
+    from api.services import worker as worker_mod
+    from api.services.chunking import TranscriptChunk
+    from api.services.llm import CreditExhaustedError
+    from api.services.worker import JobWorker
+
+    w = JobWorker.__new__(JobWorker)
+    w.llm = MagicMock()
+    w.llm.get_backend_for_phase = MagicMock(return_value="openrouter")
+    w.llm.get_backend_config = MagicMock(return_value={"timeout": 120})
+
+    async def fake_chat(**kwargs):
+        # The second chunk hits the credit wall; the first would succeed.
+        if "b" in next(m["content"] for m in kwargs["messages"] if m["role"] == "user"):
+            raise CreditExhaustedError("Insufficient credit", backend="openrouter")
+        return SimpleNamespace(
+            content="formatted", cost=0.01, total_tokens=10, input_tokens=6, output_tokens=4, model="m"
+        )
+
+    w.llm.chat = fake_chat
+    monkeypatch.setattr(worker_mod, "log_event", AsyncMock())
+    monkeypatch.setattr(w, "_load_agent_prompt", lambda phase: "system")
+
+    chunks = [
+        TranscriptChunk(index=0, content="a", start_timecode="0", end_timecode="1", word_count=1, overlap_prefix=""),
+        TranscriptChunk(index=1, content="b", start_timecode="1", end_timecode="2", word_count=1, overlap_prefix="a"),
+    ]
+    result = await w._run_formatter_chunked(
+        job_id=1,
+        chunks=chunks,
+        context={"analyst_output": ""},
+        project_path=tmp_path,
+        chunking_config={"max_parallel": 2},
+    )
+
+    assert result["success"] is False
+    assert result["credit_exhausted"] is True
 
 
 def test_revalidation_updates_validator_model():

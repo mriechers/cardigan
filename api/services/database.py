@@ -115,6 +115,7 @@ jobs_table = Table(
     Column("max_retries", Integer, server_default="3"),
     Column("error_message", Text, nullable=True),
     Column("error_timestamp", DateTime, nullable=True),
+    Column("auto_escalated_at", DateTime, nullable=True),
     Column("manifest_path", Text, nullable=True),
     Column("logs_path", Text, nullable=True),
     Column("last_heartbeat", DateTime, nullable=True),
@@ -241,6 +242,32 @@ async def init_db() -> None:
     # Create tables if they don't exist (fresh database)
     async with _engine.begin() as conn:
         await conn.run_sync(metadata.create_all)
+        # Defense-in-depth: backfill columns added to the ORM schema that may be
+        # absent on a pre-existing / hand-maintained SQLite DB. metadata.create_all
+        # NEVER ALTERs an existing table, so a deploy whose DB predates a newly
+        # added column would raise OperationalError on first write to it (#243:
+        # auto_escalated_at). Idempotent — skips any column already present.
+        await conn.run_sync(_ensure_jobs_columns)
+
+
+# Columns added to the ``jobs`` ORM schema after the table's original creation.
+# name -> SQLite column type (kept in sync with the Column() declarations above;
+# SQLAlchemy's DateTime renders as DATETIME in the SQLite dialect).
+_JOBS_BACKFILL_COLUMNS: dict[str, str] = {
+    "auto_escalated_at": "DATETIME",
+}
+
+
+def _ensure_jobs_columns(sync_conn) -> None:
+    """Add any missing ``jobs`` columns from ``_JOBS_BACKFILL_COLUMNS`` (idempotent).
+
+    Safe on both fresh DBs (column already created by ``metadata.create_all`` ->
+    skipped) and pre-existing DBs (column missing -> added via ALTER TABLE).
+    """
+    existing = {row[1] for row in sync_conn.exec_driver_sql("PRAGMA table_info(jobs)").fetchall()}
+    for column, ddl_type in _JOBS_BACKFILL_COLUMNS.items():
+        if column not in existing:
+            sync_conn.exec_driver_sql(f"ALTER TABLE jobs ADD COLUMN {column} {ddl_type}")
 
 
 async def close_db() -> None:
@@ -601,6 +628,9 @@ async def update_job(job_id: int, job_update: JobUpdate) -> Optional[Job]:
                 update_values["error_timestamp"] = None
             else:
                 update_values["error_timestamp"] = datetime.now(timezone.utc)
+
+        if job_update.auto_escalated_at is not None:
+            update_values["auto_escalated_at"] = job_update.auto_escalated_at
 
         if job_update.estimated_cost is not None:
             update_values["estimated_cost"] = job_update.estimated_cost
@@ -1481,6 +1511,7 @@ def _row_to_job(row) -> Job:
         max_retries=row.max_retries,
         error_message=row.error_message,
         error_timestamp=row.error_timestamp,
+        auto_escalated_at=getattr(row, "auto_escalated_at", None),
         manifest_path=row.manifest_path,
         logs_path=row.logs_path,
         last_heartbeat=row.last_heartbeat,

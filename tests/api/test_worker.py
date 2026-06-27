@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
+from api.models.job import JobStatus
 from api.services.worker import JobWorker, WorkerConfig
 
 
@@ -674,3 +675,364 @@ class TestResolveDurationIntoMetrics:
         result = worker._resolve_duration_into_metrics(metrics, None)
 
         assert result["estimated_duration_minutes"] == 25.0
+
+
+class TestCreditExhaustionAndTruncation:
+    """Triggers B (credit) + C (truncation) routing onto pause_and_suggest (#243)."""
+
+    @pytest.mark.asyncio
+    @patch("api.services.worker.get_llm_client")
+    @patch("api.services.worker.log_event")
+    @patch("api.services.worker.AGENTS_DIR")
+    async def test_run_phase_tags_credit_exhausted(
+        self, mock_agents_dir, mock_log_event, mock_get_llm, mock_llm_client, tmp_path
+    ):
+        """_run_phase must catch CreditExhaustedError BEFORE the generic handler
+        and return a tagged dict (not a flattened {'success': False, 'error': ...})."""
+        from api.services.llm import CreditExhaustedError
+
+        mock_get_llm.return_value = mock_llm_client
+        mock_llm_client.chat = AsyncMock(
+            side_effect=CreditExhaustedError("OpenRouter credit exhausted", backend="openrouter")
+        )
+        mock_log_event.return_value = None
+        mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
+
+        worker = JobWorker()
+        result = await worker._run_phase(
+            job_id=1, phase_name="analyst", context={"transcript": "x"}, project_path=tmp_path
+        )
+
+        assert result["success"] is False
+        assert result["credit_exhausted"] is True
+        assert "credit" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    @patch("api.services.worker.get_llm_client")
+    @patch("api.services.worker.update_job_status")
+    @patch("api.services.worker.update_job_phase")
+    @patch("api.services.worker.update_job_heartbeat")
+    @patch("api.services.worker.log_event")
+    @patch("api.services.worker.start_run_tracking")
+    @patch("api.services.worker.end_run_tracking")
+    @patch("api.services.worker.pause_and_suggest")
+    @patch("api.services.worker.TRANSCRIPTS_DIR")
+    @patch("api.services.worker.OUTPUT_DIR")
+    @patch("api.services.worker.AGENTS_DIR")
+    async def test_process_job_credit_exhausted_pauses_not_failed(
+        self,
+        mock_agents_dir,
+        mock_output_dir,
+        mock_transcripts_dir,
+        mock_pause,
+        mock_end_tracking,
+        mock_start_tracking,
+        mock_log_event,
+        mock_update_heartbeat,
+        mock_update_phase,
+        mock_update_status,
+        mock_get_llm,
+        mock_llm_client,
+        tmp_path,
+        sample_job,
+    ):
+        """Credit exhaustion on the first phase routes to pause_and_suggest(trigger='credit')
+        and the job is NEVER marked failed (no raise, no consumed retry)."""
+        from api.services.llm import CreditExhaustedError
+
+        mock_get_llm.return_value = mock_llm_client
+        mock_llm_client.chat = AsyncMock(
+            side_effect=CreditExhaustedError("OpenRouter credit exhausted", backend="openrouter")
+        )
+        mock_pause.return_value = None
+        mock_update_status.return_value = None
+        mock_update_phase.return_value = None
+        mock_update_heartbeat.return_value = None
+        mock_log_event.return_value = None
+        mock_start_tracking.return_value = MagicMock(total_cost=0, total_tokens=0)
+        mock_end_tracking.return_value = {"total_cost": 0.0, "total_tokens": 0}
+
+        mock_transcripts_dir.__truediv__ = lambda self, name: tmp_path / name
+        mock_output_dir.__truediv__ = lambda self, name: tmp_path / name
+        mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
+        (tmp_path / sample_job["transcript_file"]).write_text("Test transcript content")
+
+        worker = JobWorker()
+        await worker.process_job(sample_job)
+
+        mock_pause.assert_awaited_once()
+        assert mock_pause.await_args.kwargs["trigger"] == "credit"
+
+        statuses = []
+        for c in mock_update_status.call_args_list:
+            s = c.args[1] if len(c.args) > 1 else c.kwargs.get("status")
+            statuses.append(getattr(s, "value", s))
+        assert "failed" not in statuses
+
+    @pytest.mark.asyncio
+    @patch("api.services.completeness.check_completeness")
+    @patch("api.services.worker.get_llm_client")
+    @patch("api.services.worker.update_job_status")
+    @patch("api.services.worker.update_job_phase")
+    @patch("api.services.worker.update_job_heartbeat")
+    @patch("api.services.worker.log_event")
+    @patch("api.services.worker.start_run_tracking")
+    @patch("api.services.worker.end_run_tracking")
+    @patch("api.services.worker.pause_and_suggest")
+    @patch("api.services.worker.TRANSCRIPTS_DIR")
+    @patch("api.services.worker.OUTPUT_DIR")
+    @patch("api.services.worker.AGENTS_DIR")
+    async def test_process_job_truncation_routes_through_pause_and_suggest(
+        self,
+        mock_agents_dir,
+        mock_output_dir,
+        mock_transcripts_dir,
+        mock_pause,
+        mock_end_tracking,
+        mock_start_tracking,
+        mock_log_event,
+        mock_update_heartbeat,
+        mock_update_phase,
+        mock_update_status,
+        mock_get_llm,
+        mock_check_completeness,
+        mock_llm_client,
+        mock_llm_response,
+        tmp_path,
+        sample_job,
+    ):
+        """Truncation detection pauses via pause_and_suggest(trigger='truncation')."""
+        mock_get_llm.return_value = mock_llm_client
+        mock_llm_client.chat = AsyncMock(return_value=mock_llm_response)
+        mock_pause.return_value = None
+        mock_update_status.return_value = None
+        mock_update_phase.return_value = None
+        mock_update_heartbeat.return_value = None
+        mock_log_event.return_value = None
+        mock_start_tracking.return_value = MagicMock(total_cost=0, total_tokens=0)
+        mock_end_tracking.return_value = {"total_cost": 0.02, "total_tokens": 1000}
+
+        truncated = MagicMock()
+        truncated.is_complete = False
+        truncated.skipped = False
+        truncated.coverage_ratio = 0.4
+        truncated.output_word_count = 100
+        truncated.source_word_count = 250
+        truncated.to_dict.return_value = {"coverage_ratio": 0.4}
+        mock_check_completeness.return_value = truncated
+
+        mock_transcripts_dir.__truediv__ = lambda self, name: tmp_path / name
+        mock_output_dir.__truediv__ = lambda self, name: tmp_path / name
+        mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
+        (tmp_path / sample_job["transcript_file"]).write_text("Test transcript content " * 50)
+
+        worker = JobWorker()
+        await worker.process_job(sample_job)
+
+        mock_pause.assert_awaited_once()
+        assert mock_pause.await_args.kwargs["trigger"] == "truncation"
+
+    @pytest.mark.asyncio
+    @patch("api.services.worker.get_llm_client")
+    @patch("api.services.worker.update_job_status")
+    @patch("api.services.worker.end_run_tracking")
+    @patch("api.services.worker.pause_and_suggest")
+    async def test_pause_for_credit_helper(
+        self, mock_pause, mock_end_tracking, mock_update_status, mock_get_llm, mock_llm_client
+    ):
+        """Shared terminal helper (used by main loop AND optional-phase path) pauses
+        with trigger='credit' and records cost without marking the job failed."""
+        mock_get_llm.return_value = mock_llm_client
+        mock_pause.return_value = None
+        mock_end_tracking.return_value = {"total_cost": 0.05}
+        mock_update_status.return_value = None
+
+        worker = JobWorker()
+        await worker._pause_for_credit(job_id=7)
+
+        mock_pause.assert_awaited_once()
+        assert mock_pause.await_args.kwargs["trigger"] == "credit"
+        assert "credit" in mock_pause.await_args.kwargs["message"].lower()
+        # Cost recorded as a paused partial write, never failed.
+        assert mock_update_status.await_args.args[1] == JobStatus.paused
+
+
+class TestProcessJobSeamGap:
+    """Worker-level test for the seam-gap pause path wired into the formatter phase."""
+
+    # 14 distinctive captions; the formatter "drops" the contiguous block 6-9.
+    _CAPTIONS = [
+        "Madison reporters gathered outside the Capitol rotunda",
+        "Governor Evers proposed expanding rural broadband funding",
+        "Republicans criticized the broadband subsidy proposal sharply",
+        "Senator Johnson defended existing telecommunications infrastructure spending",
+        "Advocates demanded faster fiber deployment across northern counties",
+        "Treasurer Godlewski announced surprising pension investment returns",  # DROP
+        "Auditors questioned the pension accounting methodology thoroughly",  # DROP
+        "Lawmakers debated transparency reforms during heated committee hearings",  # DROP
+        "Witnesses testified about contractor billing irregularities extensively",  # DROP
+        "Mayor Rhodes welcomed the downtown revitalization grant enthusiastically",
+        "Developers unveiled ambitious waterfront housing density plans",
+        "Neighbors objected to increased traffic congestion concerns",
+        "Council postponed the zoning variance vote indefinitely",
+        "Anchors thanked viewers before the evening broadcast concluded",
+    ]
+    _DROPPED = {5, 6, 7, 8}  # 0-indexed → SRT captions 6,7,8,9 (a 4-block)
+
+    def _source_srt(self) -> str:
+        blocks = []
+        for i, text in enumerate(self._CAPTIONS, start=1):
+            blocks.append(f"{i}\n00:00:{i:02d},000 --> 00:00:{i:02d},900\n{text}\n\n")
+        return "".join(blocks)
+
+    def _formatter_output_with_gap(self) -> str:
+        kept = [t for i, t in enumerate(self._CAPTIONS) if i not in self._DROPPED]
+        body = "\n\n".join(f"**Speaker:** {t}." for t in kept)
+        return (
+            "<!-- model: test -->\n# Formatted Transcript\n**Project:** Test\n---\n\n"
+            f"{body}\n\n**Status:** ready_for_editing"
+        )
+
+    @pytest.mark.asyncio
+    @patch("api.services.worker.get_llm_client")
+    @patch("api.services.worker.update_job_status")
+    @patch("api.services.worker.update_job_phase")
+    @patch("api.services.worker.update_job_heartbeat")
+    @patch("api.services.worker.log_event")
+    @patch("api.services.worker.start_run_tracking")
+    @patch("api.services.worker.end_run_tracking")
+    @patch("api.services.worker.TRANSCRIPTS_DIR")
+    @patch("api.services.worker.OUTPUT_DIR")
+    @patch("api.services.worker.AGENTS_DIR")
+    async def test_seam_gap_pauses_job_before_optional_phases(
+        self,
+        mock_agents_dir,
+        mock_output_dir,
+        mock_transcripts_dir,
+        mock_end_tracking,
+        mock_start_tracking,
+        mock_log_event,
+        mock_update_heartbeat,
+        mock_update_phase,
+        mock_update_status,
+        mock_get_llm,
+        mock_llm_client,
+        tmp_path,
+    ):
+        """A formatter output missing a contiguous caption block pauses the job
+        with a SEAM GAP message. Kept short so the global completeness check
+        skips (under its 500-word floor) and the seam check is what fires."""
+        mock_get_llm.return_value = mock_llm_client
+
+        # Every phase returns the gapped formatter output; the formatter phase's
+        # output is what the seam check reads.
+        response = MagicMock()
+        response.content = self._formatter_output_with_gap()
+        response.cost = 0.001
+        response.total_tokens = 500
+        response.model = "test-model"
+        mock_llm_client.chat = AsyncMock(return_value=response)
+
+        mock_update_status.return_value = None
+        mock_update_phase.return_value = None
+        mock_update_heartbeat.return_value = None
+        mock_log_event.return_value = None
+        mock_start_tracking.return_value = MagicMock(total_cost=0, total_tokens=0)
+        mock_end_tracking.return_value = {"total_cost": 0.01, "total_tokens": 2000}
+
+        mock_transcripts_dir.__truediv__ = lambda self, name: tmp_path / name
+        mock_output_dir.__truediv__ = lambda self, name: tmp_path / name
+        mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
+
+        job = {
+            "id": 99,
+            "project_name": "Seam Test",
+            "transcript_file": "seamtest.srt",
+            "status": "in_progress",
+            "priority": 10,
+            "queued_at": datetime.now(timezone.utc).isoformat(),
+            "phases": [],
+        }
+        (tmp_path / job["transcript_file"]).write_text(self._source_srt(), encoding="utf-8")
+
+        worker = JobWorker()
+        await worker.process_job(job)
+
+        # A paused status update carrying the seam message must have been issued.
+        paused = [c for c in mock_update_status.call_args_list if getattr(c.args[1], "value", c.args[1]) == "paused"]
+        assert paused, "expected the job to be paused on a seam gap"
+        assert any(
+            "SEAM GAP DETECTED" in str(c.kwargs.get("error_message", "")) for c in paused
+        ), "paused status should carry the SEAM GAP message"
+
+
+class TestProcessJobSpeakerSegmentation:
+    """Worker-level test that interior `>>` markers are split before the formatter
+    LLM sees them (issue #269)."""
+
+    @pytest.mark.asyncio
+    @patch("api.services.worker.get_llm_client")
+    @patch("api.services.worker.update_job_status")
+    @patch("api.services.worker.update_job_phase")
+    @patch("api.services.worker.update_job_heartbeat")
+    @patch("api.services.worker.log_event")
+    @patch("api.services.worker.start_run_tracking")
+    @patch("api.services.worker.end_run_tracking")
+    @patch("api.services.worker.TRANSCRIPTS_DIR")
+    @patch("api.services.worker.OUTPUT_DIR")
+    @patch("api.services.worker.AGENTS_DIR")
+    async def test_formatter_receives_split_captions(
+        self,
+        mock_agents_dir,
+        mock_output_dir,
+        mock_transcripts_dir,
+        mock_end_tracking,
+        mock_start_tracking,
+        mock_log_event,
+        mock_update_heartbeat,
+        mock_update_phase,
+        mock_update_status,
+        mock_get_llm,
+        mock_llm_client,
+        mock_llm_response,
+        tmp_path,
+    ):
+        """The formatter phase's LLM input must contain the split form of an
+        interior-`>>` caption, not the original joined caption."""
+        mock_get_llm.return_value = mock_llm_client
+        mock_llm_client.chat = AsyncMock(return_value=mock_llm_response)
+        mock_start_tracking.return_value = MagicMock(total_cost=0, total_tokens=0)
+        mock_end_tracking.return_value = {"total_cost": 0.01, "total_tokens": 2000}
+
+        mock_transcripts_dir.__truediv__ = lambda self, name: tmp_path / name
+        mock_output_dir.__truediv__ = lambda self, name: tmp_path / name
+        mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
+
+        srt = (
+            "1\n00:00:01,000 --> 00:00:02,000\nPlain opener line here.\n\n"
+            "2\n00:00:02,000 --> 00:00:04,000\nAlpha speaks now. >> Beta replies instead.\n\n"
+        )
+        job = {
+            "id": 100,
+            "project_name": "Seg Test",
+            "transcript_file": "segtest.srt",
+            "status": "in_progress",
+            "priority": 10,
+            "queued_at": datetime.now(timezone.utc).isoformat(),
+            "phases": [],
+        }
+        (tmp_path / job["transcript_file"]).write_text(srt, encoding="utf-8")
+
+        worker = JobWorker()
+        await worker.process_job(job)
+
+        # Find the formatter phase's LLM call and read its user message.
+        formatter_msgs = [
+            c.kwargs["messages"] for c in mock_llm_client.chat.call_args_list if c.kwargs.get("phase") == "formatter"
+        ]
+        assert formatter_msgs, "formatter phase should have called the LLM"
+        user_text = "\n".join(m["content"] for m in formatter_msgs[0] if m["role"] == "user")
+
+        # Split form present; original joined caption absent.
+        assert ">> Beta replies instead." in user_text
+        assert "Alpha speaks now. >> Beta replies instead." not in user_text

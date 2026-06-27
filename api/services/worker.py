@@ -18,15 +18,23 @@ from api.services.database import (
     claim_next_job,
     clear_defer_state,
     defer_job,
+    get_job,
     log_event,
     record_heartbeat,
     set_config,
+    update_job,
     update_job_heartbeat,
     update_job_phase,
     update_job_status,
 )
+from api.services.escalation import (
+    pause_and_suggest,
+    resolve_escalated_model,
+    select_escalation_phases,
+)
 from api.services.llm import (
     BackendUnavailableError,
+    CreditExhaustedError,
     LLMResponse,
     end_run_tracking,
     get_llm_client,
@@ -130,6 +138,37 @@ def apply_validator_model(phases: list, model: Optional[str]) -> list:
     for p in phases:
         if p.get("name") == "validator" and model:
             p["model"] = model
+    return phases
+
+
+def apply_escalated_phase_models(phases: Optional[list], escalated: Dict[str, dict]) -> Optional[list]:
+    """Refresh persisted ``phases[]`` with the model/cost from escalated re-runs (#243).
+
+    The escalated ``_run_phase`` calls in the QA gate don't update the job's
+    persisted ``phases[]`` (only the main loop does), so per-phase attribution
+    would otherwise stay stale at the pre-escalation model. ``escalated`` maps
+    ``phase_name -> {"model": ..., "cost": ...}``. Handles both ``JobPhase``
+    objects and dict entries. Returns the (mutated) ``phases`` list.
+    """
+    if not phases:
+        return phases
+    for p in phases:
+        name = p.get("name") if isinstance(p, dict) else getattr(p, "name", None)
+        info = escalated.get(name) if name else None
+        if not info:
+            continue
+        model = info.get("model")
+        cost = info.get("cost")
+        if isinstance(p, dict):
+            if model:
+                p["model"] = model
+            if cost is not None:
+                p["cost"] = cost
+        else:
+            if model:
+                p.model = model
+            if cost is not None:
+                p.cost = cost
     return phases
 
 
@@ -858,6 +897,9 @@ Extract any name or spelling corrections that should be added to the glossary. S
             }
 
             truncation_paused = False
+            # Holds the parsed validator verdict (set when the validator phase runs);
+            # consumed by the QA-fail escalation gate at completion time.
+            validation_data: Optional[dict] = None
 
             for phase_name in self.PHASES:
                 # Check if phase already completed
@@ -922,6 +964,18 @@ Extract any name or spelling corrections that should be added to the glossary. S
                         "Job requeued — local backend busy",
                         extra={"job_id": job_id, "phase": phase_name, "detail": phase_result.get("detail")},
                     )
+                    return
+
+                if phase_result.get("credit_exhausted"):
+                    # OpenRouter is out of credit (Trigger B, #243). Pause the job
+                    # with an actionable message instead of raising (which would
+                    # mark it failed and burn a retry). The user adds credit and
+                    # retries from where it stopped.
+                    logger.warning(
+                        "Job paused — OpenRouter credit exhausted",
+                        extra={"job_id": job_id, "phase": phase_name, "project_name": project_name},
+                    )
+                    await self._pause_for_credit(job_id)
                     return
 
                 if not phase_result["success"]:
@@ -1006,10 +1060,65 @@ Extract any name or spelling corrections that should be added to the glossary. S
                                     f"{completeness.source_word_count:,} words). "
                                     f"Retry to escalate to a more capable model."
                                 )
+                                # Route truncation through the shared terminal
+                                # helper (Trigger C, #243) for a consistent
+                                # ``[truncation] ...`` paused message. The later
+                                # ``if truncation_paused`` block records the cost.
+                                await pause_and_suggest(
+                                    job_id,
+                                    trigger="truncation",
+                                    message=truncation_msg,
+                                )
+                                truncation_paused = True
+                                break  # Exit phase loop cleanly (no exception)
+
+                # === Seam-gap check after formatter phase ===
+                # Catches localized chunk-boundary drops that the global coverage
+                # ratio can't see (issue #269). Runs only if the completeness
+                # check above didn't already pause the job.
+                if phase_name == "formatter" and not truncation_paused:
+                    from api.services.seam_coverage import find_dropped_spans, format_gap_message
+
+                    seam_config = self.llm.config.get("routing", {}).get("seam_coverage", {})
+                    if seam_config.get("enabled", True):
+                        formatter_output = phase_result.get("output", "")
+                        transcript_file = job.get("transcript_file", "")
+                        is_srt = transcript_file.lower().endswith(".srt")
+
+                        seam = find_dropped_spans(
+                            source_transcript=transcript_content,
+                            formatter_output=formatter_output,
+                            is_srt=is_srt,
+                            min_run=seam_config.get("min_run", 4),
+                            per_caption_floor=seam_config.get("per_caption_floor", 0.5),
+                        )
+
+                        context["seam_coverage"] = seam.to_dict()
+
+                        if seam.has_gap:
+                            gap_msg = format_gap_message(seam)
+                            logger.warning(
+                                "Seam gap detected in formatter output",
+                                extra={
+                                    "job_id": job_id,
+                                    "dropped_spans": seam.to_dict()["dropped_spans"],
+                                },
+                            )
+                            await log_event(
+                                EventCreate(
+                                    job_id=job_id,
+                                    event_type=EventType.phase_failed,
+                                    data=EventData(
+                                        phase="seam_coverage",
+                                        extra=seam.to_dict(),
+                                    ),
+                                )
+                            )
+                            if seam_config.get("pause_on_gap", True):
                                 await update_job_status(
                                     job_id,
                                     JobStatus.paused,
-                                    error_message=truncation_msg,
+                                    error_message=gap_msg,
                                 )
                                 truncation_paused = True
                                 break  # Exit phase loop cleanly (no exception)
@@ -1080,6 +1189,18 @@ Extract any name or spelling corrections that should be added to the glossary. S
                         phases.append(phase_data)
                     await update_job_phase(job_id, phases)
 
+                    # Credit exhaustion is NEVER non-fatal, even in an optional
+                    # phase (Trigger B, #243). Pause-and-suggest before the swallow
+                    # below would otherwise hide the credit problem and let the job
+                    # complete on partial output.
+                    if phase_result.get("credit_exhausted"):
+                        logger.warning(
+                            "Job paused — OpenRouter credit exhausted (optional phase)",
+                            extra={"job_id": job_id, "phase": phase_name, "project_name": project_name},
+                        )
+                        await self._pause_for_credit(job_id)
+                        return
+
                     # Optional phase failure is logged but doesn't fail the job
                     if not phase_result["success"]:
                         logger.warning(
@@ -1093,33 +1214,72 @@ Extract any name or spelling corrections that should be added to the glossary. S
             # Create manifest
             await self._create_manifest(job, project_path, phases, tracker)
 
-            # Mark job completed
-            run_summary = await end_run_tracking(job_id)
-            await update_job_status(
+            # QA-fail escalation gate (Trigger A, #243): a validator `overall: "fail"`
+            # must NOT silently land as `completed`. The gate escalates flagged phases
+            # once and re-validates; on persistent/unresolvable failure it pauses the
+            # job (via pause_and_suggest) instead of completing it.
+            #
+            # The cost tracker must stay ALIVE across the gate so the escalated
+            # `_run_phase` re-runs and the re-validation LLM call are billed into
+            # this job's run total (and the cost-cap check still applies during
+            # escalation). `end_run_tracking` is therefore called AFTER the gate
+            # returns, not before it (#243 fix).
+            outcome = await self._finalize_with_qa_gate(
                 job_id,
-                JobStatus.completed,
-                actual_cost=run_summary["total_cost"] if run_summary else 0,
+                context,
+                project_path,
+                validation_data,
+                [p.get("name") for p in (phases or [])],
             )
-            # Job finished: clear any deferral bookkeeping so a future reprocess
-            # starts a fresh capacity-wait ceiling rather than inheriting this one.
-            await clear_defer_state(job_id)
 
-            # Archive the transcript file (non-fatal if this fails)
-            try:
-                self._archive_transcript(job)
-            except Exception as archive_err:
-                logger.warning(
-                    "Failed to archive transcript (non-fatal)", extra={"job_id": job_id, "error": str(archive_err)}
+            run_summary = await end_run_tracking(job_id)
+
+            if outcome == "completed":
+                # Mark job completed
+                await update_job_status(
+                    job_id,
+                    JobStatus.completed,
+                    actual_cost=run_summary["total_cost"] if run_summary else 0,
                 )
+                # Job finished: clear any deferral bookkeeping so a future reprocess
+                # starts a fresh capacity-wait ceiling rather than inheriting this one.
+                await clear_defer_state(job_id)
 
-            logger.info(
-                "Job completed successfully",
-                extra={
-                    "job_id": job_id,
-                    "project_name": project_name,
-                    "total_cost": run_summary["total_cost"] if run_summary else 0,
-                },
-            )
+                # Archive the transcript file (non-fatal if this fails). Only on
+                # completion — a paused job may be reviewed/retried and still needs
+                # its source transcript, so we must NOT move it away on pause.
+                try:
+                    self._archive_transcript(job)
+                except Exception as archive_err:
+                    logger.warning(
+                        "Failed to archive transcript (non-fatal)", extra={"job_id": job_id, "error": str(archive_err)}
+                    )
+
+                logger.info(
+                    "Job completed successfully",
+                    extra={
+                        "job_id": job_id,
+                        "project_name": project_name,
+                        "total_cost": run_summary["total_cost"] if run_summary else 0,
+                    },
+                )
+            else:
+                # Gate already paused the job with an actionable error_message;
+                # do NOT mark it completed and do NOT archive the transcript.
+                # Record the attempt's cost without clobbering the pause reason.
+                await update_job_status(
+                    job_id,
+                    JobStatus.paused,
+                    actual_cost=run_summary["total_cost"] if run_summary else 0,
+                )
+                logger.info(
+                    "Job paused by QA gate (not completed)",
+                    extra={
+                        "job_id": job_id,
+                        "project_name": project_name,
+                        "total_cost": run_summary["total_cost"] if run_summary else 0,
+                    },
+                )
 
         except Exception as e:
             logger.error(
@@ -1166,6 +1326,131 @@ Extract any name or spelling corrections that should be added to the glossary. S
                     logger.warning("Heartbeat cleanup error", extra={"job_id": job_id, "error": str(e)})
                 self._heartbeat_task = None
             self._current_job_id = None
+
+    def _phase_model(self, job, phase_name: str) -> Optional[str]:
+        """Return the model the named phase actually ran on, from the job's
+        persisted phases. Handles both JobPhase objects and dict entries.
+
+        Returns None if the job/phase is unknown (the caller then treats the
+        family as unresolvable and skips escalation for that phase).
+        """
+        if job is None:
+            return None
+        phases = getattr(job, "phases", None) or []
+        for p in phases:
+            name = p.get("name") if isinstance(p, dict) else getattr(p, "name", None)
+            if name == phase_name:
+                return p.get("model") if isinstance(p, dict) else getattr(p, "model", None)
+        return None
+
+    async def _finalize_with_qa_gate(
+        self,
+        job_id: int,
+        context: Dict[str, Any],
+        project_path,
+        validation_result: Optional[dict],
+        phase_order: list,
+    ) -> str:
+        """Decide the terminal state after all phases run (Trigger A, #243).
+
+        Returns 'completed' or 'paused'. On any pause path the job is left
+        visibly NOT completed via ``pause_and_suggest`` (status=paused with an
+        actionable error_message).
+
+        Policy:
+          - validator overall != "fail" (or gate disabled) -> 'completed'
+          - "fail" + already auto-escalated once            -> 'paused'
+          - "fail" (first time) -> escalate flagged phases once on a stronger
+            model, re-validate, then 'completed' (pass) or 'paused' (still fail
+            / no stronger model available).
+        """
+        from api.models.job import JobUpdate
+
+        cfg = self.llm.config.get("qa_escalation", {})
+        overall = (validation_result or {}).get("overall")
+
+        if overall != "fail" or not cfg.get("on_validation_fail", True):
+            return "completed"
+
+        job = await get_job(job_id)
+        if job is not None and getattr(job, "auto_escalated_at", None) is not None:
+            await pause_and_suggest(
+                job_id,
+                trigger="qa_fail",
+                message="QA failed again after escalation — review or retry on a stronger model.",
+            )
+            return "paused"
+
+        # The dedicated re-validation below re-runs the validator, so exclude it
+        # from the escalation loop — otherwise the validator would run up to 3x
+        # and its escalated output would be immediately overwritten (#243 fix).
+        phases = [p for p in select_escalation_phases(validation_result, phase_order) if p != "validator"]
+        exclude = cfg.get("exclude_variants", ["fast", "fable"])
+        reran = False
+        # Track escalated per-phase model/cost so we can refresh the persisted
+        # phases[] attribution after the gate resolves (Minor-A, #243).
+        escalated_models: Dict[str, dict] = {}
+        for phase_name in phases:
+            current_model = self._phase_model(job, phase_name)
+            target = await resolve_escalated_model(current_model, exclude)
+            if target is None:
+                # Already at the strongest family / catalog unavailable for this phase.
+                continue
+            res = await self._run_phase(job_id, phase_name, context, project_path, model_override=target)
+            if res and res.get("success"):
+                # Thread the escalated output back into context so the
+                # re-validation below judges the ESCALATED work, not the stale
+                # pre-escalation output (mirrors the main phase loop) (#243 fix).
+                context[f"{phase_name}_output"] = res.get("output", "")
+                escalated_models[phase_name] = {"model": res.get("model") or target, "cost": res.get("cost")}
+                reran = True
+
+        if not reran:
+            await pause_and_suggest(
+                job_id,
+                trigger="qa_fail",
+                message="QA failed and no stronger model was available — review or retry.",
+                mark_escalated=True,
+            )
+            return "paused"
+
+        # Re-validate once on the configured default validator model.
+        reval = await self._run_phase(job_id, "validator", context, project_path)
+        if reval and reval.get("success"):
+            verdict = self._parse_validation_result(reval.get("output", ""))
+            escalated_models["validator"] = {"model": reval.get("model"), "cost": reval.get("cost")}
+        else:
+            verdict = {"overall": "fail"}
+
+        # Persist the LATEST validation verdict so a completed-after-escalation job
+        # no longer reports the stale pre-escalation "fail" (MUST-FIX 1, #243). Also
+        # refresh per-phase model/cost attribution for the escalated re-runs
+        # (Minor-A). update_job is a partial update, so the subsequent
+        # pause_and_suggest (status/error/escalation marker) won't clobber this.
+        refreshed = await get_job(job_id)
+        phases_update = apply_escalated_phase_models(
+            list(refreshed.phases) if refreshed and refreshed.phases else None,
+            escalated_models,
+        )
+        await update_job(
+            job_id,
+            JobUpdate(
+                validation_result=verdict,
+                phases=phases_update,
+                auto_escalated_at=datetime.now(timezone.utc) if verdict.get("overall") == "pass" else None,
+            ),
+        )
+
+        if verdict.get("overall") == "pass":
+            return "completed"
+
+        await pause_and_suggest(
+            job_id,
+            trigger="qa_fail",
+            message="QA failed after escalation — review or retry on a stronger model.",
+            mark_escalated=True,
+        )
+        return "paused"
 
     async def _fetch_sst_context(self, job: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Fetch SST metadata from Airtable if job has linked record.
@@ -1576,6 +1861,27 @@ Extract any name or spelling corrections that should be added to the glossary. S
         ceiling_hours = cfg.get("ceiling_hours", 6)
         return backoff_minutes, ceiling_hours
 
+    async def _pause_for_credit(self, job_id: int) -> None:
+        """Terminal pause for OpenRouter credit exhaustion (Trigger B, #243).
+
+        Routes through the shared ``pause_and_suggest`` helper (status=paused,
+        actionable message, retry count untouched — credit problems must never
+        consume a retry) then records the attempt's cost without clobbering the
+        pause reason. Mirrors the truncation and QA-gate paused terminal paths.
+        """
+        await pause_and_suggest(
+            job_id,
+            trigger="credit",
+            message="OpenRouter credit exhausted — add credit, then retry.",
+        )
+        run_summary = await end_run_tracking(job_id)
+        if run_summary:
+            await update_job_status(
+                job_id,
+                JobStatus.paused,
+                actual_cost=run_summary["total_cost"],
+            )
+
     async def _run_phase(
         self,
         job_id: int,
@@ -1593,6 +1899,18 @@ Extract any name or spelling corrections that should be added to the glossary. S
             project_path: Path to project output directory
             model_override: Optional model ID to override the phase default
         """
+        # Normalize live-caption speaker markers before formatting: split any
+        # caption with an interior ">>" so the formatter sees one turn per
+        # caption (issue #269 — fixes mid-cue turn-order inversion and speaker
+        # misattribution). Word-preserving, so downstream checks are unaffected.
+        if phase_name == "formatter":
+            seg_config = self.llm.config.get("routing", {}).get("speaker_segmentation", {})
+            transcript_file = context.get("transcript_file", "")
+            if seg_config.get("enabled", True) and transcript_file.lower().endswith(".srt"):
+                from api.services.speaker_segmentation import split_interior_speaker_changes
+
+                context["transcript"] = split_interior_speaker_changes(context.get("transcript", ""))
+
         # Check for chunked formatter processing
         if phase_name == "formatter":
             chunking_config = self.llm.config.get("routing", {}).get("chunking", {})
@@ -1718,6 +2036,24 @@ Extract any name or spelling corrections that should be added to the glossary. S
                 "model": response.model,
             }
 
+        except CreditExhaustedError as e:
+            # OpenRouter has no credit/quota left (Trigger B, #243). This is NOT a
+            # generic phase failure — caught BEFORE the generic ``except Exception``
+            # below so it isn't flattened into ``{"success": False, "error": ...}``
+            # (which would mark the job failed and consume a retry). Tag the result
+            # so the pipeline can route it to pause-and-suggest instead.
+            logger.warning(
+                "Phase halted — OpenRouter credit exhausted",
+                extra={"job_id": job_id, "phase": phase_name, "backend": e.backend, "detail": e.detail},
+            )
+            return {
+                "success": False,
+                "credit_exhausted": True,
+                "error": e.detail,
+                "cost": 0,
+                "tokens": 0,
+            }
+
         except BackendUnavailableError as e:
             # The backend is temporarily busy (memory pressure / loading / contention),
             # not broken. Signal the pipeline to requeue rather than fail the job.
@@ -1757,6 +2093,20 @@ Extract any name or spelling corrections that should be added to the glossary. S
                 )
             )
             return {"success": False, "error": str(e), "cost": 0, "tokens": 0}
+
+    @staticmethod
+    def _section_tail(content: str, max_chars: int = 200) -> str:
+        """Last line of a chunk's content, used as a 'format through to here'
+        anchor. Handles SRT (last caption text) and plain text (last line)."""
+        from api.services.utils import parse_srt
+
+        caps = parse_srt(content)
+        if caps:
+            text = " ".join(caps[-1].text.split())
+        else:
+            lines = [ln.strip() for ln in content.strip().splitlines() if ln.strip()]
+            text = lines[-1] if lines else ""
+        return text[:max_chars]
 
     async def _run_formatter_chunked(
         self,
@@ -1832,9 +2182,29 @@ If the speaker said it, those exact words must appear in the output. Do NOT subs
 If a caption is garbled or unclear, include your best reconstruction rather than dropping it. NEVER silently omit content.
 SPELLING: Always use "partisan" (not "partizan"), "bipartisan" (not "bipartisan"). Program names like "Inside Wisconsin Politics" are NOT italicized."""
 
+                # Coverage mandate + tail anchor: the model must format the whole
+                # section through to its last line. On job 12 chunk 1 silently
+                # dropped ~96s from the middle of its section (#269); it knew where
+                # the previous section ended (overlap) but had no target for where
+                # its own section must reach.
+                section_tail = self._section_tail(chunk.content)
+                coverage_mandate = (
+                    "COVERAGE MANDATE: Format EVERY line of the section below, in order, from its "
+                    "first line through to its last. Do NOT skip, summarize, or jump over any "
+                    "portion of the section.\n"
+                )
+                tail_anchor = (
+                    "This section ENDS with the following line — your formatted output MUST reach "
+                    f"and include it (do not stop before it):\n---\n{section_tail}\n---\n"
+                    if section_tail
+                    else ""
+                )
+
                 if chunk.index == 0:
                     # First chunk: normal formatter prompt (generates the metadata header).
                     user_message = f"{verbatim_instruction}\n\n"
+                    if total_chunks > 1:
+                        user_message += coverage_mandate + tail_anchor + "\n"
                     if total_chunks > 1:
                         # Chunk 0 only sees the first slice of a long transcript. Without
                         # this it concludes the transcript is truncated and emits false
@@ -1875,6 +2245,7 @@ Using the following analysis as guidance:
 {analysis}
 ---
 
+{coverage_mandate}{tail_anchor}
 Please format this transcript section:
 
 ---
@@ -1939,6 +2310,43 @@ Please format this transcript section:
                 *(process_chunk(chunk) for chunk in chunks),
                 return_exceptions=True,
             )
+
+            # Credit exhaustion anywhere in the batch must pause the job (Trigger B,
+            # #243), not fail it. Detect it BEFORE the generic exception flatten below,
+            # and return the same credit-tagged dict ``_run_phase`` returns for the
+            # non-chunked case so the main loop routes it through ``_pause_for_credit``.
+            credit_error = next(
+                (r for r in chunk_results if isinstance(r, CreditExhaustedError)),
+                None,
+            )
+            if credit_error is not None:
+                # Sum cost from any chunks that completed before the batch hit the wall.
+                partial_cost = sum(r["cost"] for r in chunk_results if not isinstance(r, Exception))
+                logger.warning(
+                    "Chunked formatter halted — OpenRouter credit exhausted",
+                    extra={
+                        "job_id": job_id,
+                        "backend": credit_error.backend,
+                        "detail": credit_error.detail,
+                    },
+                )
+                await log_event(
+                    EventCreate(
+                        job_id=job_id,
+                        event_type=EventType.phase_failed,
+                        data=EventData(
+                            phase="formatter",
+                            extra={"error": credit_error.detail, "credit_exhausted": True},
+                        ),
+                    )
+                )
+                return {
+                    "success": False,
+                    "credit_exhausted": True,
+                    "error": credit_error.detail,
+                    "cost": partial_cost,
+                    "tokens": 0,
+                }
 
             # Check for failures
             for i, result in enumerate(chunk_results):

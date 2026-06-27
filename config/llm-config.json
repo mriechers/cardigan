@@ -130,11 +130,17 @@
     "poll_interval_seconds": 5,
     "heartbeat_interval_seconds": 60
   },
+  "qa_escalation": {
+    "on_validation_fail": true,
+    "max_auto_escalations": 1,
+    "family_order": ["haiku", "sonnet", "opus"],
+    "exclude_variants": ["fast", "fable"]
+  },
   "phase_backends": {
     "analyst": "openrouter-cheapskate",
     "formatter": "openrouter",
     "seo": "openrouter-cheapskate",
-    "validator": "openrouter-cheapskate",
+    "validator": "openrouter",
     "timestamp": "openrouter",
     "copy_editor": "openrouter-big-brain"
   },
@@ -144,6 +150,15 @@
       "coverage_threshold": 0.70,
       "min_source_words": 500,
       "pause_on_truncation": true
+    },
+    "seam_coverage": {
+      "enabled": true,
+      "min_run": 4,
+      "per_caption_floor": 0.5,
+      "pause_on_gap": true
+    },
+    "speaker_segmentation": {
+      "enabled": true
     },
     "chunking": {
       "enabled": true,
