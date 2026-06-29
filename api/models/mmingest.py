@@ -114,3 +114,45 @@ class RecentResponse(BaseModel):
 
     results: list[RecentEntry]
     total: int
+
+
+# ---------------------------------------------------------------------------
+# Status endpoint
+# ---------------------------------------------------------------------------
+
+
+class CrawlRun(BaseModel):
+    """Telemetry for one delta-walk pass (from mmingest_crawl_runs)."""
+
+    id: int
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    status: str  # 'running' | 'completed' | 'suppressed' | 'failed'
+    files_seen: Optional[int] = None
+    files_new: Optional[int] = None
+    sidecars_fetched: Optional[int] = None
+    sidecars_persisted: Optional[int] = None
+    fts_parity_delta: Optional[int] = None
+    elapsed_seconds: Optional[float] = None
+    error: Optional[str] = None
+
+
+class StatusCounts(BaseModel):
+    """Live row counts for the mmingest index."""
+
+    files: int  # total rows in mmingest_files
+    current_files: int  # rows with superseded_by IS NULL
+    sidecars: int  # total rows in mmingest_sidecars
+
+
+class StatusResponse(BaseModel):
+    """Response for GET /api/mmingest/status.
+
+    Surfaces the last crawl run + live index counts so an empty/stalled index
+    is diagnosable without shell access.  ``last_run`` is null before the first
+    scheduled pass (or before migration 021 applies).
+    """
+
+    last_run: Optional[CrawlRun] = None
+    running: bool = False
+    counts: StatusCounts

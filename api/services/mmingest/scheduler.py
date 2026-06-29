@@ -60,21 +60,25 @@ async def run_delta_walk() -> None:
     """
     logger.info("mmingest delta walk + index starting")
 
+    # Resolve the engine before the try so we can record telemetry in all
+    # branches.  Import lazily to avoid circular imports at module load time.
+    import api.services.database as _db_module
+    from api.services.mmingest.indexer import MmingestIndexer
+    from api.services.mmingest.run_status import record_run_finish, record_run_start
+
+    # _engine is the module-level singleton created by init_db(); if the
+    # scheduler fires before init_db() completes, the engine will be None
+    # and we log an error rather than crashing.
+    engine = _db_module._engine
+    if engine is None:
+        logger.error("mmingest indexer: DB engine not initialised (init_db() not yet called). Skipping this run.")
+        return
+
+    # Record a 'running' telemetry row so /api/mmingest/status can report an
+    # in-flight (or stalled) pass even before it completes.
+    run_id = await record_run_start(engine)
+
     try:
-        # Import lazily to avoid circular imports at module load time.
-        # _engine is the module-level singleton created by init_db(); if the
-        # scheduler fires before init_db() completes, the engine will be None
-        # and we log an error rather than crashing.
-        import api.services.database as _db_module
-        from api.services.mmingest.indexer import MmingestIndexer
-
-        engine = _db_module._engine
-        if engine is None:
-            logger.error(
-                "mmingest indexer: DB engine not initialised (init_db() not yet called). " "Skipping this run."
-            )
-            return
-
         indexer = MmingestIndexer(
             engine=engine,
             base_url="https://mmingest.pbswi.wisc.edu/",
@@ -85,6 +89,7 @@ async def run_delta_walk() -> None:
 
         run = await indexer.run_once()
 
+        await record_run_finish(engine, run_id, status="completed", run=run)
         logger.info(
             "mmingest delta walk complete: files_seen=%d files_new=%d "
             "sidecars_fetched=%d sidecars_persisted=%d fts_delta=%s elapsed=%.1fs",
@@ -98,8 +103,12 @@ async def run_delta_walk() -> None:
 
     except RuntimeError as exc:
         # Pause-window suppression is a normal operational event, not a failure.
+        await record_run_finish(engine, run_id, status="suppressed", error=str(exc))
         logger.info("mmingest delta walk suppressed: %s", exc)
-    except Exception:
+    except Exception as exc:
+        # Record the failure so it surfaces via /api/mmingest/status, then
+        # re-log with traceback.  A silently-empty index must never look healthy.
+        await record_run_finish(engine, run_id, status="failed", error=repr(exc))
         logger.exception("mmingest delta walk failed")
 
 
