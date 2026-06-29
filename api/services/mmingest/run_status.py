@@ -112,6 +112,36 @@ async def record_run_finish(
         logger.exception("mmingest telemetry: failed to record run finish for run_id=%s", run_id)
 
 
+async def reconcile_running_as_interrupted(engine: AsyncEngine) -> int:
+    """Mark any lingering ``running`` rows as ``interrupted``.
+
+    Called at the start of each delta-walk pass.  Because run_delta_walk runs
+    single-instance (APScheduler max_instances=1) and only one container is
+    live, any row still ``running`` at this point is an orphan from a process
+    that died mid-walk — exactly the deploy-restart failure this PR targets.
+    Reconciling it here prevents ``/status`` from reporting ``running: true``
+    forever and records an accurate terminal status for the crashed pass.
+
+    Returns the number of rows reconciled.  Best-effort: failures are logged,
+    not raised.
+    """
+    finished = datetime.now(timezone.utc).isoformat()
+    try:
+        async with engine.begin() as conn:
+            result = await conn.execute(
+                text("""
+                    UPDATE mmingest_crawl_runs
+                    SET status = 'interrupted', finished_at = :finished_at
+                    WHERE status = 'running'
+                """),
+                {"finished_at": finished},
+            )
+        return result.rowcount or 0
+    except Exception:
+        logger.exception("mmingest telemetry: failed to reconcile stale running rows")
+        return 0
+
+
 async def read_status(engine: AsyncEngine) -> Optional[dict[str, Any]]:
     """Return the most recent crawl run as a dict, plus a ``running`` flag.
 
@@ -122,6 +152,11 @@ async def read_status(engine: AsyncEngine) -> Optional[dict[str, Any]]:
             "last_run": { ... row fields ... } | None,
             "running": bool,
         }
+
+    ``running`` is derived from the most recent row's status — NOT a global
+    count of unfinished rows.  A global count would stay ``true`` forever after
+    a crash orphans a ``running`` row; deriving from the latest row means a
+    later completed/interrupted pass correctly reports ``running: false``.
     """
     async with engine.connect() as conn:
         # Preflight: table may not exist during the deploy window before 021.
@@ -141,10 +176,6 @@ async def read_status(engine: AsyncEngine) -> Optional[dict[str, Any]]:
             LIMIT  1
         """))).fetchone()
 
-        running = (await conn.execute(text("""
-            SELECT COUNT(*) FROM mmingest_crawl_runs
-            WHERE status = 'running' AND finished_at IS NULL
-        """))).scalar_one()
-
     last_run = dict(row._mapping) if row is not None else None
-    return {"last_run": last_run, "running": bool(running)}
+    running = last_run is not None and last_run["status"] == "running" and last_run["finished_at"] is None
+    return {"last_run": last_run, "running": running}

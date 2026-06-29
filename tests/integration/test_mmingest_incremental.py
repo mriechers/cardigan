@@ -23,7 +23,12 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from api.services.mmingest.crawler import FileWorkItem
 from api.services.mmingest.indexer import MmingestIndexer
-from api.services.mmingest.run_status import read_status, record_run_finish, record_run_start
+from api.services.mmingest.run_status import (
+    read_status,
+    reconcile_running_as_interrupted,
+    record_run_finish,
+    record_run_start,
+)
 
 
 @pytest_asyncio.fixture
@@ -193,3 +198,41 @@ async def test_record_run_finish_failed_captures_error(migrated_engine):
     assert status["running"] is False
     assert status["last_run"]["status"] == "failed"
     assert "boom" in status["last_run"]["error"]
+
+
+@pytest.mark.asyncio
+async def test_running_flag_not_stuck_after_orphaned_run(migrated_engine):
+    """An orphaned 'running' row must not pin running=true after a later run.
+
+    Regression for the crash-leaves-running-forever bug: a process that dies
+    mid-walk leaves a 'running' row.  A subsequent completed run must report
+    running=false because the flag is derived from the latest row, not a global
+    count of unfinished rows.
+    """
+    # Orphan: a 'running' row that never finished (dead process).
+    await record_run_start(migrated_engine)
+
+    # A later pass starts and completes normally.
+    run_id2 = await record_run_start(migrated_engine)
+    await record_run_finish(migrated_engine, run_id2, status="completed")
+
+    status = await read_status(migrated_engine)
+    assert status["running"] is False, "running flag stuck true despite latest run completing"
+    assert status["last_run"]["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_marks_orphaned_running_as_interrupted(migrated_engine):
+    """reconcile_running_as_interrupted flips lingering 'running' rows."""
+    await record_run_start(migrated_engine)  # orphan
+
+    reconciled = await reconcile_running_as_interrupted(migrated_engine)
+    assert reconciled == 1
+
+    status = await read_status(migrated_engine)
+    assert status["running"] is False
+    assert status["last_run"]["status"] == "interrupted"
+    assert status["last_run"]["finished_at"] is not None
+
+    # Idempotent: a second reconcile finds nothing to do.
+    assert await reconcile_running_as_interrupted(migrated_engine) == 0

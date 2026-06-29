@@ -208,14 +208,16 @@ class MmingestIndexer:
             if not batch:
                 return
 
-            # Upsert files (transactional)
-            async with self._engine.begin() as conn:
-                url_to_id = await self._upsert_files(conn, batch)
-
-            # Apply variant lineage (superseded_by) updates (transactional).
+            # Upsert files AND apply variant lineage in a SINGLE transaction.
+            # These must be atomic: committing the upsert without the lineage
+            # update would durably leave two superseded_by=NULL rows for one
+            # (media_id, variant_tag) group if the process dies between them, and
+            # that state does NOT self-heal (the next walk skips both rows as
+            # unchanged, so _apply_variant_lineage never revisits the group).
             # _apply_variant_lineage re-queries the DB for each affected group,
             # so it stays correct when groups span multiple incremental batches.
             async with self._engine.begin() as conn:
+                url_to_id = await self._upsert_files(conn, batch)
                 await self._apply_variant_lineage(conn, batch, url_to_id)
 
             # Fetch and persist sidecars for this batch

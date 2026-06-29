@@ -64,7 +64,11 @@ async def run_delta_walk() -> None:
     # branches.  Import lazily to avoid circular imports at module load time.
     import api.services.database as _db_module
     from api.services.mmingest.indexer import MmingestIndexer
-    from api.services.mmingest.run_status import record_run_finish, record_run_start
+    from api.services.mmingest.run_status import (
+        reconcile_running_as_interrupted,
+        record_run_finish,
+        record_run_start,
+    )
 
     # _engine is the module-level singleton created by init_db(); if the
     # scheduler fires before init_db() completes, the engine will be None
@@ -73,6 +77,13 @@ async def run_delta_walk() -> None:
     if engine is None:
         logger.error("mmingest indexer: DB engine not initialised (init_db() not yet called). Skipping this run.")
         return
+
+    # Reconcile any orphaned 'running' rows from a process that died mid-walk
+    # (e.g. a deploy restart).  Safe here: this job is single-instance and only
+    # one container runs, so a lingering 'running' row is always stale.
+    reconciled = await reconcile_running_as_interrupted(engine)
+    if reconciled:
+        logger.warning("mmingest telemetry: marked %d orphaned 'running' run(s) as interrupted", reconciled)
 
     # Record a 'running' telemetry row so /api/mmingest/status can report an
     # in-flight (or stalled) pass even before it completes.
