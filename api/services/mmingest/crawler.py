@@ -31,7 +31,12 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from datetime import time as dtime
-from typing import Optional
+from typing import Awaitable, Callable, Optional
+
+# Streaming callback invoked once per directory with that directory's own file
+# work items, enabling incremental persistence (a partial walk still populates
+# the index before the full pass completes).
+OnDirectoryCallback = Callable[[list["FileWorkItem"]], Awaitable[None]]
 
 import httpx
 
@@ -387,6 +392,7 @@ class MmingestCrawler:
         self,
         directories: Optional[list[str]] = None,
         known: Optional[dict[str, ChangeTriple]] = None,
+        on_directory: Optional[OnDirectoryCallback] = None,
     ) -> list[FileWorkItem]:
         """Walk configured directories and return work items for new/changed files.
 
@@ -395,6 +401,11 @@ class MmingestCrawler:
                          Paths should start with "/" and may include trailing slash.
             known:       Dict mapping URL -> ChangeTriple for already-indexed files.
                          Files whose triple matches are skipped (no change).
+            on_directory: Optional async callback invoked once per directory with
+                         that directory's own new/changed file work items, as soon
+                         as the directory is parsed.  Enables incremental
+                         persistence so an interrupted walk still populates rows.
+                         The full list is still returned regardless.
 
         Returns:
             List of FileWorkItem for files that are new or have changed since
@@ -438,6 +449,7 @@ class MmingestCrawler:
                         known=known,
                         visited=visited,
                         ancestor_segments=set(),
+                        on_directory=on_directory,
                     )
                 )
                 tasks.append(task)
@@ -467,6 +479,7 @@ class MmingestCrawler:
         known: dict[str, ChangeTriple],
         visited: set[str],
         ancestor_segments: set[str],
+        on_directory: Optional[OnDirectoryCallback] = None,
     ) -> list[FileWorkItem]:
         """Recursively walk a single directory URL."""
         canonical = url.rstrip("/")
@@ -489,7 +502,7 @@ class MmingestCrawler:
         parser = AutoindexParser(base_url=url)
         entries = parser.parse(html)
 
-        work_items: list[FileWorkItem] = []
+        own_items: list[FileWorkItem] = []
         subdir_tasks: list[asyncio.Task] = []
 
         # Current directory's name for loop detection
@@ -525,14 +538,39 @@ class MmingestCrawler:
                         known=known,
                         visited=visited,
                         ancestor_segments=child_ancestor_segments,
+                        on_directory=on_directory,
                     )
                 )
                 subdir_tasks.append(task)
             else:
                 item = self._make_work_item(entry, path, known)
                 if item is not None:
-                    work_items.append(item)
+                    own_items.append(item)
 
+        # Per-directory progress heartbeat.  Logged at INFO so a stalled walk is
+        # visible in `docker logs` without guesswork (the whole point: a crawl
+        # that issues one request per hour now leaves a per-directory trail).
+        logger.info(
+            "mmingest crawl: dir=%s depth=%d entries=%d new_files=%d subdirs=%d visited=%d",
+            path,
+            depth,
+            len(entries),
+            len(own_items),
+            len(subdir_tasks),
+            len(visited),
+        )
+
+        # Stream this directory's own new/changed files for incremental
+        # persistence, BEFORE recursing into subdirs.  A failure in the callback
+        # must not abort the walk — the items will be retried on the next pass
+        # (they are not marked persisted) or by the indexer's final sweep.
+        if on_directory is not None and own_items:
+            try:
+                await on_directory(list(own_items))
+            except Exception:
+                logger.exception("mmingest crawl: on_directory callback failed for %s", path)
+
+        work_items: list[FileWorkItem] = list(own_items)
         if subdir_tasks:
             sub_results = await asyncio.gather(*subdir_tasks, return_exceptions=True)
             for sub_result in sub_results:
