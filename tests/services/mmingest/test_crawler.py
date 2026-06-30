@@ -74,6 +74,38 @@ class TestTokenBucket:
         # Allow generous tolerance for CI environments
         assert elapsed >= 0.05, f"Should have waited but only took {elapsed:.3f}s"
 
+    @pytest.mark.asyncio
+    async def test_concurrent_staggered_acquire_does_not_livelock(self):
+        """Many staggered concurrent waiters must all drain at ~rate (regression).
+
+        Reproduces the livelock that left the prod mmingest index empty: acquire()
+        discarded accumulated tokens (``self._tokens = 0.0``) on every
+        non-acquiring waiter while also advancing ``_last_refill`` on every lock
+        entry.  With N waiters re-entering the lock faster than the refill period,
+        the accumulated fraction was perpetually reset, tokens almost never
+        reached 1.0, and nearly all callers starved indefinitely.
+
+        The staggered start is essential: synchronized waiters happen to wake in a
+        tight batch and mask the bug, but real callers desynchronise (the root
+        request's network I/O offsets each child).  Under the bug this test hangs
+        and times out; with the fix all 30 drain in ~1.5s.
+        """
+        bucket = TokenBucket(rate=20.0, burst=1)  # 1 token / 50ms
+        await bucket.acquire()  # consume the initial token (mimics the root request)
+
+        done = 0
+        N = 30
+
+        async def waiter(i: int) -> None:
+            nonlocal done
+            await asyncio.sleep(i * 0.003)  # desynchronise the waiters
+            await bucket.acquire()
+            done += 1
+
+        # At 20/s, 30 acquisitions take ~1.5s; the livelock would blow past 8s.
+        await asyncio.wait_for(asyncio.gather(*(waiter(i) for i in range(N))), timeout=8.0)
+        assert done == N, f"only {done}/{N} acquired — rate limiter starved waiters"
+
 
 # ---------------------------------------------------------------------------
 # MmingestCrawler — concurrency cap

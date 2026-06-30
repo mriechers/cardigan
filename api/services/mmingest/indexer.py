@@ -23,6 +23,7 @@ superseded_by to the new winner.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
@@ -113,6 +114,12 @@ class MmingestIndexer:
         self._rate_per_second = rate_per_second
         self._crawler_auth = crawler_auth
 
+        # Per-run incremental-persistence state.  Reset at the top of each
+        # run_once() call; the crawler's on_directory callback drives them.
+        self._run: IndexerRun = IndexerRun()
+        self._persist_lock: asyncio.Lock = asyncio.Lock()
+        self._persisted_urls: set[str] = set()
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -122,16 +129,29 @@ class MmingestIndexer:
 
         Returns an IndexerRun summary.  Non-fatal errors are collected in
         IndexerRun.errors; fatal errors propagate as exceptions.
+
+        Persistence is incremental: the crawler invokes ``_persist_batch`` once
+        per directory as it walks, so an interrupted pass (e.g. a container
+        restart mid-crawl) still leaves the directories it reached in the DB.
+        The full returned list drives a final sweep for any items a non-streaming
+        crawler (or a test double) returned without invoking the callback.
         """
         start = time.monotonic()
         run = IndexerRun()
+
+        # Reset per-run incremental-persistence state.  The lock is recreated
+        # here so it binds to the currently running event loop.
+        self._run = run
+        self._persist_lock = asyncio.Lock()
+        self._persisted_urls = set()
 
         # Step 1: load known state from the DB (read-only, no transaction needed)
         async with self._engine.connect() as conn:
             known = await self.load_known_state(conn)
         logger.info("mmingest indexer: %d known files loaded from DB", len(known))
 
-        # Step 2: run the delta walk (S1B does the HTTP + parse work)
+        # Step 2: run the delta walk, persisting each directory's items as they
+        # are discovered (S1B does the HTTP + parse work).
         crawler = MmingestCrawler(
             base_url=self._base_url,
             max_concurrent=self._max_concurrent,
@@ -141,50 +161,20 @@ class MmingestIndexer:
         work_items = await crawler.delta_walk(
             directories=self._directories,
             known=known,
+            on_directory=self._persist_batch,
         )
         run.files_seen = len(work_items)
+        run.files_new = len(work_items)  # crawler only returns new/changed
         logger.info("mmingest indexer: %d new/changed work items from crawler", len(work_items))
 
-        if not work_items:
-            # Still run parity check even with no new work
-            async with self._engine.connect() as conn:
-                run.fts_parity_delta = await self._verify_parity_after_batch(conn)
-            run.elapsed_seconds = time.monotonic() - start
-            return run
+        # Final sweep: persist any returned items not already streamed via the
+        # callback.  No-op in production (the crawler streams every directory);
+        # covers tests and any crawler that ignores on_directory.
+        residual = [wi for wi in work_items if wi.url not in self._persisted_urls]
+        if residual:
+            await self._persist_batch(residual)
 
-        # Step 3: upsert files into mmingest_files (transactional)
-        async with self._engine.begin() as conn:
-            url_to_id = await self._upsert_files(conn, work_items)
-
-        run.files_new = len(work_items)  # crawler only returns new/changed
-
-        # Step 4: apply variant lineage (superseded_by) updates (transactional)
-        async with self._engine.begin() as conn:
-            await self._apply_variant_lineage(conn, work_items, url_to_id)
-
-        # Step 5: fetch and persist sidecars
-        sidecar_items = [wi for wi in work_items if wi.file_type in _SIDECAR_FILE_TYPES]
-        if sidecar_items:
-            fetcher = SidecarFetcher(auth=self._crawler_auth)
-            fetch_inputs = [(wi.url, url_to_id.get(wi.url)) for wi in sidecar_items]
-            results = await fetcher.fetch_many(
-                urls=fetch_inputs,
-                max_concurrent=self._max_concurrent,
-            )
-
-            run.sidecars_fetched = len(results)
-            ok_results = [r for r in results if r.ok]
-            run.sidecars_failed = len(results) - len(ok_results)
-
-            for r in results:
-                if not r.ok:
-                    run.errors.append(f"Sidecar fetch failed for {r.url}: {r.error}")
-
-            if ok_results:
-                async with self._engine.begin() as conn:
-                    run.sidecars_persisted = await self._persist_sidecars(conn, ok_results, url_to_id)
-
-        # Step 6: parity check after the sidecar batch (read-only)
+        # Parity check after all batches (read-only)
         async with self._engine.connect() as conn:
             run.fts_parity_delta = await self._verify_parity_after_batch(conn)
 
@@ -200,6 +190,62 @@ class MmingestIndexer:
             run.elapsed_seconds,
         )
         return run
+
+    async def _persist_batch(self, items: list[FileWorkItem]) -> None:
+        """Upsert one batch of work items and their sidecars, incrementally.
+
+        Invoked once per directory by the crawler's ``on_directory`` callback,
+        and once for any residual items by ``run_once``.  Serialised with a lock
+        so concurrent directory callbacks never collide on SQLite writes.
+
+        Idempotent: URLs already persisted in this run are skipped, and the
+        underlying INSERT OR IGNORE / REPLACE statements keep cross-run re-walks
+        safe.  Sidecar counts accumulate onto the active IndexerRun so the final
+        summary is correct regardless of how many batches ran.
+        """
+        async with self._persist_lock:
+            batch = [wi for wi in items if wi.url not in self._persisted_urls]
+            if not batch:
+                return
+
+            # Upsert files AND apply variant lineage in a SINGLE transaction.
+            # These must be atomic: committing the upsert without the lineage
+            # update would durably leave two superseded_by=NULL rows for one
+            # (media_id, variant_tag) group if the process dies between them, and
+            # that state does NOT self-heal (the next walk skips both rows as
+            # unchanged, so _apply_variant_lineage never revisits the group).
+            # _apply_variant_lineage re-queries the DB for each affected group,
+            # so it stays correct when groups span multiple incremental batches.
+            async with self._engine.begin() as conn:
+                url_to_id = await self._upsert_files(conn, batch)
+                await self._apply_variant_lineage(conn, batch, url_to_id)
+
+            # Fetch and persist sidecars for this batch
+            sidecar_items = [wi for wi in batch if wi.file_type in _SIDECAR_FILE_TYPES]
+            if sidecar_items:
+                fetcher = SidecarFetcher(auth=self._crawler_auth)
+                fetch_inputs = [(wi.url, url_to_id.get(wi.url)) for wi in sidecar_items]
+                results = await fetcher.fetch_many(
+                    urls=fetch_inputs,
+                    max_concurrent=self._max_concurrent,
+                )
+
+                self._run.sidecars_fetched += len(results)
+                ok_results = [r for r in results if r.ok]
+                self._run.sidecars_failed += len(results) - len(ok_results)
+
+                for r in results:
+                    if not r.ok:
+                        self._run.errors.append(f"Sidecar fetch failed for {r.url}: {r.error}")
+
+                if ok_results:
+                    async with self._engine.begin() as conn:
+                        self._run.sidecars_persisted += await self._persist_sidecars(conn, ok_results, url_to_id)
+
+            # Mark this batch persisted so the final sweep / overlapping callbacks
+            # don't double-process it.
+            for wi in batch:
+                self._persisted_urls.add(wi.url)
 
     # ------------------------------------------------------------------
     # Load known state
