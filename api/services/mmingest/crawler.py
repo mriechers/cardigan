@@ -130,10 +130,21 @@ class TokenBucket:
     async def acquire(self) -> None:
         """Wait until a token is available, then consume it.
 
-        Uses a re-acquire loop to avoid over-issue during the sleep period:
-        after sleeping, we re-enter the lock and re-check — another coroutine
-        may have consumed the token that was refilled during our sleep, so we
-        loop until we can actually decrement.
+        Refills lazily from elapsed wall-clock on each lock entry and consumes a
+        whole token only once one has accumulated.  The ``_lock`` serialises the
+        decrement, so two waiters can never consume the same token — no
+        speculative reservation is needed.
+
+        IMPORTANT: do NOT zero ``self._tokens`` for non-acquiring waiters.  An
+        earlier version reset ``self._tokens = 0.0`` while computing the sleep,
+        which — combined with advancing ``_last_refill`` on every entry —
+        discarded the fractional tokens accrued so far.  With many concurrent
+        waiters re-entering the lock faster than the refill period, the accrued
+        fraction was perpetually thrown away, tokens almost never reached 1.0,
+        and callers starved indefinitely (a livelock that left the mmingest
+        crawl stuck after its first request).  Preserving ``_tokens`` across
+        entries lets the fraction accumulate to a whole token at the configured
+        rate regardless of contention.
         """
         while True:
             async with self._lock:
@@ -146,10 +157,9 @@ class TokenBucket:
                     self._tokens -= 1.0
                     return
 
-                # Compute sleep and reserve the token speculatively
-                # (set tokens to 0 so concurrent acquires see an empty bucket)
+                # Not enough yet — sleep for the remaining deficit, leaving the
+                # accrued fraction in place so it keeps accumulating.
                 wait_time = (1.0 - self._tokens) / self._rate
-                self._tokens = 0.0
 
             # Sleep outside the lock so other coroutines can run
             await asyncio.sleep(wait_time)
