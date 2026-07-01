@@ -66,3 +66,83 @@ async def resolve_escalated_model(current_model: str | None, exclude_variants: l
     if target_family is None:
         return None
     return await model_roster.newest_in_family(target_family, exclude_variants)
+
+
+# Flag-text substrings (case-insensitive) that denote a failure a stronger
+# model cannot fix — editorial review notes or missing input data.
+NONFIXABLE_FLAG_PATTERNS = [
+    "review note",
+    "needs_review",
+    "needs review",
+    "media id",
+    "media_id",
+    # Caption-quality / verification-reminder flags observed on Here & Now web
+    # clips (live jobs 15-19): a stronger model cannot supply missing source
+    # data, external verification, or unavailable tooling.
+    "unresolved",
+    "not identified",
+    "unidentified",
+    "cannot be determined",
+    "could not be determined",
+    "unverified",
+    "unconfirmed",
+    "semrush",
+    "excerpt",
+]
+
+# Markers the formatter writes into its OWN output when it surfaces an
+# unresolved uncertainty. Their presence means the failure is a contract /
+# editorial signal, not a model-quality defect. Matched case-insensitively.
+FORMATTER_CONTRACT_MARKERS = [
+    "<!-- review notes",
+    "status:** needs_review",
+    "status: needs_review",
+]
+
+
+def classify_qa_failure(validation_result: dict | None, context: dict | None = None) -> dict:
+    """Split a failing validation_result's flags into model-fixable vs not.
+
+    A flag is non-fixable when its text matches NONFIXABLE_FLAG_PATTERNS, or
+    when the corresponding ``context["{phase}_output"]`` carries a formatter
+    contract marker. Escalation is skipped only when EVERY failing flag is
+    non-fixable. Empty/unknown input fails safe -> escalate=True.
+    """
+    context = context or {}
+    results = (validation_result or {}).get("phase_results", {})
+    fixable: list[str] = []
+    nonfixable: list[str] = []
+
+    for phase_name, r in results.items():
+        flags = r.get("flags") or []
+        if r.get("status") != "fail" and not flags:
+            continue
+        output = (context.get(f"{phase_name}_output") or "").lower()
+        artifact_nonfixable = any(m in output for m in FORMATTER_CONTRACT_MARKERS)
+        if not flags:
+            # Phase failed with no flag text — only treat as non-fixable if the
+            # artifact itself shows a contract marker; otherwise escalate.
+            (nonfixable if artifact_nonfixable else fixable).append(f"{phase_name}: output failed")
+            continue
+        for flag in flags:
+            ftext = (flag or "").lower()
+            is_nonfixable = artifact_nonfixable or any(p in ftext for p in NONFIXABLE_FLAG_PATTERNS)
+            (nonfixable if is_nonfixable else fixable).append(flag)
+
+    # Escalation can only yield a PASS if EVERY flag clears, so a single
+    # non-fixable flag makes escalation futile regardless of how many fixable
+    # flags sit beside it -> skip whenever ANY non-fixable flag is present.
+    # (Live evidence: jobs 15-19 each escalated to Opus and still failed.)
+    # Empty/all-fixable -> escalate (fail safe / give the stronger model a shot).
+    escalate = not nonfixable
+    return {"escalate": escalate, "fixable": fixable, "nonfixable": nonfixable}
+
+
+def nonfixable_review_message(nonfixable: list[str]) -> str:
+    """Build the honest pause message naming the human-review items."""
+    items = "; ".join(nonfixable) if nonfixable else "items the formatter could not verify"
+    return (
+        "Paused for human review — the formatter flagged items it can't verify "
+        f"and a stronger model won't resolve: {items}. "
+        "Verify media_id + proper-noun spelling, then resume."
+    )

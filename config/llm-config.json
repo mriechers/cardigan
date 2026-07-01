@@ -133,6 +133,7 @@
   "qa_escalation": {
     "on_validation_fail": true,
     "max_auto_escalations": 1,
+    "skip_escalation_when_nonfixable": true,
     "family_order": ["haiku", "sonnet", "opus"],
     "exclude_variants": ["fast", "fable"]
   },

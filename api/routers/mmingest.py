@@ -42,14 +42,18 @@ from api.models.mmingest import (
     AssetEntry,
     AssetResponse,
     CaptionResponse,
+    CrawlRun,
     RecentEntry,
     RecentResponse,
     SearchResponse,
     SearchResult,
+    StatusCounts,
+    StatusResponse,
     UrlResponse,
 )
 from api.services.airtable import AirtableClient, get_airtable_client
 from api.services.database import get_db_url
+from api.services.mmingest.run_status import read_status
 
 router = APIRouter()
 
@@ -514,3 +518,59 @@ async def get_recent(
     ]
 
     return RecentResponse(results=results, total=total)
+
+
+# ---------------------------------------------------------------------------
+# 6. GET /status
+# ---------------------------------------------------------------------------
+
+
+@router.get("/status", response_model=StatusResponse)
+async def get_status(
+    _scope=_require_scope("mmingest:read"),
+) -> StatusResponse:
+    """Crawler health: last delta-walk run + live index counts.
+
+    Always returns 200 (never 500) so monitors can poll it through deploy
+    windows.  ``last_run`` is null before the first scheduled pass or before
+    migration 021 applies; ``counts`` is zeroed if the index tables are absent.
+
+    This is the signal that distinguishes a healthy-but-empty index (crawl never
+    completed) from a broken router — an empty index with a 'running' last_run
+    whose started_at is hours old means the walk is stalled, not missing.
+    """
+    engine = _get_engine()
+    try:
+        status = await read_status(engine)
+
+        # Live row counts.  Preflight sqlite_master so a pre-migration DB
+        # returns zeros instead of raising OperationalError.
+        async with engine.connect() as conn:
+            tables_present = (await conn.execute(text("""
+                SELECT COUNT(*) FROM sqlite_master
+                WHERE type = 'table' AND name IN ('mmingest_files', 'mmingest_sidecars')
+            """))).scalar_one()
+
+            if tables_present >= 2:
+                files = (await conn.execute(text("SELECT COUNT(*) FROM mmingest_files"))).scalar_one()
+                current = (
+                    await conn.execute(text("SELECT COUNT(*) FROM mmingest_files WHERE superseded_by IS NULL"))
+                ).scalar_one()
+                sidecars = (await conn.execute(text("SELECT COUNT(*) FROM mmingest_sidecars"))).scalar_one()
+            else:
+                files = current = sidecars = 0
+    finally:
+        await engine.dispose()
+
+    last_run = None
+    running = False
+    if status is not None:
+        running = status["running"]
+        if status["last_run"] is not None:
+            last_run = CrawlRun(**status["last_run"])
+
+    return StatusResponse(
+        last_run=last_run,
+        running=running,
+        counts=StatusCounts(files=files, current_files=current, sidecars=sidecars),
+    )
