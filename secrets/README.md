@@ -27,6 +27,12 @@ Create an API key pair in your Langfuse project settings
 The secret half of the Langfuse API key pair (created at the same time
 as the public key above). Starts with `sk-lf-`.
 
+### local_llm_api_key
+Only needed when routing a pipeline phase to the `local-llm` backend (oMLX on the
+Mac Studio). This is the Bearer key oMLX enforces — it lives in 1Password
+("oMLX Local LLM Key"). Omit the file entirely if no phase uses `local-llm`
+(the backend is keyless-tolerant, but oMLX will reject unauthenticated calls).
+
 ## Optional secrets (passed as env vars, not files)
 
 ### CARDIGAN_API_KEY

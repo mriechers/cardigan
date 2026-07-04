@@ -82,8 +82,8 @@ def _parse_unavailable_503(response: "httpx.Response") -> tuple[str, Optional[in
 
     Tolerates today's flat ``{"detail": "..."}`` body and a future richer
     envelope ``{"error": {"retryable": bool, "retry_after_s": int, "message": ...}}``
-    (see the dougie busy-signal handoff). Defaults to retryable=True so a bare
-    503 from a deferrable backend is treated as "try later".
+    (a local model server's busy-signal contract). Defaults to retryable=True so
+    a bare 503 from a deferrable backend is treated as "try later".
     """
     retryable = True
     retry_after_s: Optional[int] = None
@@ -314,12 +314,33 @@ def _resolve_endpoint(config: Dict[str, Any]) -> str:
     """Resolve a backend's endpoint, honoring an optional ``endpoint_env`` override.
 
     Lets the deploy environment supply the URL (e.g. the LXC→Mac Studio address
-    for local-dougie) without baking a homelab address into committed config.
+    for a local model server) without baking a network address into committed
+    config — so the same image can be re-pointed at a different network by
+    setting one env var.
+
+    Tolerates an OpenAI-style *base* URL ending in ``/v1`` (the convention the
+    ``/local-llm`` skill and oMLX use): the chat-completions path is appended so
+    a bare base and a full endpoint both work.
     """
     env_var = config.get("endpoint_env")
+    endpoint = os.getenv(env_var, config["endpoint"]) if env_var else config["endpoint"]
+    stripped = endpoint.rstrip("/")
+    if stripped.endswith("/v1"):
+        return stripped + "/chat/completions"
+    return endpoint
+
+
+def _resolve_model(config: Dict[str, Any]) -> Optional[str]:
+    """Resolve a backend's served model id, honoring an optional ``model_env`` override.
+
+    Mirrors ``_resolve_endpoint``: a single-model local server may serve a
+    different model on a different network, so the deploy env can supply the id
+    (``LOCAL_LLM_MODEL``) without a committed-config edit.
+    """
+    env_var = config.get("model_env")
     if env_var:
-        return os.getenv(env_var, config["endpoint"])
-    return config["endpoint"]
+        return os.getenv(env_var, config.get("model"))
+    return config.get("model")
 
 
 def _backend_cost(config: Dict[str, Any], model: str, input_tokens: int, output_tokens: int) -> float:
@@ -585,13 +606,14 @@ class LLMClient:
         backend_config = self.get_backend_config(backend_name)
 
         # Determine model — priority order:
-        # 0. Backend with force_model (e.g. local-dougie serves one model only —
-        #    its own id must win over a phase_models cloud id the server can't serve)
+        # 0. Backend with force_model (e.g. a local single-model server —
+        #    its own id must win over a phase_models cloud id the server can't serve;
+        #    honors a ``model_env`` override for portability across networks)
         # 1. Explicit model param
         # 2. phase_models config (per-phase model assignment from Settings UI)
         # 3. Backend's configured model / fallback_model
         if backend_config.get("force_model"):
-            model_id = backend_config.get("model")
+            model_id = _resolve_model(backend_config)
         elif model:
             model_id = model
         elif phase:
