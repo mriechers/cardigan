@@ -4,11 +4,12 @@ Foundation package for the Cardigan hybrid deterministic-LLM pipeline. This
 package holds the YAML house-style rule loader (rules.py), the shared
 result/violation dataclasses (types.py), the prompt-block renderer
 (prompt_blocks.py), the engine primitives (casing.py, entities.py,
-scanner.py, limits.py, phase_io.py), the pure pipeline-stage modules
-(pre_stage.py, post_stage.py), the deterministic validator checklist
-(lint.py), and the QA-verdict merge (qa_merge.py) that the job worker (a
-later task) wires into each phase's generation call and the validator's QA
-gate. Nothing here touches the DB, async code, or FastAPI.
+scanner.py, limits.py, phase_io.py, substitutions.py), the pure
+pipeline-stage modules (pre_stage.py, post_stage.py), the deterministic
+validator checklist (lint.py), the shared review-notes-placement check
+(review_notes.py), and the QA-verdict merge (qa_merge.py) that the job
+worker (a later task) wires into each phase's generation call and the
+validator's QA gate. Nothing here touches the DB, async code, or FastAPI.
 """
 
 from api.services.style_engine.casing import build_canonical, to_down_style
@@ -29,6 +30,7 @@ from api.services.style_engine.prompt_blocks import (
     resolve_prompt_profile,
 )
 from api.services.style_engine.qa_merge import merge_style_flags
+from api.services.style_engine.review_notes import check_review_notes_placement
 from api.services.style_engine.rules import (
     DEFAULT_RULES_PATH,
     StyleRules,
@@ -36,6 +38,11 @@ from api.services.style_engine.rules import (
     load_rules,
 )
 from api.services.style_engine.scanner import scan_forbidden, scan_person_voice
+from api.services.style_engine.substitutions import (
+    apply_substitutions,
+    apply_substitutions_with_fixes,
+    normalize_speaker_turns,
+)
 from api.services.style_engine.types import (
     AppliedFix,
     PhaseCheckResult,
@@ -67,6 +74,10 @@ __all__ = [
     "SeoFields",
     "extract_seo_fields",
     "splice_seo_fields",
+    "apply_substitutions",
+    "apply_substitutions_with_fixes",
+    "normalize_speaker_turns",
+    "check_review_notes_placement",
     "run_pre_stage",
     "run_post_stage",
     "run_lint",

@@ -34,6 +34,7 @@ from typing import Any
 
 from api.services.style_engine.limits import check_field_limits
 from api.services.style_engine.phase_io import extract_seo_fields
+from api.services.style_engine.review_notes import check_review_notes_placement
 from api.services.style_engine.rules import StyleRules
 from api.services.style_engine.types import PhaseCheckResult, RuleViolation
 
@@ -77,7 +78,6 @@ _LIMIT_RULE_ID_MAP = {
 }
 
 _HR_LINE_RE = re.compile(r"^-{3,}[ \t]*$", re.MULTILINE)
-_REVIEW_NOTE_MARKER_RE = re.compile(r"<!--\s*review|NEEDS_REVIEW|^##\s*Review Notes", re.IGNORECASE | re.MULTILINE)
 
 _HONORIFIC_RE = re.compile(r"^(?:Dr|Mr|Ms|Mrs|Prof)\.?\s", re.IGNORECASE)
 
@@ -282,30 +282,7 @@ def _extract_keyword_tags(seo_output: str) -> list[str] | None:
 
 def _check_review_notes_in_body(raw_output: str, rules: StyleRules, phase: str) -> list[RuleViolation]:
     review_notes_cfg = _phase_cfg(rules, "formatter").get("review_notes") or {}
-    if review_notes_cfg.get("placement") != "top":
-        return []
-
-    hr_match = _HR_LINE_RE.search(raw_output)
-    if not hr_match:
-        return []
-
-    after_first_rule = raw_output[hr_match.end() :]
-    marker_match = _REVIEW_NOTE_MARKER_RE.search(after_first_rule)
-    if not marker_match:
-        return []
-
-    return [
-        RuleViolation(
-            rule_id="lint.formatter.review_notes_in_body",
-            phase=phase,
-            severity="error",
-            message=(
-                f'Review-note marker "{marker_match.group(0).strip()}" appears after the first '
-                "horizontal rule -- review notes must sit at the top of the document"
-            ),
-            model_fixable=False,
-        )
-    ]
+    return check_review_notes_placement(raw_output, review_notes_cfg, phase)
 
 
 # ---------------------------------------------------------------------------

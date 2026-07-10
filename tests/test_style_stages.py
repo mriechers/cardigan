@@ -1,4 +1,5 @@
-"""Tests for the style_engine pure pipeline-stage modules (seo phase).
+"""Tests for the style_engine pure pipeline-stage modules (seo, validator,
+formatter phases).
 
 Covers api.services.style_engine.pre_stage.run_pre_stage and
 api.services.style_engine.post_stage.run_post_stage. All rule data and
@@ -7,9 +8,9 @@ analyst speaker table, and inline seo_output.md-shaped report strings --
 never depends on config/house_style.yaml. Mirrors the fixture/helper style
 of tests/test_style_casing_entities.py and tests/test_style_scanner_limits.py.
 
-Only the seo phase has behavior in this task; every other phase must
-degrade gracefully to an empty/skipped passthrough (formatter/timestamp/etc.
-are wired in by later tasks behind the same interface).
+seo, validator, and formatter phases have behavior; every other phase
+(e.g. "timestamp") must degrade gracefully to an empty/skipped passthrough
+until a later task registers it behind the same interface.
 """
 
 from __future__ import annotations
@@ -287,9 +288,12 @@ class TestPreStageGraceful:
         assert result.data == {}
 
     def test_unknown_phase_ignores_context(self):
+        # "formatter" now has real behavior (task 3a) -- "timestamp" is
+        # still unregistered and must degrade gracefully regardless of
+        # context contents.
         rules = _pre_rules()
         result = run_pre_stage(
-            "formatter", {"analyst_output": ANALYST_TABLE, "program": "Here & Now"}, rules
+            "timestamp", {"analyst_output": ANALYST_TABLE, "program": "Here & Now"}, rules
         )
         assert result.prompt_section == ""
         assert result.data == {}
@@ -580,3 +584,470 @@ class TestPreStageValidatorPromptSection:
         }
         result = run_pre_stage("validator", {"style_checks": style_checks}, rules)
         assert result.data["style_checks_summary"]["seo"] == {"error_count": 1, "warning_count": 1}
+
+
+# ---------------------------------------------------------------------------
+# run_pre_stage / run_post_stage -- formatter phase (task 3a)
+# ---------------------------------------------------------------------------
+
+_FORMATTER_SUBSTITUTIONS = [
+    {"find": r"\b[Oo]kay\b", "replace": "OK", "tier": "enforce"},
+    {"find": r"\bSenator\b", "replace": "Sen.", "tier": "enforce"},
+    {"find": r"\bLiberals\b", "replace": "liberals", "tier": "enforce", "note": "sentence-initial guard applies"},
+    {
+        "id": "de_italicize_program_names",
+        "find": r"\*(Wisconsin Life|Here & Now)\*",
+        "replace": r"\1",
+        "tier": "enforce",
+        "note": "strips markdown italics around known program names; replace is a backreference to the matched name",
+    },
+    {"id": "oxford_comma", "detect": r",\s+and\b", "tier": "flag", "severity": "warning", "note": "no Oxford comma in lists"},
+    {"id": "capitol_capital", "detect": r"\bcapital\b", "tier": "flag", "severity": "warning", "note": "'Capitol' vs 'capital'"},
+]
+
+_FORMATTER_SPEAKER_LABEL_SPEC = {
+    "pattern": r"^\*\*[A-Z][\w.'-]+(?: [A-Z][\w.'-]+)+:\*\*",
+    "trailing_spaces": 2,
+    "blank_lines_between_turns": 1,
+    "no_honorifics": True,
+}
+
+
+def _formatter_rules(
+    substitutions: list[dict] | None = None,
+    speaker_label: dict | None = None,
+    review_notes: dict | None = None,
+) -> StyleRules:
+    raw = {
+        "meta": {"version": 1},
+        "phases": {
+            "formatter": {
+                "substitutions": _FORMATTER_SUBSTITUTIONS if substitutions is None else substitutions,
+                "speaker_label": _FORMATTER_SPEAKER_LABEL_SPEC if speaker_label is None else speaker_label,
+                "review_notes": (
+                    {"placement": "top", "format": "html_comment", "tier": "flag"}
+                    if review_notes is None
+                    else review_notes
+                ),
+            }
+        },
+        "casing": {"surname_stoplist": []},
+    }
+    return StyleRules(raw=raw)
+
+
+class TestPreStageFormatterData:
+    def test_proper_nouns_from_analyst_table(self):
+        rules = _formatter_rules()
+        result = run_pre_stage("formatter", {"analyst_output": ANALYST_TABLE}, rules)
+        assert result.phase == "formatter"
+        assert "Nick Hoffman" in result.data["proper_nouns"]
+        assert "Angela Fitzgerald" in result.data["proper_nouns"]
+
+    def test_speaker_label_spec_carries_raw_values(self):
+        rules = _formatter_rules()
+        result = run_pre_stage("formatter", {}, rules)
+        spec = result.data["speaker_label_spec"]
+        assert spec["trailing_spaces"] == 2
+        assert spec["blank_lines_between_turns"] == 1
+        assert spec["no_honorifics"] is True
+
+    def test_enforce_substitutions_excludes_flag_tier(self):
+        rules = _formatter_rules()
+        result = run_pre_stage("formatter", {}, rules)
+        subs = result.data["enforce_substitutions"]
+        assert {s.get("tier") for s in subs} == {"enforce"}
+        ids = {s.get("id") for s in subs if s.get("id")}
+        assert "oxford_comma" not in ids
+        assert "capitol_capital" not in ids
+        assert "de_italicize_program_names" in ids
+
+
+class TestPreStageFormatterPromptSection:
+    def test_section_header_present(self):
+        rules = _formatter_rules()
+        result = run_pre_stage("formatter", {}, rules)
+        assert "## Style Rules (authoritative)" in result.prompt_section
+
+    def test_proper_nouns_authoritative_line_present(self):
+        rules = _formatter_rules()
+        result = run_pre_stage("formatter", {"analyst_output": ANALYST_TABLE}, rules)
+        assert "Nick Hoffman" in result.prompt_section
+        assert "authoritative spellings" in result.prompt_section.lower()
+
+    def test_speaker_label_spec_rendered_with_odd_values_not_hardcoded(self):
+        # Odd values (not the real config's 2/1) must show up verbatim,
+        # proving the numbers are read from data, never hardcoded prose.
+        rules = _formatter_rules(
+            speaker_label={
+                "pattern": _FORMATTER_SPEAKER_LABEL_SPEC["pattern"],
+                "trailing_spaces": 5,
+                "blank_lines_between_turns": 3,
+                "no_honorifics": True,
+            }
+        )
+        result = run_pre_stage("formatter", {}, rules)
+        assert "5 trailing space" in result.prompt_section
+        assert "3 blank line" in result.prompt_section
+
+    def test_no_honorifics_false_omits_honorific_instruction(self):
+        rules = _formatter_rules(
+            speaker_label={
+                "pattern": _FORMATTER_SPEAKER_LABEL_SPEC["pattern"],
+                "trailing_spaces": 2,
+                "blank_lines_between_turns": 1,
+                "no_honorifics": False,
+            }
+        )
+        result = run_pre_stage("formatter", {}, rules)
+        assert "honorific" not in result.prompt_section.lower()
+
+    def test_substitution_pairs_rendered_from_yaml_not_hardcoded(self):
+        rules = _formatter_rules()
+        result = run_pre_stage("formatter", {}, rules)
+        assert "OK (never okay)" in result.prompt_section
+        assert "Sen. (never Senator)" in result.prompt_section
+
+    def test_regexy_find_uses_note_when_present(self):
+        # de_italicize's find is alternation-shaped -- best-effort cleanup
+        # can't produce a clean phrase, so the note supplies it instead.
+        rules = _formatter_rules()
+        result = run_pre_stage("formatter", {}, rules)
+        assert "strips markdown italics around known program names" in result.prompt_section
+
+    def test_backreference_replace_never_prints_raw_backreference_token(self):
+        # Regression: de_italicize's replace is the literal string "\1" (a
+        # regex backreference, not a literal replacement outside an actual
+        # match) -- rendering it via the normal "X (never Y)" template would
+        # literally print "\1" into the prompt, which is meaningless to a
+        # human/model reader.
+        rules = _formatter_rules()
+        result = run_pre_stage("formatter", {}, rules)
+        assert r"\1" not in result.prompt_section
+
+    def test_simple_find_with_note_still_uses_cleanup_not_note(self):
+        # A note is present on the "Liberals" entry too, but its find
+        # cleans up to a plain word ("Liberals") -- the note must NOT
+        # override a clean best-effort result.
+        rules = _formatter_rules()
+        result = run_pre_stage("formatter", {}, rules)
+        assert "liberals (never Liberals)" in result.prompt_section
+        assert "sentence-initial guard applies" not in result.prompt_section
+
+    def test_flag_tier_entries_never_appear_in_pairs_line(self):
+        rules = _formatter_rules()
+        result = run_pre_stage("formatter", {}, rules)
+        assert "oxford" not in result.prompt_section.lower()
+        assert "capitol_capital" not in result.prompt_section.lower()
+
+    def test_review_notes_placement_line_data_driven(self):
+        rules = _formatter_rules()
+        result = run_pre_stage("formatter", {}, rules)
+        assert "top" in result.prompt_section.lower()
+        assert "html comment" in result.prompt_section.lower()
+
+    def test_review_notes_line_reflects_odd_placement_value(self):
+        rules = _formatter_rules(review_notes={"placement": "bottom", "format": "plain_text"})
+        result = run_pre_stage("formatter", {}, rules)
+        assert "bottom" in result.prompt_section.lower()
+        assert "plain text" in result.prompt_section.lower()
+
+
+class TestPreStageFormatterGraceful:
+    def test_no_analyst_output_omits_names_block(self):
+        rules = _formatter_rules()
+        result = run_pre_stage("formatter", {}, rules)
+        assert result.data["proper_nouns"] == []
+        assert "authoritative spellings" not in result.prompt_section.lower()
+
+    def test_none_analyst_output_does_not_raise(self):
+        rules = _formatter_rules()
+        result = run_pre_stage("formatter", {"analyst_output": None}, rules)
+        assert result.data["proper_nouns"] == []
+
+    def test_unknown_keys_in_speaker_label_spec_tolerated(self):
+        rules = _formatter_rules(
+            speaker_label={
+                "pattern": _FORMATTER_SPEAKER_LABEL_SPEC["pattern"],
+                "trailing_spaces": 2,
+                "blank_lines_between_turns": 1,
+                "no_honorifics": True,
+                "some_future_field": {"nested": "value"},
+            }
+        )
+        result = run_pre_stage("formatter", {}, rules)
+        assert result.prompt_section  # still renders without raising
+
+    def test_missing_speaker_label_omits_line(self):
+        rules = _formatter_rules(speaker_label={})
+        result = run_pre_stage("formatter", {}, rules)
+        assert "Speaker labels" not in result.prompt_section
+
+    def test_missing_review_notes_omits_line(self):
+        rules = _formatter_rules(review_notes={})
+        result = run_pre_stage("formatter", {}, rules)
+        assert "Review notes" not in result.prompt_section
+
+    def test_empty_substitutions_omits_pairs_line(self):
+        rules = _formatter_rules(substitutions=[])
+        result = run_pre_stage("formatter", {}, rules)
+        assert "write it right" not in result.prompt_section.lower()
+
+
+# ---------------------------------------------------------------------------
+# run_post_stage -- formatter phase (task 3a)
+# ---------------------------------------------------------------------------
+
+_FORMATTER_DOC_HEADER = (
+    "# Formatted Transcript\n"
+    "**Project:** 2WLI1234HD\n"
+    "**Program:** Here & Now\n"
+    "**Duration:** 10:00\n"
+    "**Date Processed:** 2026-07-10\n"
+)
+
+
+def _formatter_doc(
+    body: str,
+    review_notes: str | None = None,
+    review_notes_before_header: bool = False,
+    status: str = "ready_for_editing",
+) -> str:
+    notes_block = f"{review_notes}\n\n" if review_notes else ""
+    if review_notes_before_header:
+        return f"{notes_block}{_FORMATTER_DOC_HEADER}\n---\n\n{body}\n\n---\n\n**Status:** {status}\n"
+    return f"{_FORMATTER_DOC_HEADER}\n---\n\n{notes_block}{body}\n\n---\n\n**Status:** {status}\n"
+
+
+class TestPostStageFormatterEndToEndNormalize:
+    def test_full_normalize_byte_exact(self):
+        rules = _formatter_rules()
+        raw_body = (
+            "**Nick Hoffman:**\n"
+            "Senator Smith says that's okay with the budget, and mentioned *Here & Now* coverage.\n"
+            "\n\n\n"
+            "**Angela Fitzgerald:**     \n"
+            "That's right, we'll see."
+        )
+        raw_output = _formatter_doc(raw_body)
+
+        result = run_post_stage("formatter", raw_output, {}, rules)
+
+        assert result.changed is True
+        expected_body = (
+            "**Nick Hoffman:**  \n"
+            "Sen. Smith says that's OK with the budget, and mentioned Here & Now coverage.\n"
+            "\n"
+            "**Angela Fitzgerald:**  \n"
+            "That's right, we'll see."
+        )
+        expected_output = _formatter_doc(expected_body)
+        assert result.normalized_output == expected_output
+
+    def test_fix_entries_report_before_after_and_counts(self):
+        rules = _formatter_rules()
+        raw_body = "**Nick Hoffman:**\nSenator Smith says that's okay.\n\n**Angela Fitzgerald:**\nOkay, agreed."
+        raw_output = _formatter_doc(raw_body)
+
+        result = run_post_stage("formatter", raw_output, {}, rules)
+
+        rule_ids = {f.rule_id for f in result.check.fixes}
+        # rule_ids are slugged from each pair's `replace` value when the
+        # yaml entry has no explicit `id` -- "Sen." -> "sen", "OK" -> "ok".
+        assert rule_ids == {"formatter.substitution.sen", "formatter.substitution.ok"}
+        okay_fix = next(f for f in result.check.fixes if f.rule_id == "formatter.substitution.ok")
+        assert okay_fix.count == 2  # "okay" + "Okay"
+
+    def test_header_and_footer_metadata_never_touched(self):
+        rules = _formatter_rules()
+        raw_body = "**Nick Hoffman:**\nSenator Smith says okay.\n\n**Angela Fitzgerald:**\nAgreed."
+        raw_output = _formatter_doc(raw_body)
+
+        result = run_post_stage("formatter", raw_output, {}, rules)
+
+        assert "**Date Processed:** 2026-07-10\n" in result.normalized_output
+        assert "**Status:** ready_for_editing\n" in result.normalized_output
+        assert "**Date Processed:**  \n" not in result.normalized_output
+
+
+class TestPostStageFormatterGuards:
+    def test_fenced_code_block_and_url_untouched(self):
+        rules = _formatter_rules()
+        raw_body = (
+            "**Nick Hoffman:**\n"
+            "Visit https://example.com/okay-page and see this:\n\n"
+            "```\nokay = True\n```"
+        )
+        raw_output = _formatter_doc(raw_body)
+
+        result = run_post_stage("formatter", raw_output, {}, rules)
+
+        assert "https://example.com/okay-page" in result.normalized_output
+        assert "okay = True" in result.normalized_output
+
+    def test_sentence_initial_liberals_untouched(self):
+        rules = _formatter_rules()
+        raw_body = "**Nick Hoffman:**\nLiberals gathered downtown to discuss the plan."
+        raw_output = _formatter_doc(raw_body)
+
+        result = run_post_stage("formatter", raw_output, {}, rules)
+
+        assert "Liberals gathered downtown" in result.normalized_output
+        assert "liberals gathered downtown" not in result.normalized_output
+
+
+class TestPostStageFormatterConvergence:
+    def test_okay_variants_converge_to_identical_output(self):
+        rules = _formatter_rules()
+        body_lower = "**Nick Hoffman:**\nThat's okay with me."
+        body_title = "**Nick Hoffman:**\nThat's Okay with me."
+
+        result_lower = run_post_stage("formatter", _formatter_doc(body_lower), {}, rules)
+        result_title = run_post_stage("formatter", _formatter_doc(body_title), {}, rules)
+
+        assert result_lower.normalized_output == result_title.normalized_output
+
+
+class TestPostStageFormatterFlagTier:
+    def test_oxford_comma_detected_text_unchanged(self):
+        rules = _formatter_rules()
+        # Label line already carries correct trailing-space/spec whitespace
+        # so the only thing under test is the flag-tier "never rewrites"
+        # guarantee, not incidental enforce-tier whitespace normalization.
+        raw_body = "**Nick Hoffman:**  \nWe discussed red, white, and blue today."
+        raw_output = _formatter_doc(raw_body)
+
+        result = run_post_stage("formatter", raw_output, {}, rules)
+
+        assert result.normalized_output == raw_output
+        oxford_violations = [v for v in result.check.violations if v.rule_id == "formatter.oxford_comma"]
+        assert len(oxford_violations) == 1
+        assert oxford_violations[0].severity == "warning"
+        assert oxford_violations[0].model_fixable is True
+
+    def test_capitol_capital_detected(self):
+        rules = _formatter_rules()
+        raw_body = "**Nick Hoffman:**\nThe capital was raised for the new building fund."
+        raw_output = _formatter_doc(raw_body)
+
+        result = run_post_stage("formatter", raw_output, {}, rules)
+
+        capitol_violations = [v for v in result.check.violations if v.rule_id == "formatter.capitol_capital"]
+        assert len(capitol_violations) == 1
+        assert "capital" in result.normalized_output  # detection only, never rewritten
+
+    def test_no_flag_violations_when_absent(self):
+        rules = _formatter_rules()
+        raw_body = "**Nick Hoffman:**\nWe discussed the budget plan today."
+        raw_output = _formatter_doc(raw_body)
+
+        result = run_post_stage("formatter", raw_output, {}, rules)
+
+        flag_rule_ids = {v.rule_id for v in result.check.violations}
+        assert "formatter.oxford_comma" not in flag_rule_ids
+        assert "formatter.capitol_capital" not in flag_rule_ids
+
+    def test_review_notes_in_body_flagged(self):
+        rules = _formatter_rules()
+        raw_body = "**Nick Hoffman:**\nStatement.\n\n<!-- REVIEW NOTES: speaker unclear -->\n\n**Angela Fitzgerald:**\nMore."
+        raw_output = _formatter_doc(raw_body)
+
+        result = run_post_stage("formatter", raw_output, {}, rules)
+
+        review_violations = [
+            v for v in result.check.violations if v.rule_id == "lint.formatter.review_notes_in_body"
+        ]
+        assert len(review_violations) == 1
+        assert review_violations[0].model_fixable is False
+
+    def test_review_notes_at_top_not_flagged(self):
+        rules = _formatter_rules()
+        raw_body = "**Nick Hoffman:**\nStatement.\n\n**Angela Fitzgerald:**\nMore."
+        raw_output = _formatter_doc(
+            raw_body,
+            review_notes="<!-- REVIEW NOTES: speaker unclear -->",
+            review_notes_before_header=True,
+        )
+
+        result = run_post_stage("formatter", raw_output, {}, rules)
+
+        review_violations = [
+            v for v in result.check.violations if v.rule_id == "lint.formatter.review_notes_in_body"
+        ]
+        assert review_violations == []
+
+
+class TestPostStageFormatterNoVoiceScanning:
+    def test_amazing_and_we_never_flagged(self):
+        # Voice/forbidden scanning is a seo-phase concept only -- dialogue
+        # is not metadata copy, people may say "amazing" or "we" on camera.
+        rules = _formatter_rules()
+        raw_body = "**Nick Hoffman:**\nWe think this is an amazing budget deal for Wisconsin."
+        raw_output = _formatter_doc(raw_body)
+
+        result = run_post_stage("formatter", raw_output, {}, rules)
+
+        voice_violations = [
+            v for v in result.check.violations if v.rule_id.startswith("voice.")
+        ]
+        assert voice_violations == []
+        assert "amazing" in result.normalized_output
+        assert "We think" in result.normalized_output
+
+
+class TestPostStageFormatterWordCountGuard:
+    def test_pathological_substitution_reverts_to_raw(self):
+        # A synthetic "the" -> "" substitution deletes real content words --
+        # the guard must catch this and return raw output unchanged.
+        pathological_subs = [{"find": r"\bthe\b", "replace": "", "tier": "enforce"}]
+        rules = _formatter_rules(substitutions=pathological_subs)
+        raw_body = (
+            "**Nick Hoffman:**\n"
+            "The budget deal includes the new funding for the schools in the state "
+            "and the roads across the region for the coming year."
+        )
+        raw_output = _formatter_doc(raw_body)
+
+        result = run_post_stage("formatter", raw_output, {}, rules)
+
+        assert result.normalized_output == raw_output
+        assert result.changed is False
+        guard_violations = [v for v in result.check.violations if v.rule_id == "formatter.normalization_guard"]
+        assert len(guard_violations) == 1
+        assert guard_violations[0].severity == "error"
+        assert guard_violations[0].model_fixable is False
+        assert result.check.fixes == []
+
+    def test_normal_substitutions_never_trigger_guard(self):
+        rules = _formatter_rules()
+        raw_body = (
+            "**Nick Hoffman:**\n"
+            "Senator Smith and Attorney General Jones said the vote was okay, and "
+            "mentioned *Here & Now* coverage of the Liberals rally."
+        )
+        raw_output = _formatter_doc(raw_body)
+
+        result = run_post_stage("formatter", raw_output, {}, rules)
+
+        guard_violations = [v for v in result.check.violations if v.rule_id == "formatter.normalization_guard"]
+        assert guard_violations == []
+        assert result.normalized_output != raw_output
+
+
+class TestPostStageFormatterIdempotence:
+    def test_double_post_stage_is_a_no_op(self):
+        rules = _formatter_rules()
+        raw_body = (
+            "**Nick Hoffman:**\n"
+            "Senator Smith said that's okay, and mentioned *Here & Now* coverage of "
+            "the Liberals rally.\n\n\n"
+            "**Angela Fitzgerald:**     \n"
+            "Agreed, we'll follow up."
+        )
+        raw_output = _formatter_doc(raw_body)
+
+        once = run_post_stage("formatter", raw_output, {}, rules)
+        twice = run_post_stage("formatter", once.normalized_output, {}, rules)
+
+        assert once.normalized_output == twice.normalized_output
+        assert twice.changed is False

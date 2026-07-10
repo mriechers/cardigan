@@ -12,14 +12,15 @@ computed from ``context``) at call time -- nothing here hard-codes a limit
 number or a forbidden-phrase list, so the section always reflects whatever
 ``config/house_style.yaml`` (or a caller's synthetic ``StyleRules``) says.
 
-The ``seo`` and ``validator`` phases have behavior today; every other phase
-name degrades gracefully to an empty result so later tasks can register
-formatter/timestamp/etc. behind the same interface without touching this
+The ``seo``, ``validator``, and ``formatter`` phases have behavior today;
+every other phase name degrades gracefully to an empty result so later tasks
+can register timestamp/etc. behind the same interface without touching this
 module's call sites.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -74,11 +75,23 @@ def run_pre_stage(phase: str, context: Mapping[str, Any], rules: StyleRules) -> 
     in ``rules`` ``phases.validator.semantic_checks``. An empty/missing
     ``style_checks`` renders nothing (prompt unchanged).
 
+    For ``phase == "formatter"``, computes ``proper_nouns`` (same source as
+    ``seo``), the raw ``speaker_label_spec`` dict
+    (``phases.formatter.speaker_label``), and ``enforce_substitutions``
+    (``rules.substitutions(tier="enforce")``), and renders them into a
+    "## Style Rules (authoritative)" section: the authoritative name list,
+    the speaker-label format spec in prose, the enforce-tier pairs rendered
+    as "write it right the first time" rules, and a review-notes placement
+    line.
+
     For any other phase (v1), returns
     ``PreStageResult(phase=phase, prompt_section="", data={})``.
     """
     if phase == "validator":
         return _run_validator_pre_stage(context, rules)
+
+    if phase == "formatter":
+        return _run_formatter_pre_stage(context, rules)
 
     if phase != "seo":
         return PreStageResult(phase=phase, prompt_section="", data={})
@@ -174,6 +187,132 @@ def _render_semantic_instruction(semantic_checks: list[str]) -> str:
     return f"{_VALIDATOR_INSTRUCTION_PREFIX}{body}"
 
 
+# ---------------------------------------------------------------------------
+# formatter phase
+# ---------------------------------------------------------------------------
+
+
+def _run_formatter_pre_stage(context: Mapping[str, Any], rules: StyleRules) -> PreStageResult:
+    analyst_output = context.get("analyst_output") or ""
+    proper_nouns = extract_proper_nouns(analyst_output, rules.surname_stoplist())
+
+    formatter_cfg = (rules.raw.get("phases", {}) or {}).get("formatter", {}) or {}
+    speaker_label_spec = dict(formatter_cfg.get("speaker_label") or {})
+    review_notes_cfg = formatter_cfg.get("review_notes") or {}
+    enforce_substitutions = rules.substitutions(tier="enforce")
+
+    data = {
+        "proper_nouns": proper_nouns,
+        "speaker_label_spec": speaker_label_spec,
+        "enforce_substitutions": enforce_substitutions,
+    }
+
+    prompt_section = _render_formatter_prompt_section(data, review_notes_cfg)
+
+    return PreStageResult(phase="formatter", prompt_section=prompt_section, data=data)
+
+
+def _render_formatter_prompt_section(data: dict, review_notes_cfg: Mapping[str, Any]) -> str:
+    lines = [
+        "## Style Rules (authoritative)",
+        "",
+        "These values are computed and enforced by the pipeline — they override "
+        "anything else in this prompt.",
+        "",
+    ]
+
+    proper_nouns = data["proper_nouns"]
+    if proper_nouns:
+        lines.append(
+            f"**Proper nouns (authoritative spellings — use exactly these):** {_render_list(proper_nouns)}"
+        )
+
+    speaker_label_line = _render_speaker_label_line(data["speaker_label_spec"])
+    if speaker_label_line:
+        lines.append(speaker_label_line)
+
+    pairs_line = _render_substitution_pairs_line(data["enforce_substitutions"])
+    if pairs_line:
+        lines.append(pairs_line)
+
+    review_notes_line = _render_review_notes_line(review_notes_cfg)
+    if review_notes_line:
+        lines.append(review_notes_line)
+
+    return "\n".join(lines) + "\n"
+
+
+def _render_speaker_label_line(spec: Mapping[str, Any]) -> str:
+    if not spec.get("pattern"):
+        return ""
+
+    bits = ["**First Last:** — bold, first + last name, colon inside the bold"]
+
+    trailing_spaces = spec.get("trailing_spaces")
+    if trailing_spaces is not None:
+        plural = "" if trailing_spaces == 1 else "s"
+        bits.append(f"{trailing_spaces} trailing space{plural} after the colon")
+
+    blank_lines = spec.get("blank_lines_between_turns")
+    if blank_lines is not None:
+        plural = "" if blank_lines == 1 else "s"
+        bits.append(f"exactly {blank_lines} blank line{plural} between speaker turns")
+
+    if spec.get("no_honorifics"):
+        bits.append("no honorifics in labels")
+
+    return f"**Speaker labels:** {'; '.join(bits)}."
+
+
+_BACKREFERENCE_RE = re.compile(r"\\\d")
+
+
+def _render_substitution_pairs_line(substitutions: list[dict]) -> str:
+    pairs = []
+    for sub in substitutions:
+        find = sub.get("find")
+        replace = sub.get("replace")
+        if not find or replace is None:
+            continue
+        note = sub.get("note")
+
+        if _BACKREFERENCE_RE.search(replace):
+            # `replace` contains a regex backreference (e.g. "\1") -- it is
+            # not a literal replacement string outside an actual match, so
+            # it can't be shown via the normal "X (never Y)" template
+            # (that would literally print "\1" into the prompt). Prefer the
+            # entry's note (expected to describe the transform in prose);
+            # fall back to a generic description built from the humanized
+            # find when no note is present.
+            pairs.append(note or f"apply consistent formatting to {_humanize_substitution_find(find, None)}")
+            continue
+
+        humanized_find = _humanize_substitution_find(find, note)
+        pairs.append(f"{replace} (never {humanized_find})")
+
+    if not pairs:
+        return ""
+
+    return f"**Write it right the first time:** {'; '.join(pairs)}."
+
+
+def _humanize_substitution_find(find: str, note: str | None) -> str:
+    cleaned = _strip_regex_boundary(find)
+    cleaned = _CHAR_CLASS_RE.sub(lambda m: m.group(1).lower(), cleaned)
+    if note and _REGEXY_RE.search(cleaned):
+        return note
+    return cleaned
+
+
+def _render_review_notes_line(review_notes_cfg: Mapping[str, Any]) -> str:
+    placement = review_notes_cfg.get("placement")
+    if not placement:
+        return ""
+    fmt = review_notes_cfg.get("format")
+    fmt_text = f", formatted as an {fmt.replace('_', ' ')}" if fmt else ""
+    return f"**Review notes:** place at the {placement} of the document{fmt_text}."
+
+
 def _render_seo_prompt_section(data: dict, rules: StyleRules, program: str | None) -> str:
     lines = [
         "## Style Rules (authoritative)",
@@ -219,6 +358,18 @@ def _strip_regex_boundary(pattern: str) -> str:
     if text.endswith(r"\b"):
         text = text[:-2]
     return text
+
+
+# Collapses a two-letter case-alternation class like "[Oo]" down to its
+# lowercase representative letter ("o") for display -- used by the
+# formatter substitution-pairs renderer's best-effort cleanup.
+_CHAR_CLASS_RE = re.compile(r"\[(\w)\w\]")
+
+# Leftover regex metacharacters after boundary-stripping + char-class
+# collapse mean best-effort cleanup couldn't produce a clean phrase (e.g. an
+# alternation like "(Here & Now|Wisconsin Life)") -- signals the renderer to
+# prefer an entry's ``note`` field, when present, over the raw pattern text.
+_REGEXY_RE = re.compile(r"[()|\[\]\\]")
 
 
 def _render_voice(rules: StyleRules) -> str:
