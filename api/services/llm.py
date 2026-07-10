@@ -605,16 +605,14 @@ class LLMClient:
         backend_name = backend or self.config.get("primary_backend", "openrouter")
         backend_config = self.get_backend_config(backend_name)
 
-        # Determine model — priority order:
-        # 0. Backend with force_model (e.g. a local single-model server —
-        #    its own id must win over a phase_models cloud id the server can't serve;
-        #    honors a ``model_env`` override for portability across networks)
-        # 1. Explicit model param
-        # 2. phase_models config (per-phase model assignment from Settings UI)
-        # 3. Backend's configured model / fallback_model
-        if backend_config.get("force_model"):
-            model_id = _resolve_model(backend_config)
-        elif model:
+        # Determine model — route on the (backend, model) pair. Priority:
+        # 1. Explicit model param (caller override)
+        # 2. phase_models — the per-phase assignment from the Settings UI; applies
+        #    to every backend, local included, so an assigned local model id is what
+        #    gets sent (no single-model force override)
+        # 3. Backend's configured model, honoring a ``model_env`` override for a
+        #    single-model local server, then fallback_model
+        if model:
             model_id = model
         elif phase:
             phase_models = self.config.get("phase_models", {})
@@ -623,7 +621,7 @@ class LLMClient:
             model_id = None
 
         if not model_id:
-            model_id = backend_config.get("model") or backend_config.get("fallback_model")
+            model_id = _resolve_model(backend_config) or backend_config.get("fallback_model")
 
         self.active_backend = backend_name
         self.active_model = model_id

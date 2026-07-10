@@ -67,7 +67,6 @@ def mock_config(tmp_path):
                 "model_env": "LOCAL_LLM_MODEL",
                 "api_key_env": "LOCAL_LLM_API_KEY",
                 "strip_reasoning": True,
-                "force_model": True,
                 "defer_when_unavailable": True,
                 "max_tokens": 8192,
                 "cost_per_project": 0.0,
@@ -89,7 +88,7 @@ def mock_config(tmp_path):
                 "validator": "openrouter-cheapskate",
             },
         },
-        "phase_models": {"analyst": "anthropic/claude-haiku-4.5"},
+        "phase_models": {"analyst": "anthropic/claude-haiku-4.5", "seo": "Qwen2.5-7B-Instruct-4bit"},
         "safety": {"run_cost_cap": 1.0, "max_cost_per_1k_tokens": 0.05, "model_allowlist": []},
     }
 
@@ -592,9 +591,10 @@ class TestLocalBackendIntegration:
         assert response.content == dirty
 
     @pytest.mark.asyncio
-    async def test_force_model_overrides_phase_models(self, llm_client):
-        # phase_models.analyst is a cloud model id the MLX server can't serve;
-        # force_model makes the backend's own model id win.
+    async def test_local_backend_routes_assigned_model(self, llm_client):
+        # Route on the (backend, model) pair: a per-phase model assigned to a
+        # local backend is what gets sent. The backend supplies endpoint+key;
+        # the assignment supplies the served model id. (Was masked by force_model.)
         start_run_tracking(job_id=903)
         mock_response = self._mock_openai_response("hi")
 
@@ -603,14 +603,15 @@ class TestLocalBackendIntegration:
                 response = await llm_client.chat(
                     messages=[{"role": "user", "content": "x"}],
                     backend="local-llm",
-                    phase="analyst",
+                    phase="seo",
                 )
 
-        assert response.model == "qwen-local"
+        assert response.model == "Qwen2.5-7B-Instruct-4bit"
 
     @pytest.mark.asyncio
-    async def test_phase_models_wins_without_force_model(self, llm_client):
-        # openai-plain does not set force_model -> phase_models.analyst applies.
+    async def test_openai_backend_routes_assigned_model(self, llm_client):
+        # A cloud/openai backend also routes on the per-phase assignment:
+        # phase_models.analyst is what gets sent.
         start_run_tracking(job_id=904)
         mock_response = self._mock_openai_response("hi")
 
@@ -761,9 +762,10 @@ class TestLocalBackendIntegration:
         assert headers["Authorization"] == "Bearer omlx-secret"
 
     @pytest.mark.asyncio
-    async def test_model_env_overrides_config_model(self, llm_client, monkeypatch):
+    async def test_model_env_is_fallback_when_unassigned(self, llm_client, monkeypatch):
         # A single-model local server may serve a different model on a different
-        # network; model_env lets the deploy env supply it without a config edit.
+        # network; model_env supplies it without a config edit. It is the FALLBACK,
+        # used when no explicit or per-phase model is assigned.
         monkeypatch.setenv("LOCAL_LLM_MODEL", "mlx-community/other-model")
         start_run_tracking(job_id=912)
         mock_response = self._mock_openai_response("hi")
@@ -773,11 +775,30 @@ class TestLocalBackendIntegration:
                 response = await llm_client.chat(
                     messages=[{"role": "user", "content": "x"}],
                     backend="local-llm",
-                    phase="analyst",
                 )
 
         assert response.model == "mlx-community/other-model"
         assert mock_post.call_args_list[0].kwargs["json"]["model"] == "mlx-community/other-model"
+
+    @pytest.mark.asyncio
+    async def test_phase_assignment_beats_model_env(self, llm_client, monkeypatch):
+        # Route on the (backend, model) pair: a per-phase assignment wins over the
+        # backend's fallback model_env — the inverse of the removed force_model
+        # behavior. Guards against reintroducing a single-model override.
+        monkeypatch.setenv("LOCAL_LLM_MODEL", "mlx-community/other-model")
+        start_run_tracking(job_id=914)
+        mock_response = self._mock_openai_response("hi")
+
+        with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
+            with patch("api.services.llm.log_event"):
+                response = await llm_client.chat(
+                    messages=[{"role": "user", "content": "x"}],
+                    backend="local-llm",
+                    phase="seo",
+                )
+
+        assert response.model == "Qwen2.5-7B-Instruct-4bit"
+        assert mock_post.call_args_list[0].kwargs["json"]["model"] == "Qwen2.5-7B-Instruct-4bit"
 
     @pytest.mark.asyncio
     async def test_v1_base_endpoint_gets_chat_completions_appended(self, llm_client, monkeypatch):
