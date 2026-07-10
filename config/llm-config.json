@@ -91,6 +91,7 @@
       "model_env": "LOCAL_LLM_MODEL",
       "api_key_env": "LOCAL_LLM_API_KEY",
       "strip_reasoning": true,
+      "discover": true,
       "defer_when_unavailable": true,
       "max_tokens": 8192,
       "timeout": 300,

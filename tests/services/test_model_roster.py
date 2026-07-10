@@ -1,8 +1,94 @@
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from api.services import model_roster
+
+
+def _discover_config():
+    return {
+        "backends": {
+            "local-llm": {
+                "type": "openai",
+                "endpoint": "http://studio.riechers.co:8000/v1/chat/completions",
+                "api_key_env": "LOCAL_LLM_API_KEY",
+                "enabled": True,
+                "discover": True,
+            },
+            # openrouter is not an openai/discover backend -> must be skipped
+            "openrouter": {"type": "openrouter", "enabled": True},
+            # a disabled local backend -> must be skipped
+            "local-off": {"type": "openai", "endpoint": "http://x/v1", "enabled": False, "discover": True},
+        }
+    }
+
+
+def _mock_models_response(payload):
+    resp = MagicMock()
+    resp.raise_for_status = MagicMock()
+    resp.json.return_value = payload
+    return resp
+
+
+@pytest.mark.asyncio
+async def test_fetch_local_models_tags_by_server_and_host_unfiltered():
+    payload = {
+        "data": [
+            {"id": "Qwen2.5-7B-Instruct-4bit", "owned_by": "omlx", "max_model_len": 32768},
+            {"id": "some-unheard-of-model", "owned_by": "omlx", "max_model_len": 4096},
+        ]
+    }
+    get_mock = AsyncMock(return_value=_mock_models_response(payload))
+    with patch.object(model_roster.httpx.AsyncClient, "get", get_mock):
+        with patch.object(model_roster, "get_secret", return_value="k"):
+            got = await model_roster.fetch_local_models(_discover_config())
+
+    # Discovery derives the /v1/models URL from the chat endpoint and sends the key.
+    assert get_mock.call_args.args[0] == "http://studio.riechers.co:8000/v1/models"
+    assert get_mock.call_args.kwargs["headers"]["Authorization"] == "Bearer k"
+    # Every served model is kept — no family-pattern filtering.
+    assert [m["id"] for m in got] == ["Qwen2.5-7B-Instruct-4bit", "some-unheard-of-model"]
+    first = got[0]
+    assert first["provider"] == "oMLX"            # from owned_by, prettified
+    assert first["backend"] == "local-llm"        # routing key
+    assert first["host"] == "studio.riechers.co:8000"
+    assert first["pricing_input"] == 0 and first["pricing_output"] == 0
+    assert first["context_len"] == 32768
+    assert first["tier"] is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_local_models_non_fatal_on_unreachable():
+    import httpx
+
+    with patch.object(model_roster.httpx.AsyncClient, "get", AsyncMock(side_effect=httpx.ConnectError("down"))):
+        with patch.object(model_roster, "get_secret", return_value="k"):
+            got = await model_roster.fetch_local_models(_discover_config())
+    assert got == []  # a down endpoint contributes nothing, no raise
+
+
+@pytest.mark.asyncio
+async def test_get_available_models_merges_cloud_and_local():
+    model_roster.invalidate_cache()
+    config = {
+        "model_families": [{"name": "Claude", "provider": "Anthropic", "tier": 0, "patterns": ["anthropic/*"]}],
+        "backends": _discover_config()["backends"],
+        "available_models": [],
+    }
+    cloud_raw = [{"id": "anthropic/claude-haiku-4.5", "name": "Claude Haiku", "pricing": {"prompt": "0", "completion": "0"}}]
+    local = [{"id": "Qwen2.5-7B-Instruct-4bit", "provider": "oMLX", "backend": "local-llm",
+              "host": "studio.riechers.co:8000", "tier": None, "pricing_input": 0,
+              "pricing_output": 0, "context_len": 32768}]
+
+    with patch.object(model_roster, "_load_config", return_value=config):
+        with patch.object(model_roster, "fetch_openrouter_models", AsyncMock(return_value=cloud_raw)):
+            with patch.object(model_roster, "fetch_local_models", AsyncMock(return_value=local)):
+                got = await model_roster.get_available_models()
+
+    model_roster.invalidate_cache()
+    ids = [m["id"] for m in got]
+    assert "anthropic/claude-haiku-4.5" in ids   # cloud roster
+    assert "Qwen2.5-7B-Instruct-4bit" in ids     # local merged in alongside
 
 
 @pytest.mark.asyncio

@@ -65,14 +65,16 @@ returned ids into the roster **unfiltered**, each tagged:
 
 ```jsonc
 { "id": "Qwen2.5-7B-Instruct-4bit", "name": "Qwen2.5-7B-Instruct-4bit",
-  "provider": "oMLX", "backend": "studio.riechers.co:8000", "tier": null,
-  "pricing_input": 0, "pricing_output": 0, "context_len": 32768 }
+  "provider": "oMLX", "backend": "local-llm", "host": "studio.riechers.co:8000",
+  "tier": null, "pricing_input": 0, "pricing_output": 0, "context_len": 32768 }
 ```
 
-Both labels are **derived from discovery, never hand-entered**: `provider` from each model's
-`owned_by` field in the `/v1/models` response (oMLX returns `"owned_by": "omlx"` → shown as
-`oMLX`; fall back to the host when `owned_by` is generic or absent), and `backend`/identity from
-the endpoint host itself. Naming a server is not a step — a new box labels itself.
+The display labels are **derived from discovery, never hand-entered**: `provider` from each
+model's `owned_by` field in the `/v1/models` response (oMLX returns `"owned_by": "omlx"` → shown
+as `oMLX`; falls back to `Local` when absent) and `host` from the endpoint. `backend` is the
+config key that routes to the server; **step 3 keys backends by host, converging `backend` →
+`host`** so the routing key and the display host become one. Naming a server is not a step — a
+new box labels itself via `owned_by` + `host`.
 
 - Reuse the existing 1h cache + `invalidate_cache()`; `/config/models/refresh` re-queries **all**
   sources (rename its intent from "fetch from OpenRouter" to "refresh all backends").

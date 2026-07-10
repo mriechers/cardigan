@@ -8,10 +8,12 @@ patterns, and classifies each into a cost tier. Falls back to the static
 import asyncio
 import json
 import logging
+import os
 import time
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 import httpx
 
@@ -124,6 +126,86 @@ def _static_fallback(config: dict) -> List[dict]:
     return config.get("available_models", [])
 
 
+# Prettified labels for common OpenAI-compatible servers' ``owned_by`` value.
+# Cosmetic only (per-server brand, not per-model); unknown values pass through.
+_PROVIDER_LABELS = {
+    "omlx": "oMLX",
+    "vllm": "vLLM",
+    "llamacpp": "llama.cpp",
+    "llama-cpp": "llama.cpp",
+    "lmstudio": "LM Studio",
+    "ollama": "Ollama",
+}
+
+
+def _provider_label(owned_by: Optional[str]) -> str:
+    """Human label for a discovered model's serving software."""
+    if not owned_by:
+        return "Local"
+    return _PROVIDER_LABELS.get(owned_by.lower(), owned_by)
+
+
+def _resolve_backend_endpoint(cfg: dict) -> str:
+    """A backend's endpoint, honoring an ``endpoint_env`` override."""
+    env = cfg.get("endpoint_env")
+    return os.getenv(env, cfg["endpoint"]) if env else cfg["endpoint"]
+
+
+def _models_url(endpoint: str) -> str:
+    """Derive the ``/v1/models`` URL from a chat endpoint or a ``/v1`` base."""
+    stripped = endpoint.rstrip("/")
+    if stripped.endswith("/chat/completions"):
+        stripped = stripped[: -len("/chat/completions")]
+    return stripped.rstrip("/") + "/models"
+
+
+async def fetch_local_models(config: dict) -> List[dict]:
+    """Discover models from each enabled, ``discover``-flagged local (openai-type)
+    backend via its ``/v1/models`` endpoint.
+
+    Returns roster entries merged **unfiltered** (no family-pattern filtering, so a
+    brand-new model is never dropped), each tagged by serving software (``provider``
+    from the server's ``owned_by``) and ``host``, at $0. ``backend`` is the config
+    key that routes to it. A backend that errors contributes nothing (logged) —
+    discovery is never fatal.
+    """
+    results: List[dict] = []
+    for name, cfg in config.get("backends", {}).items():
+        if not (cfg.get("enabled") and cfg.get("discover") and cfg.get("type") == "openai"):
+            continue
+        endpoint = _resolve_backend_endpoint(cfg)
+        url = _models_url(endpoint)
+        host = urlparse(endpoint).netloc or endpoint
+        api_key = get_secret(cfg["api_key_env"]) if cfg.get("api_key_env") else None
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(url, headers=headers)
+                resp.raise_for_status()
+                data = resp.json().get("data", [])
+        except (httpx.HTTPError, KeyError, json.JSONDecodeError) as e:
+            logger.warning("Local model discovery failed for %s (%s): %s", name, url, e)
+            continue
+        for m in data:
+            model_id = m.get("id")
+            if not model_id:
+                continue
+            results.append(
+                {
+                    "id": model_id,
+                    "name": m.get("name") or model_id,
+                    "provider": _provider_label(m.get("owned_by")),
+                    "backend": name,
+                    "host": host,
+                    "tier": None,
+                    "pricing_input": 0,
+                    "pricing_output": 0,
+                    "context_len": m.get("max_model_len"),
+                }
+            )
+    return results
+
+
 async def get_available_models() -> List[dict]:
     """Get the current model roster, using cache when fresh.
 
@@ -147,27 +229,32 @@ async def get_available_models() -> List[dict]:
         config = _load_config()
         families = _get_family_patterns(config)
 
-        # If no families configured, use static list
+        # Locally-discovered models are always merged into whatever cloud roster is
+        # built below. They ride along with it rather than being cached separately.
+        local = await fetch_local_models(config)
+
+        # If no families configured, use static cloud list (uncached, so a later
+        # config change is picked up next call) + local.
         if not families:
             logger.info("No model_families configured, using static available_models")
-            return _static_fallback(config)
+            return _static_fallback(config) + local
 
-        # Try dynamic fetch
         raw_models = await fetch_openrouter_models()
         if raw_models is None:
             logger.info("OpenRouter fetch failed, using static fallback")
-            return _static_fallback(config)
+            return _static_fallback(config) + local
 
         classified = _classify_models(raw_models, families)
         if not classified:
             logger.warning("No models matched family patterns, using static fallback")
-            return _static_fallback(config)
+            return _static_fallback(config) + local
 
-        # Update cache
-        _cache["models"] = classified
+        # Cache only when the cloud roster came from a successful dynamic fetch.
+        models = classified + local
+        _cache["models"] = models
         _cache["expires"] = now + CACHE_TTL_SECONDS
-        logger.info("Refreshed model roster: %d models from OpenRouter", len(classified))
-        return classified
+        logger.info("Refreshed model roster: %d cloud + %d local", len(classified), len(local))
+        return models
 
 
 def invalidate_cache() -> None:
