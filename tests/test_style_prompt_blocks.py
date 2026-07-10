@@ -25,11 +25,13 @@ from api.services.style_engine.prompt_blocks import (
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
-# seo.md is excluded here -- task 1c gave it {{style:...}} tokens. It gets its
+# seo.md and validator.md are excluded here -- task 1c gave seo.md
+# {{style:...}} tokens and task 2d gave validator.md its own. Each gets its
 # own no-op-broken assertions + real-render tests below instead.
-TOKEN_FREE_PROMPT_PHASES = ["analyst", "formatter", "validator", "timestamp", "copy_editor"]
+TOKEN_FREE_PROMPT_PHASES = ["analyst", "formatter", "timestamp", "copy_editor"]
 
 SEO_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "seo.md"
+VALIDATOR_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "validator.md"
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -302,6 +304,78 @@ def test_seo_prompt_slim_profile_renders_condensed_blocks() -> None:
     ) in rendered
     # Proves slim actually swapped in -- the full-profile-only heading must be absent.
     assert "## Copy style (REQUIRED)" not in rendered
+    assert "{{style:" not in rendered
+
+
+# ---------------------------------------------------------------------------
+# 7c. validator.md: task 2d gave it a token -- prove it's present and renders
+# cleanly against the REAL config/house_style.yaml for both profiles.
+# ---------------------------------------------------------------------------
+
+
+def test_validator_prompt_contains_expected_style_token() -> None:
+    content = VALIDATOR_PROMPT_PATH.read_text()
+    assert "{{style:validator.checklist}}" in content
+
+
+@pytest.mark.parametrize("profile", ["full", "slim"])
+def test_validator_prompt_renders_against_real_config_for_both_profiles(profile: str) -> None:
+    content = VALIDATOR_PROMPT_PATH.read_text()
+
+    # Must not raise PromptBlockError for either profile against the REAL
+    # config/house_style.yaml -- proves validator.checklist has both a
+    # "full" and a "slim" entry.
+    rendered = render_prompt_blocks(content, profile=profile)
+
+    assert "{{style:" not in rendered
+
+
+def test_validator_prompt_no_stray_old_char_limits() -> None:
+    """The pre-transcription checklist quoted stale 60/160 char limits (SST
+    write path enforces 80/90) -- proves the bug-fix landed and neither
+    stale number survives anywhere in the rendered prompt, in either profile.
+    """
+    content = VALIDATOR_PROMPT_PATH.read_text()
+
+    for profile in ("full", "slim"):
+        rendered = render_prompt_blocks(content, profile=profile)
+        assert "60 characters" not in rendered
+        assert "160 characters" not in rendered
+
+
+def test_validator_prompt_full_profile_renders_expected_checklist_block() -> None:
+    """Golden assertions on the token-replaced region only (not the whole
+    prompt) -- keeps this test from being a brittle whole-file snapshot.
+    """
+    content = VALIDATOR_PROMPT_PATH.read_text()
+    rendered = render_prompt_blocks(content, profile="full")
+
+    assert "## Validation Checklist" in rendered
+    assert "### Analyst Phase" in rendered
+    assert "### Formatter Phase" in rendered
+    assert "### SEO Phase" in rendered
+    assert "Title is under 80 characters" in rendered
+    assert "Short description is under 90 characters" in rendered
+    assert "Long description is under 350 characters" in rendered
+    assert "Title accurately reflects content" in rendered
+    assert "Description accurately reflects content" in rendered
+    assert "{{style:" not in rendered
+
+
+def test_validator_prompt_slim_profile_renders_condensed_block() -> None:
+    content = VALIDATOR_PROMPT_PATH.read_text()
+    rendered = render_prompt_blocks(content, profile="slim")
+
+    assert "Title accurately reflects content" in rendered
+    assert "Description accurately reflects content" in rendered
+    assert (
+        "All mechanical checks (character limits, formatting, placeholders, truncation, "
+        "speaker labels) run deterministically in the pipeline and are merged into your "
+        "verdict — do NOT re-check them; judge only the semantic accuracy items above."
+    ) in rendered
+    # Proves slim actually swapped in -- the full-profile-only sections must be absent.
+    assert "## Validation Checklist" not in rendered
+    assert "### SEO Phase" not in rendered
     assert "{{style:" not in rendered
 
 

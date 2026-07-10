@@ -206,6 +206,28 @@ class TestPromptBlockNumbersMatchCharLimits:
                 f"fix the prompt_blocks prose to match"
             )
 
+    @pytest.mark.parametrize("field", ["title", "short_description", "long_description"])
+    def test_validator_checklist_block_is_scanned_for_field(self, field):
+        """Explicit coverage guard for task 2d's validator.checklist block --
+        proves the generic scan above isn't passing vacuously off of
+        seo.copy_rules/shared.char_budgets alone. If a future edit strips the
+        numbers out of validator.checklist.full, this fails loudly instead of
+        the generic parametrized test above just quietly finding fewer hits.
+        """
+        rules = load_rules(CONFIG_PATH)
+        prompt_blocks = rules.raw.get("prompt_blocks", {}) or {}
+        validator_block = prompt_blocks.get("validator.checklist")
+        assert validator_block is not None, "prompt_blocks.'validator.checklist' is missing from house_style.yaml"
+
+        full_text = validator_block.get("full", "")
+        pattern = _PROMPT_BLOCK_FIELD_LIMIT_RE[field]
+        matches = [int(m.group(1)) for m in pattern.finditer(full_text)]
+
+        assert matches, f"validator.checklist.full does not quote a {field} character limit"
+        expected_max = rules.limits_for()[field]["max"]
+        for number in matches:
+            assert number == expected_max
+
 
 class TestSmokeLevelCompleteness:
     """Non-empty smoke checks — the loader's accessors must return real
