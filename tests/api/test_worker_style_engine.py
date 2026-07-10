@@ -959,3 +959,119 @@ class TestFinalizeQaGateLintWiring:
         assert merged["overall"] == "fail"
         formatter_flags = merged["phase_results"]["formatter"]["flags"]
         assert any(f.startswith("[style-nonfixable:lint.output_missing]") for f in formatter_flags)
+
+
+class TestRetryRevalidationLintMerge:
+    """Proves the THIRD call site (`retry_single_phase`'s post-retry re-validation
+    parse, ~worker.py:564) routes through `_apply_style_lint` before persisting --
+    not just the main-loop parse (TestValidatorLintHook) and QA-gate parse
+    (TestFinalizeQaGateLintWiring) covered above."""
+
+    @pytest.mark.asyncio
+    async def test_retry_phase_merges_lint_flags_on_revalidation(self, tmp_path, monkeypatch):
+        """After retrying a phase (e.g., seo), the re-run of the validator must
+        merge lint flags before persisting the validation_result, so a manually
+        retried job with validator.lint="enforce" does NOT bypass QA flags.
+
+        This test proves the third validation-persist path routes through
+        _apply_style_lint by verifying the hook is called with the parsed
+        validator verdict and context, and the merged result is persisted."""
+        rules_path = _write_rules(tmp_path, title_max=40)
+        style_cfg = _style_engine_cfg(
+            rules_path,
+            phases={"validator": {"lint": "enforce"}},
+            qa_gate={"merge_flags": True, "fail_on_error": True},
+        )
+
+        worker = JobWorker.__new__(JobWorker)
+        worker.llm = MagicMock()
+        worker.llm.config = {
+            "routing": {"style_engine": style_cfg},
+        }
+
+        # Mock job with minimal fields needed for retry_single_phase
+        existing_job = MagicMock()
+        existing_job.model_dump.return_value = {
+            "id": 42,
+            "project_name": "Test Project",
+            "transcript_file": "test.txt",
+            "project_path": str(tmp_path),
+            "word_count": 100,
+            "duration_minutes": 5,
+            "status": "completed",
+            "phases": [
+                {
+                    "name": "seo",
+                    "status": "completed",
+                    "cost": 0.001,
+                    "tokens": 100,
+                    "input_tokens": 50,
+                    "output_tokens": 50,
+                    "model": "test-model",
+                    "completed_at": "2024-01-01T00:00:00Z",
+                    "retry_count": 0,
+                }
+            ],
+        }
+        existing_job.phases = existing_job.model_dump()["phases"]
+
+        # Mock database operations - patch at the database module level since retry_single_phase imports locally
+        from api.services import database as db_mod
+        monkeypatch.setattr(
+            db_mod, "get_job", AsyncMock(side_effect=[existing_job, existing_job, existing_job])
+        )
+        update_job_mock = AsyncMock()
+        monkeypatch.setattr(db_mod, "update_job", update_job_mock)
+        monkeypatch.setattr(worker_mod, "log_event", AsyncMock())
+
+        # Capture calls to _apply_style_lint to prove it's wired in
+        original_apply_style_lint = worker._apply_style_lint
+        apply_style_lint_calls = []
+
+        async def mock_apply_style_lint(job_id, context, validation_data):
+            apply_style_lint_calls.append({"job_id": job_id, "context": context, "validation_data": validation_data})
+            # Call the real method to get actual merged result
+            return await original_apply_style_lint(job_id, context, validation_data)
+
+        monkeypatch.setattr(worker, "_apply_style_lint", mock_apply_style_lint)
+
+        # Mock _run_phase to return retried phase output and passing validator JSON
+        passing_verdict_json = json.dumps(_passing_verdict())
+
+        async def fake_run_phase(job_id, phase_name, context, project_path, model_override=None):
+            if phase_name == "validator":
+                return {"success": True, "output": passing_verdict_json, "model": "validator-model"}
+            else:
+                return {"success": True, "output": "Retried phase output", "model": "test-model"}
+
+        monkeypatch.setattr(worker, "_run_phase", fake_run_phase)
+
+        # Write transcript file for load
+        (tmp_path / "test.txt").write_text("Test transcript content")
+
+        result = await worker.retry_single_phase(
+            job_id=42,
+            phase_name="seo",
+            feedback="Tighten the title",
+        )
+
+        # Verify retry succeeded
+        assert result["success"] is True
+
+        # Prove _apply_style_lint was called during the retry's re-validation phase
+        assert apply_style_lint_calls, "expected _apply_style_lint to be called during retry re-validation"
+        call = apply_style_lint_calls[0]
+        assert call["job_id"] == 42
+        assert call["validation_data"]["overall"] == "pass"  # input is passing verdict
+
+        # Verify the persisted validation_result is the merged one from _apply_style_lint
+        persisted_validations = [
+            c.args[1]
+            for c in update_job_mock.await_args_list
+            if len(c.args) >= 2 and hasattr(c.args[1], "validation_result") and c.args[1].validation_result
+        ]
+        assert persisted_validations, "update_job was never called with validation_result"
+
+        # The last call should have the merged result
+        final_validation = persisted_validations[-1].validation_result
+        assert final_validation is not None

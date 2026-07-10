@@ -562,6 +562,7 @@ class JobWorker:
                     if validator_result.get("output"):
                         try:
                             validation_data = self._parse_validation_result(validator_result["output"])
+                            validation_data = await self._apply_style_lint(job_id, context, validation_data)
                             refreshed = await get_job(job_id)
                             phases = refreshed.phases or [] if refreshed else []
                             phases = apply_validator_model(phases, validator_result.get("model"))
