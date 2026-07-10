@@ -5,6 +5,7 @@ Provides endpoints for viewing and updating LLM routing configuration.
 
 import json
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -343,3 +344,144 @@ async def get_cost_estimate(body: CostEstimateRequest):
     )
 
     return CostEstimateResponse(**result)
+
+
+# ---------------------------------------------------------------------------
+# Backend-definition CRUD (/config/backends)
+#
+# Lets a user register a local OpenAI-compatible endpoint as a first-class,
+# discoverable backend without hand-editing llm-config.json. Backends are keyed
+# by host so a server self-identifies (no invented names like "local-llm-2").
+# The generic OpenAI client + the model roster already consume whatever is
+# written here, so onboarding a new server is data, not code.
+# ---------------------------------------------------------------------------
+
+
+class BackendCreate(BaseModel):
+    """Request body to register a local OpenAI-compatible backend."""
+
+    endpoint: str = Field(..., description="OpenAI-compatible base URL, e.g. http://host:8000/v1")
+    api_key_env: Optional[str] = Field(None, description="Name of the secret/env var holding the API key")
+    model: Optional[str] = Field(None, description="Optional fallback model id when a phase has no assignment")
+    enabled: bool = Field(True, description="Whether the backend is usable")
+    discover: bool = Field(True, description="Whether to list this server's /v1/models in the roster")
+
+
+class BackendPatch(BaseModel):
+    """Partial update for an existing backend (only provided fields change)."""
+
+    endpoint: Optional[str] = None
+    api_key_env: Optional[str] = None
+    model: Optional[str] = None
+    enabled: Optional[bool] = None
+    discover: Optional[bool] = None
+
+
+class BackendInfo(BaseModel):
+    """Summary of a configured backend."""
+
+    name: str
+    type: str
+    endpoint: Optional[str] = None
+    enabled: bool
+    discover: bool
+
+
+class BackendsListResponse(BaseModel):
+    backends: List[BackendInfo]
+
+
+def _backend_info(name: str, entry: dict) -> BackendInfo:
+    return BackendInfo(
+        name=name,
+        type=entry.get("type", "openai"),
+        endpoint=entry.get("endpoint"),
+        enabled=bool(entry.get("enabled", True)),
+        discover=bool(entry.get("discover", False)),
+    )
+
+
+@router.get("/backends", response_model=BackendsListResponse)
+async def list_backends():
+    """List all configured backends (cloud presets + user-registered local endpoints)."""
+    config = _load_config()
+    backends = config.get("backends", {})
+    return BackendsListResponse(backends=[_backend_info(n, e) for n, e in backends.items()])
+
+
+@router.post("/backends", response_model=BackendInfo, status_code=201)
+async def create_backend(body: BackendCreate):
+    """Register a new local OpenAI-compatible backend, keyed by its host.
+
+    The host is derived from the endpoint (self-identifying), so no name is
+    invented. Cost is $0 and discovery is on by default. Invalidates the roster
+    cache so the new server's models surface on the next refresh.
+    """
+    host = urlparse(body.endpoint).netloc
+    if not host:
+        raise HTTPException(status_code=400, detail="endpoint must be an absolute URL like http://host:8000/v1")
+
+    config = _load_config()
+    backends = config.setdefault("backends", {})
+    if host in backends:
+        raise HTTPException(status_code=409, detail=f"Backend '{host}' already exists")
+
+    entry: Dict[str, Any] = {
+        "type": "openai",
+        "endpoint": body.endpoint,
+        "enabled": body.enabled,
+        "discover": body.discover,
+        "cost_per_project": 0.0,
+    }
+    if body.api_key_env:
+        entry["api_key_env"] = body.api_key_env
+    if body.model:
+        entry["model"] = body.model
+
+    backends[host] = entry
+    _save_config(config)
+    invalidate_cache()
+    return _backend_info(host, entry)
+
+
+@router.patch("/backends/{name}", response_model=BackendInfo)
+async def update_backend(name: str, body: BackendPatch):
+    """Update fields of an existing backend (enable/disable, toggle discovery, edit endpoint)."""
+    config = _load_config()
+    backends = config.get("backends", {})
+    if name not in backends:
+        raise HTTPException(status_code=404, detail=f"Backend '{name}' not found")
+
+    entry = backends[name]
+    for field in ("endpoint", "api_key_env", "model", "enabled", "discover"):
+        value = getattr(body, field)
+        if value is not None:
+            entry[field] = value
+
+    _save_config(config)
+    invalidate_cache()
+    return _backend_info(name, entry)
+
+
+@router.delete("/backends/{name}", status_code=204)
+async def delete_backend(name: str):
+    """Remove a backend. Refuses if it still routes traffic (would orphan a phase)."""
+    config = _load_config()
+    backends = config.get("backends", {})
+    if name not in backends:
+        raise HTTPException(status_code=404, detail=f"Backend '{name}' not found")
+
+    refs = []
+    if config.get("primary_backend") == name:
+        refs.append("primary_backend")
+    if config.get("fallback_backend") == name:
+        refs.append("fallback_backend")
+    used_phases = [p for p, b in config.get("phase_backends", {}).items() if b == name]
+    if used_phases:
+        refs.append(f"phase_backends({', '.join(used_phases)})")
+    if refs:
+        raise HTTPException(status_code=409, detail=f"Backend '{name}' is in use by: {', '.join(refs)}")
+
+    del backends[name]
+    _save_config(config)
+    invalidate_cache()
