@@ -3,10 +3,11 @@
 Foundation package for the Cardigan hybrid deterministic-LLM pipeline. This
 package holds the YAML house-style rule loader (rules.py), the shared
 result/violation dataclasses (types.py), the prompt-block renderer
-(prompt_blocks.py), and the engine primitives (casing.py, entities.py,
-scanner.py, limits.py, phase_io.py) that later pipeline-stage tasks
-(pre/post pipeline stages, the eval harness's --style-report) build on.
-Nothing here touches the DB, async code, or FastAPI.
+(prompt_blocks.py), the engine primitives (casing.py, entities.py,
+scanner.py, limits.py, phase_io.py), and the pure pipeline-stage modules
+(pre_stage.py, post_stage.py) that the job worker (a later task) wires
+into each phase's generation call. Nothing here touches the DB, async
+code, or FastAPI.
 """
 
 from api.services.style_engine.casing import build_canonical, to_down_style
@@ -18,6 +19,8 @@ from api.services.style_engine.phase_io import (
     extract_seo_fields,
     splice_seo_fields,
 )
+from api.services.style_engine.post_stage import run_post_stage
+from api.services.style_engine.pre_stage import run_pre_stage
 from api.services.style_engine.prompt_blocks import (
     PromptBlockError,
     render_prompt_blocks,
@@ -61,4 +64,6 @@ __all__ = [
     "SeoFields",
     "extract_seo_fields",
     "splice_seo_fields",
+    "run_pre_stage",
+    "run_post_stage",
 ]
