@@ -96,3 +96,56 @@ def extract_seo_fields(seo_md: str) -> SeoFields:
         short_description=extracted.get("short_description"),
         long_description=extracted.get("long_description"),
     )
+
+
+def splice_seo_fields(seo_md: str, fields: SeoFields, replacements: dict[str, str]) -> str:
+    """Replace field VALUES in ``seo_md`` using the spans carried by ``fields``.
+
+    ``replacements`` keys are ``"title"`` | ``"short_description"`` |
+    ``"long_description"``; only fields present in *both* ``fields``
+    (non-``None``) and ``replacements`` are spliced -- an unknown key, or a
+    key whose ``fields`` span is ``None``, is silently skipped.
+
+    Splices are applied from the LAST span forward (descending ``start``
+    offset) so that spans earlier in the document stay valid for the
+    remainder of the loop -- replacing a value with one of a different
+    length shifts every offset after it, but never before it.
+
+    Before each splice, re-checks ``seo_md[start:end] == field.value`` --
+    the span-integrity guard. If the document has been tampered with (or the
+    spans are stale) since extraction, raises ``ValueError`` rather than
+    silently splicing the wrong text.
+
+    Returns the new document. Everything outside the spliced spans is
+    preserved byte-for-byte. When ``replacements`` contributes no applicable
+    splices, returns ``seo_md`` unchanged.
+    """
+    field_map = {
+        "title": fields.title,
+        "short_description": fields.short_description,
+        "long_description": fields.long_description,
+    }
+
+    to_splice: list[tuple[str, FieldSpan, str]] = []
+    for key, new_value in replacements.items():
+        span = field_map.get(key)
+        if span is None:
+            continue
+        to_splice.append((key, span, new_value))
+
+    # Descending start offset: splice the rightmost span first so already
+    # spliced regions never shift the not-yet-spliced spans that precede them.
+    to_splice.sort(key=lambda item: item[1].start, reverse=True)
+
+    result = seo_md
+    for key, span, new_value in to_splice:
+        actual = result[span.start : span.end]
+        if actual != span.value:
+            raise ValueError(
+                f"splice_seo_fields: span integrity check failed for field "
+                f"{key!r} at [{span.start}:{span.end}] -- expected {span.value!r}, "
+                f"found {actual!r}"
+            )
+        result = result[: span.start] + new_value + result[span.end :]
+
+    return result

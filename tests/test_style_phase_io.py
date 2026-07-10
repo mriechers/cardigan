@@ -11,7 +11,14 @@ heading suffixes like "### Title (Final Recommendation)").
 
 from __future__ import annotations
 
-from api.services.style_engine.phase_io import FieldSpan, SeoFields, extract_seo_fields
+import pytest
+
+from api.services.style_engine.phase_io import (
+    FieldSpan,
+    SeoFields,
+    extract_seo_fields,
+    splice_seo_fields,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -221,3 +228,137 @@ class TestSeoFieldsToDict:
         assert fields.title is None
         assert fields.short_description is None
         assert fields.long_description is None
+
+
+# ---------------------------------------------------------------------------
+# splice_seo_fields -- round trip
+# ---------------------------------------------------------------------------
+
+
+class TestSpliceRoundTrip:
+    def test_single_replacement_round_trips(self):
+        fields = extract_seo_fields(REALISTIC_SEO_MD)
+        new_title = "Wisconsin Gov. Signs Budget Into Law"
+        spliced = splice_seo_fields(REALISTIC_SEO_MD, fields, {"title": new_title})
+        reparsed = extract_seo_fields(spliced)
+        assert reparsed.title is not None
+        assert reparsed.title.value == new_title
+        # Unaffected fields are untouched.
+        assert reparsed.short_description.value == fields.short_description.value
+        assert reparsed.long_description.value == fields.long_description.value
+
+    def test_three_replacements_round_trip(self):
+        fields = extract_seo_fields(REALISTIC_SEO_MD)
+        replacements = {
+            "title": "New Wisconsin Title",
+            "short_description": "New short description text.",
+            "long_description": "New long description text, considerably longer than the others.",
+        }
+        spliced = splice_seo_fields(REALISTIC_SEO_MD, fields, replacements)
+        reparsed = extract_seo_fields(spliced)
+        assert reparsed.title.value == replacements["title"]
+        assert reparsed.short_description.value == replacements["short_description"]
+        assert reparsed.long_description.value == replacements["long_description"]
+
+    def test_replacements_with_different_lengths_do_not_corrupt_earlier_spans(self):
+        # title comes before short_description/long_description in the doc;
+        # replacing title with something much longer/shorter must not shift
+        # the later fields' correctness (splice-from-the-end guarantees this).
+        fields = extract_seo_fields(REALISTIC_SEO_MD)
+        replacements = {
+            "title": "X",
+            "long_description": "Y" * 500,
+        }
+        spliced = splice_seo_fields(REALISTIC_SEO_MD, fields, replacements)
+        reparsed = extract_seo_fields(spliced)
+        assert reparsed.title.value == "X"
+        assert reparsed.long_description.value == "Y" * 500
+        assert reparsed.short_description.value == fields.short_description.value
+
+
+# ---------------------------------------------------------------------------
+# splice_seo_fields -- identity / no-op
+# ---------------------------------------------------------------------------
+
+
+class TestSpliceIdentity:
+    def test_empty_replacements_returns_document_unchanged(self):
+        fields = extract_seo_fields(REALISTIC_SEO_MD)
+        spliced = splice_seo_fields(REALISTIC_SEO_MD, fields, {})
+        assert spliced == REALISTIC_SEO_MD
+
+    def test_unknown_replacement_key_is_ignored(self):
+        fields = extract_seo_fields(REALISTIC_SEO_MD)
+        spliced = splice_seo_fields(REALISTIC_SEO_MD, fields, {"nonexistent_field": "value"})
+        assert spliced == REALISTIC_SEO_MD
+
+    def test_replacement_for_missing_span_is_ignored(self):
+        fields = extract_seo_fields(MISSING_LONG_DESC_SEO_MD)
+        assert fields.long_description is None
+        spliced = splice_seo_fields(
+            MISSING_LONG_DESC_SEO_MD, fields, {"long_description": "should not appear"}
+        )
+        assert spliced == MISSING_LONG_DESC_SEO_MD
+
+
+# ---------------------------------------------------------------------------
+# splice_seo_fields -- span-integrity guard
+# ---------------------------------------------------------------------------
+
+
+class TestSpliceIntegrityGuard:
+    def test_tampered_document_raises_value_error(self):
+        fields = extract_seo_fields(REALISTIC_SEO_MD)
+        # Tamper with the document at the title's span so it no longer
+        # matches the value captured in `fields`.
+        tampered = (
+            REALISTIC_SEO_MD[: fields.title.start]
+            + "Something Completely Different"
+            + REALISTIC_SEO_MD[fields.title.end :]
+        )
+        with pytest.raises(ValueError):
+            splice_seo_fields(tampered, fields, {"title": "New Title"})
+
+    def test_error_message_names_the_field(self):
+        fields = extract_seo_fields(REALISTIC_SEO_MD)
+        tampered = (
+            REALISTIC_SEO_MD[: fields.title.start]
+            + "Something Completely Different"
+            + REALISTIC_SEO_MD[fields.title.end :]
+        )
+        with pytest.raises(ValueError, match="title"):
+            splice_seo_fields(tampered, fields, {"title": "New Title"})
+
+    def test_untampered_fields_still_splice_when_another_field_is_tampered(self):
+        # Tampering title's span (with a same-length replacement, so later
+        # spans' offsets are undisturbed) but only replacing
+        # short_description must not raise -- the guard only checks fields
+        # actually being spliced.
+        fields = extract_seo_fields(REALISTIC_SEO_MD)
+        same_length_tamper = "Z" * len(fields.title.value)
+        tampered = (
+            REALISTIC_SEO_MD[: fields.title.start]
+            + same_length_tamper
+            + REALISTIC_SEO_MD[fields.title.end :]
+        )
+        spliced = splice_seo_fields(tampered, fields, {"short_description": "New short desc."})
+        reparsed = extract_seo_fields(spliced)
+        assert reparsed.short_description.value == "New short desc."
+
+
+# ---------------------------------------------------------------------------
+# splice_seo_fields -- byte-for-byte preservation outside spans
+# ---------------------------------------------------------------------------
+
+
+class TestSplicePreservesSurroundingText:
+    def test_text_outside_spans_is_byte_identical(self):
+        fields = extract_seo_fields(REALISTIC_SEO_MD)
+        new_title = "Shorter Title"
+        spliced = splice_seo_fields(REALISTIC_SEO_MD, fields, {"title": new_title})
+        # Everything before the title's span is untouched.
+        assert spliced[: fields.title.start] == REALISTIC_SEO_MD[: fields.title.start]
+        # Everything after the title's span (shifted by the length delta) is untouched.
+        tail_start_spliced = fields.title.start + len(new_title)
+        tail_start_original = fields.title.end
+        assert spliced[tail_start_spliced:] == REALISTIC_SEO_MD[tail_start_original:]

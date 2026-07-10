@@ -12,7 +12,12 @@ Nothing here touches the DB, async code, or FastAPI.
 from api.services.style_engine.casing import build_canonical, to_down_style
 from api.services.style_engine.entities import extract_proper_nouns
 from api.services.style_engine.limits import check_field_limits
-from api.services.style_engine.phase_io import FieldSpan, SeoFields, extract_seo_fields
+from api.services.style_engine.phase_io import (
+    FieldSpan,
+    SeoFields,
+    extract_seo_fields,
+    splice_seo_fields,
+)
 from api.services.style_engine.prompt_blocks import (
     PromptBlockError,
     render_prompt_blocks,
@@ -55,4 +60,5 @@ __all__ = [
     "FieldSpan",
     "SeoFields",
     "extract_seo_fields",
+    "splice_seo_fields",
 ]
