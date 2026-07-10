@@ -9,6 +9,15 @@ outputs already sitting in the job's ``context`` bus, producing the exact
 same ``RuleViolation``/``PhaseCheckResult`` shapes the rest of style_engine
 uses. Detection only -- nothing here rewrites a phase's output.
 
+Two of those checks are pure consumption, not new detection: the worker's
+own completeness gate (``api/services/completeness.py``, stashed at
+``context["completeness_check"]``) and seam-coverage gate
+(``api/services/seam_coverage.py``, stashed at ``context["seam_coverage"]``)
+already carry real transcript text at production runtime, something this
+module cannot see -- ``run_lint`` just surfaces their verdicts as
+``lint.formatter.truncation_suspect`` / ``lint.formatter.seam_gap``
+violations so the merged QA verdict reflects them.
+
 Every numeric limit is read from ``StyleRules`` (via
 ``limits.check_field_limits``/``rules.limits_for``) at call time, never
 hard-coded, so this module tracks whatever ``config/house_style.yaml`` (or a
@@ -165,6 +174,8 @@ def run_lint(context: Mapping[str, Any], rules: StyleRules) -> dict[str, PhaseCh
             violations += _check_speaker_label_inconsistent(raw_output, rules, phase)
             violations += _check_content_past_duration(raw_output, context, phase)
             violations += _check_truncation_suspect(raw_output, context, phase)
+            violations += _check_completeness_gate(context, phase)
+            violations += _check_seam_coverage_gate(context, phase)
 
         results[phase] = PhaseCheckResult(phase=phase, violations=violations)
 
@@ -375,9 +386,17 @@ def _check_content_past_duration(raw_output: str, context: Mapping[str, Any], ph
 
     limit_seconds = duration_minutes * 60 + _DURATION_SLACK_SECONDS
 
+    # HTML comments (review notes, provenance headers) are stripped before
+    # scanning -- same defect class as _check_truncation_coverage (01805ef):
+    # a (MM:SS) marker mentioned in passing inside a "<!-- REVIEW NOTES:
+    # ... -->" aside describes something about the source content, not a
+    # genuine past-duration marker in the visible transcript body, and
+    # scanning raw_output unstripped treats the two identically.
+    body_text = _HTML_COMMENT_RE.sub("", raw_output)
+
     violations: list[RuleViolation] = []
     seen_markers: set[str] = set()
-    for match in _TIMECODE_RE.finditer(raw_output):
+    for match in _TIMECODE_RE.finditer(body_text):
         marker = match.group(0)
         if marker in seen_markers:
             continue
@@ -521,6 +540,98 @@ def _format_seconds_as_timecode(total_seconds: float) -> str:
     if hours:
         return f"{hours}:{minutes:02d}:{seconds:02d}"
     return f"{minutes}:{seconds:02d}"
+
+
+# ---------------------------------------------------------------------------
+# lint.formatter.truncation_suspect -- completeness-gate consumption path
+# (task 2c3). The Stage-2 agreement study's Run 2 conclusion identified the
+# dominant remaining recall gap as truncation cases needing a word-count-vs-
+# source signal that the offline study can't reproduce (no transcript-fetch
+# endpoint) but the live worker already computes: api/services/
+# completeness.py's check_completeness() runs after every formatter phase
+# and stashes CompletenessResult.to_dict() at context["completeness_check"]
+# (worker.py, ~line 1013). Rather than duplicating that word-count-ratio
+# logic here, this path just reads the gate's own verdict -- pure
+# consumption, no new detection mechanism.
+# ---------------------------------------------------------------------------
+
+
+def _check_completeness_gate(context: Mapping[str, Any], phase: str) -> list[RuleViolation]:
+    check = context.get("completeness_check")
+    if not isinstance(check, Mapping):
+        return []
+    if check.get("skipped", False):
+        return []
+    if check.get("is_complete", True) is not False:
+        return []
+
+    coverage_ratio = check.get("coverage_ratio")
+    output_words = check.get("output_word_count")
+    source_words = check.get("source_word_count")
+    # Tolerate a malformed/partial dict (e.g. hand-built in a test, or a
+    # future CompletenessResult field rename) -- graceful skip, never crash
+    # formatting a message from missing data.
+    if not isinstance(coverage_ratio, (int, float)):
+        return []
+    if not isinstance(output_words, int) or not isinstance(source_words, int):
+        return []
+
+    return [
+        RuleViolation(
+            rule_id="lint.formatter.truncation_suspect",
+            phase=phase,
+            severity="warning",
+            message=(
+                f"formatter coverage {coverage_ratio:.2f} ({output_words}/{source_words} words) "
+                "below completeness threshold"
+            ),
+            model_fixable=False,
+        )
+    ]
+
+
+# ---------------------------------------------------------------------------
+# lint.formatter.seam_gap -- seam-coverage-gate consumption path (task 2c3).
+# Same consumption pattern as the completeness gate above, over api/
+# services/seam_coverage.py's find_dropped_spans(), which the worker stashes
+# at context["seam_coverage"] (SeamCoverageResult.to_dict()) after every
+# formatter phase (worker.py, ~line 1100) -- catches localized chunk-
+# boundary drops the global word-count ratio can't see.
+# ---------------------------------------------------------------------------
+
+
+def _check_seam_coverage_gate(context: Mapping[str, Any], phase: str) -> list[RuleViolation]:
+    seam = context.get("seam_coverage")
+    if not isinstance(seam, Mapping):
+        return []
+    if not seam.get("has_gap", False):
+        return []
+
+    dropped_spans = seam.get("dropped_spans")
+    if not isinstance(dropped_spans, list) or not dropped_spans:
+        return []
+
+    first_span = dropped_spans[0]
+    if not isinstance(first_span, Mapping):
+        return []
+    start = first_span.get("start_timecode")
+    end = first_span.get("end_timecode")
+    if not start or not end:
+        return []
+
+    count = len(dropped_spans)
+    return [
+        RuleViolation(
+            rule_id="lint.formatter.seam_gap",
+            phase=phase,
+            severity="warning",
+            message=(
+                f"formatter output is missing {count} span{'s' if count != 1 else ''} of source "
+                f"dialogue at a chunk seam, first near {start}–{end}"
+            ),
+            model_fixable=False,
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------

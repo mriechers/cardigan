@@ -430,6 +430,32 @@ word-count approach above, run against a version of this study wired to
 real transcript text (a scope change beyond what this offline,
 REST-API-only harness can do today).
 
+### In-pipeline truncation coverage
+
+Follow-up item 1 above turned out to already exist in production, just not
+in a form `run_lint` consumed. `api/services/completeness.py`'s
+`check_completeness()` and `api/services/seam_coverage.py`'s
+`find_dropped_spans()` both run after every real formatter phase and stash
+their verdicts on the job's `context` bus (`completeness_check`,
+`seam_coverage`) -- unlike this offline study, the live worker has the
+actual source transcript in hand, so it can compute the exact
+word-count-vs-source and content-anchored seam-drop signals this study
+identified as the dominant gap. `run_lint` now reads those two dict results
+and surfaces them as `lint.formatter.truncation_suspect` (completeness) and
+the new `lint.formatter.seam_gap` (seam) violations when the gate already
+flagged a problem, so the merged QA verdict carries the deterministic
+pipeline's own truncation finding rather than leaving lint blind to it. No
+new detection logic was written -- this is pure consumption of an
+already-computed result. Practically, this means the 8 `llm_only_deterministic`
+truncation misses counted in Run 2's numbers above were an artifact of this
+study's offline harness (no transcript-fetch endpoint, see Limitations)
+rather than evidence that production lint itself misses truncation --
+production lint now inherits the completeness/seam gates' verdicts
+directly. This does not change the Run 1/Run 2 numbers recorded above,
+which remain the offline-harness measurement as run; a future study
+iteration wired to real transcript text (per Limitations, below) would be
+needed to re-measure recall with this consumption path included.
+
 ### Limitations of this study (updated for Run 2)
 
 - **Small, PBS-Wisconsin-specific sample** -- unchanged from Run 1 (21 jobs,

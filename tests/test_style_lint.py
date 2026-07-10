@@ -649,6 +649,30 @@ class TestContentPastDuration:
         result = run_lint(context, rules)
         assert _violations_for(result, "formatter", "lint.formatter.content_past_duration") == []
 
+    def test_marker_inside_html_comment_does_not_fire(self):
+        # Same defect class fixed for the coverage-vs-duration path (01805ef):
+        # a (MM:SS) marker mentioned in passing inside a review-note HTML
+        # comment describes something about the source content, not a
+        # genuine past-duration marker in the visible transcript body.
+        rules = _rules()
+        body = "**John Smith:**\nThe segment closes out cleanly and reaches its natural conclusion."
+        review_notes = '<!-- REVIEW NOTES:\n- Hendrickson paragraph attribution (99:59) needs checking. -->'
+        formatter = _formatter_output(body=body, review_notes=review_notes)
+        context = {"formatter_output": formatter, "duration_minutes": 10}
+        result = run_lint(context, rules)
+        assert _violations_for(result, "formatter", "lint.formatter.content_past_duration") == []
+
+    def test_same_marker_in_body_text_still_fires(self):
+        # The same (99:59) marker, this time in the visible transcript body
+        # rather than a review-note comment, must still fire.
+        rules = _rules()
+        body = "**John Smith:**\nThe segment somehow references (99:59) which would otherwise be way over."
+        context = {"formatter_output": _formatter_output(body=body), "duration_minutes": 10}
+        result = run_lint(context, rules)
+        violations = _violations_for(result, "formatter", "lint.formatter.content_past_duration")
+        assert len(violations) == 1
+        assert "(99:59)" in violations[0].message
+
 
 # ---------------------------------------------------------------------------
 # lint.formatter.truncation_suspect (warning)
@@ -811,6 +835,204 @@ class TestTruncationSuspectCoverageVsDuration:
 
 
 # ---------------------------------------------------------------------------
+# lint.formatter.truncation_suspect -- completeness-gate consumption path
+# (task 2c3). context["completeness_check"] is the worker's own
+# CompletenessResult.to_dict() (api/services/completeness.py), stashed after
+# every real formatter phase run -- lint doesn't recompute the word-count
+# ratio itself, it just surfaces the gate's already-computed verdict.
+# ---------------------------------------------------------------------------
+
+
+def _completeness_check(
+    is_complete: bool = False,
+    coverage_ratio: float = 0.62,
+    source_word_count: int = 5000,
+    output_word_count: int = 3100,
+    skipped: bool = False,
+    reason: str = "TRUNCATION DETECTED",
+) -> dict:
+    return {
+        "is_complete": is_complete,
+        "coverage_ratio": coverage_ratio,
+        "source_word_count": source_word_count,
+        "output_word_count": output_word_count,
+        "skipped": skipped,
+        "reason": reason,
+    }
+
+
+class TestCompletenessGateConsumption:
+    def test_absent_key_does_not_fire(self):
+        rules = _rules()
+        result = run_lint({"formatter_output": _formatter_output()}, rules)
+        assert _violations_for(result, "formatter", "lint.formatter.truncation_suspect") == []
+
+    def test_incomplete_and_not_skipped_fires(self):
+        rules = _rules()
+        context = {
+            "formatter_output": _formatter_output(),
+            "completeness_check": _completeness_check(is_complete=False),
+        }
+        result = run_lint(context, rules)
+        violations = _violations_for(result, "formatter", "lint.formatter.truncation_suspect")
+        assert len(violations) == 1
+        assert violations[0].severity == "warning"
+        assert violations[0].model_fixable is False
+        assert "0.62" in violations[0].message
+        assert "3100" in violations[0].message
+        assert "5000" in violations[0].message
+
+    def test_is_complete_true_does_not_fire(self):
+        rules = _rules()
+        context = {
+            "formatter_output": _formatter_output(),
+            "completeness_check": _completeness_check(is_complete=True),
+        }
+        result = run_lint(context, rules)
+        assert _violations_for(result, "formatter", "lint.formatter.truncation_suspect") == []
+
+    def test_skipped_does_not_fire_even_when_incomplete(self):
+        rules = _rules()
+        context = {
+            "formatter_output": _formatter_output(),
+            "completeness_check": _completeness_check(is_complete=False, skipped=True),
+        }
+        result = run_lint(context, rules)
+        assert _violations_for(result, "formatter", "lint.formatter.truncation_suspect") == []
+
+    def test_missing_keys_do_not_crash_and_skip_gracefully(self):
+        rules = _rules()
+        context = {
+            "formatter_output": _formatter_output(),
+            "completeness_check": {"is_complete": False},
+        }
+        result = run_lint(context, rules)
+        assert _violations_for(result, "formatter", "lint.formatter.truncation_suspect") == []
+
+    def test_non_mapping_value_does_not_crash_and_skips(self):
+        rules = _rules()
+        context = {"formatter_output": _formatter_output(), "completeness_check": "not a dict"}
+        result = run_lint(context, rules)
+        assert _violations_for(result, "formatter", "lint.formatter.truncation_suspect") == []
+
+    def test_fires_alongside_and_independently_of_punctuation_path(self):
+        # Punctuation path fires on its own (last line lacks terminal
+        # punctuation); completeness-gate path fires independently on the
+        # same phase -- both land as lint.formatter.truncation_suspect
+        # violations, not deduplicated against each other.
+        rules = _rules()
+        body = "**John Smith:**\nThe budget debate continued late into the evening and"
+        context = {
+            "formatter_output": _formatter_output(body=body),
+            "completeness_check": _completeness_check(is_complete=False),
+        }
+        result = run_lint(context, rules)
+        violations = _violations_for(result, "formatter", "lint.formatter.truncation_suspect")
+        assert len(violations) == 2
+
+
+# ---------------------------------------------------------------------------
+# lint.formatter.seam_gap -- seam-coverage-gate consumption path (task 2c3).
+# context["seam_coverage"] is the worker's own SeamCoverageResult.to_dict()
+# (api/services/seam_coverage.py), stashed after every real formatter phase
+# run -- catches localized chunk-boundary drops the global word-count ratio
+# can't see.
+# ---------------------------------------------------------------------------
+
+
+def _seam_coverage(
+    has_gap: bool = True,
+    dropped_spans: list[dict] | None = None,
+    captions_checked: int = 120,
+) -> dict:
+    if dropped_spans is None:
+        dropped_spans = [
+            {
+                "start_timecode": "00:07:10,000",
+                "end_timecode": "00:07:22,000",
+                "caption_count": 5,
+                "sample_text": "the budget conference committee reached agreement late",
+            }
+        ]
+    return {
+        "has_gap": has_gap,
+        "dropped_spans": dropped_spans,
+        "captions_checked": captions_checked,
+    }
+
+
+class TestSeamCoverageGateConsumption:
+    def test_absent_key_does_not_fire(self):
+        rules = _rules()
+        result = run_lint({"formatter_output": _formatter_output()}, rules)
+        assert _violations_for(result, "formatter", "lint.formatter.seam_gap") == []
+
+    def test_has_gap_fires(self):
+        rules = _rules()
+        context = {
+            "formatter_output": _formatter_output(),
+            "seam_coverage": _seam_coverage(has_gap=True),
+        }
+        result = run_lint(context, rules)
+        violations = _violations_for(result, "formatter", "lint.formatter.seam_gap")
+        assert len(violations) == 1
+        assert violations[0].severity == "warning"
+        assert violations[0].model_fixable is False
+        assert "1" in violations[0].message
+        assert "00:07:10,000" in violations[0].message
+
+    def test_no_gap_does_not_fire(self):
+        rules = _rules()
+        context = {
+            "formatter_output": _formatter_output(),
+            "seam_coverage": _seam_coverage(has_gap=False, dropped_spans=[]),
+        }
+        result = run_lint(context, rules)
+        assert _violations_for(result, "formatter", "lint.formatter.seam_gap") == []
+
+    def test_multiple_spans_count_named_in_message(self):
+        spans = [
+            {
+                "start_timecode": "00:03:00,000",
+                "end_timecode": "00:03:20,000",
+                "caption_count": 4,
+                "sample_text": "first dropped span",
+            },
+            {
+                "start_timecode": "00:12:00,000",
+                "end_timecode": "00:12:40,000",
+                "caption_count": 6,
+                "sample_text": "second dropped span",
+            },
+        ]
+        rules_ = _rules()
+        context = {
+            "formatter_output": _formatter_output(),
+            "seam_coverage": _seam_coverage(has_gap=True, dropped_spans=spans),
+        }
+        result = run_lint(context, rules_)
+        violations = _violations_for(result, "formatter", "lint.formatter.seam_gap")
+        assert len(violations) == 1
+        assert "2" in violations[0].message
+        assert "00:03:00,000" in violations[0].message
+
+    def test_missing_dropped_spans_does_not_crash_and_skips(self):
+        rules = _rules()
+        context = {
+            "formatter_output": _formatter_output(),
+            "seam_coverage": {"has_gap": True},
+        }
+        result = run_lint(context, rules)
+        assert _violations_for(result, "formatter", "lint.formatter.seam_gap") == []
+
+    def test_non_mapping_value_does_not_crash_and_skips(self):
+        rules = _rules()
+        context = {"formatter_output": _formatter_output(), "seam_coverage": "not a dict"}
+        result = run_lint(context, rules)
+        assert _violations_for(result, "formatter", "lint.formatter.seam_gap") == []
+
+
+# ---------------------------------------------------------------------------
 # model_fixable contract -- explicit per rule_id, since escalation routing
 # depends on these being correct.
 # ---------------------------------------------------------------------------
@@ -881,6 +1103,30 @@ class TestModelFixableContract:
         body = "**John Smith:**\nThe budget debate continued late into the evening and"
         result = run_lint({"formatter_output": _formatter_output(body=body)}, rules)
         violations = _violations_for(result, "formatter", "lint.formatter.truncation_suspect")
+        assert violations
+        for v in violations:
+            assert v.model_fixable is False
+
+    def test_completeness_gate_truncation_suspect_is_not_model_fixable(self):
+        rules = _rules()
+        context = {
+            "formatter_output": _formatter_output(),
+            "completeness_check": _completeness_check(is_complete=False),
+        }
+        result = run_lint(context, rules)
+        violations = _violations_for(result, "formatter", "lint.formatter.truncation_suspect")
+        assert violations
+        for v in violations:
+            assert v.model_fixable is False
+
+    def test_seam_gap_is_not_model_fixable(self):
+        rules = _rules()
+        context = {
+            "formatter_output": _formatter_output(),
+            "seam_coverage": _seam_coverage(has_gap=True),
+        }
+        result = run_lint(context, rules)
+        violations = _violations_for(result, "formatter", "lint.formatter.seam_gap")
         assert violations
         for v in violations:
             assert v.model_fixable is False
