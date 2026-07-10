@@ -248,6 +248,55 @@ programs:
     title_includes: [location, plant_species]
     seasonal_context: when_relevant
 
-# Populated by a later task — the prompt-block renderer that turns
-# these rules into per-phase prompt sections.
-prompt_blocks: {}
+# ------------------------------------------------------------------
+# Prompt blocks — rendered by api.services.style_engine.prompt_blocks
+# into `{{style:KEY}}` tokens in prompts/*.md. This is the mechanism
+# that lets agent prompts consume rule text FROM this file instead of
+# duplicating it inline (and drifting). Each key has a "full" profile
+# (verbose, for unconstrained runs) and a "slim" profile (condensed,
+# for runs where the deterministic post-stage enforces casing/limits
+# and the prompt only needs to say so). Numbers quoted in the text
+# below are human-authored copies of limits.fields — see the drift
+# check in tests/test_house_style_config.py that keeps them honest.
+# ------------------------------------------------------------------
+prompt_blocks:
+  "seo.copy_rules":
+    full: |
+      ## Copy style (REQUIRED)
+
+      These rules govern every title, description, and social line you write. They are instructions, not text to reproduce in the report.
+
+      - **Down style for titles/headlines:** capitalize ONLY the first word and proper nouns (people, places, organizations). NOT title case.
+        - Correct: `Wisconsin Democratic primary turns negative`
+        - Wrong: `Wisconsin Democratic Primary Turns Negative`
+      - **State what it is — no teasers, clickbait, hype, or sales language.** Never use viewer directives (watch, discover, see how, don't miss), promises (will reveal), calls to action, ALL-CAPS, or unevidenced superlatives (amazing, incredible).
+      - **Third person, no "we"/"our".** Describe what the episode covers; don't sell it.
+      - **Name specifics:** prefer real names/places/topics over dramatic adjectives. Spell out place names ("Wisconsin", not "WI"; "gubernatorial", not "Gub") unless the character limit genuinely forces a well-known abbreviation.
+      - **Lead with the primary keyword**, ideally within the first 50 characters of the title.
+      - **Avoid generic titles** ("A Look at Nature") and **keyword stuffing** ("Wisconsin Parks Wisconsin Hiking Wisconsin Nature Wisconsin").
+      - **No fabricated data:** you have no live keyword metrics — never invent search volume, difficulty, or CPC numbers (see the keyword tables and SEMRush section below).
+
+      Quality checklist — verify before saving your report:
+
+      - [ ] Title ≤80 characters, down style, with the primary keyword early
+      - [ ] Short description ≤90 characters
+      - [ ] Long description ≤350 characters
+      - [ ] Primary keywords appear in title and both descriptions, integrated naturally (not stuffed)
+      - [ ] No viewer directives, calls to action, ALL-CAPS, or unevidenced superlatives
+      - [ ] Tags are prioritized and platform-appropriate; recommendations are actionable
+      - [ ] Keyword tables use Source (direct/implied) — no invented volume/difficulty numbers
+      - [ ] Accessibility considerations noted (alt text, captions)
+    slim: |
+      Casing and character counts are enforced after generation. Hard limits: title 80, short description 90, long description 350 characters, 15-20 keywords. Write naturally within them; use down style (first word + proper nouns); third person, no calls to action.
+  "shared.char_budgets":
+    full: |
+      **PBS Wisconsin platform limits** (enforced by the SST write path — write to these, not past them):
+
+      - Title: ≤80 characters
+      - Short description: ≤90 characters
+      - Long description: ≤350 characters
+      - Keywords: 15-20 total
+
+      These are hard limits, not targets. Metadata over these limits is rejected downstream, so do not treat them as approximate.
+    slim: |
+      Hard limits (enforced after generation): title 80, short description 90, long description 350 characters, 15-20 keywords.

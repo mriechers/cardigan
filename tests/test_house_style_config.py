@@ -15,6 +15,7 @@ every other consumer of `load_rules()` in the same process/test session.
 """
 
 import ast
+import re
 from pathlib import Path
 
 import pytest
@@ -150,6 +151,60 @@ class TestCharLimitDrift:
                 f"(and possibly no limits.fields entry in house_style.yaml either)"
             )
             assert limits[yaml_key]["max"] == char_limit
+
+
+# Field label -> regex matching that label followed (same line, within a
+# short window) by the char-limit number the block is quoting -- e.g. "Title
+# ≤80 characters" or "title 80,". Deliberately pragmatic (per task 1c's
+# brief): confined to the same line (`[^\d\n]` excludes newlines, so a label
+# and number separated by a line break simply produce no match rather than a
+# false one) and to title/short/long, the three fields with a single numeric
+# max. `keywords` is a min/max pair and is out of scope.
+_PROMPT_BLOCK_FIELD_LIMIT_RE = {
+    "title": re.compile(r"\btitle\b[^\d\n]{0,15}?(\d{2,4})", re.IGNORECASE),
+    "short_description": re.compile(r"\bshort description\b[^\d\n]{0,15}?(\d{2,4})", re.IGNORECASE),
+    "long_description": re.compile(r"\blong description\b[^\d\n]{0,15}?(\d{2,4})", re.IGNORECASE),
+}
+
+
+class TestPromptBlockNumbersMatchCharLimits:
+    """The prompt_blocks section's human-authored rule prose quotes hard
+    character limits inline (e.g. "Title ≤80 characters") for the LLM
+    reading the rendered prompt. Those numbers are NOT read programmatically
+    -- limits.fields is the machine source of truth for the deterministic
+    engine -- so nothing stops an editor updating one and forgetting the
+    other. This closes that gap for title/short/long, the corrected-by-task-1c
+    values (80/90/350).
+    """
+
+    @pytest.mark.parametrize("field", ["title", "short_description", "long_description"])
+    def test_prompt_block_numbers_match_limits_fields(self, field):
+        rules = load_rules(CONFIG_PATH)
+        expected_max = rules.limits_for()[field]["max"]
+
+        prompt_blocks = rules.raw.get("prompt_blocks", {}) or {}
+        pattern = _PROMPT_BLOCK_FIELD_LIMIT_RE[field]
+
+        found = []  # (block_key, profile_name, number)
+        for block_key, profiles in prompt_blocks.items():
+            if not isinstance(profiles, dict):
+                continue
+            for profile_name, text in profiles.items():
+                if not isinstance(text, str):
+                    continue
+                for match in pattern.finditer(text):
+                    found.append((block_key, profile_name, int(match.group(1))))
+
+        assert found, (
+            f"No prompt_blocks text mentions a {field} character limit -- expected at "
+            f"least one (e.g. in seo.copy_rules or shared.char_budgets)"
+        )
+        for block_key, profile_name, number in found:
+            assert number == expected_max, (
+                f"Drift: prompt_blocks.{block_key!r}.{profile_name!r} quotes the {field} "
+                f"limit as {number} but limits.fields.{field}.max={expected_max} -- "
+                f"fix the prompt_blocks prose to match"
+            )
 
 
 class TestSmokeLevelCompleteness:

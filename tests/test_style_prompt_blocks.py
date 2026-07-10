@@ -25,7 +25,11 @@ from api.services.style_engine.prompt_blocks import (
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
-REAL_PROMPT_PHASES = ["analyst", "formatter", "seo", "validator", "timestamp", "copy_editor"]
+# seo.md is excluded here -- task 1c gave it {{style:...}} tokens. It gets its
+# own no-op-broken assertions + real-render tests below instead.
+TOKEN_FREE_PROMPT_PHASES = ["analyst", "formatter", "validator", "timestamp", "copy_editor"]
+
+SEO_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "seo.md"
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -224,22 +228,81 @@ def test_trailing_newline_stripped_once_no_doubled_blank_lines(tmp_path: Path) -
 
 
 # ---------------------------------------------------------------------------
-# 7. No-op guarantee on real prompts
+# 7. No-op guarantee on real prompts (token-free phases only)
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("phase", REAL_PROMPT_PHASES)
+@pytest.mark.parametrize("phase", TOKEN_FREE_PROMPT_PHASES)
 def test_no_op_guarantee_on_real_prompt_files(phase: str) -> None:
     prompt_path = PROMPTS_DIR / f"{phase}.md"
     content = prompt_path.read_text()
 
-    # Guards that this task did not add tokens to any prompt file.
+    # Guards that no other prompt file has gained tokens.
     assert "{{style:" not in content
 
     # And proves the renderer is a true identity function on that content
     # (uses the DEFAULT_RULES_PATH default -- irrelevant here since the
     # short-circuit means the rules file is never touched).
     assert render_prompt_blocks(content) == content
+
+
+# ---------------------------------------------------------------------------
+# 7b. seo.md: task 1c gave it tokens -- prove they're present and render
+# cleanly against the REAL config/house_style.yaml for both profiles.
+# ---------------------------------------------------------------------------
+
+
+def test_seo_prompt_contains_expected_style_tokens() -> None:
+    content = SEO_PROMPT_PATH.read_text()
+    assert "{{style:seo.copy_rules}}" in content
+    assert "{{style:shared.char_budgets}}" in content
+
+
+@pytest.mark.parametrize("profile", ["full", "slim"])
+def test_seo_prompt_renders_against_real_config_for_both_profiles(profile: str) -> None:
+    content = SEO_PROMPT_PATH.read_text()
+
+    # Must not raise PromptBlockError for either profile against the REAL
+    # config/house_style.yaml -- proves both seo.copy_rules and
+    # shared.char_budgets have both a "full" and a "slim" entry.
+    rendered = render_prompt_blocks(content, profile=profile)
+
+    assert "{{style:" not in rendered
+
+
+def test_seo_prompt_full_profile_renders_expected_copy_rules_block() -> None:
+    """Golden assertions on the token-replaced regions only (not the whole
+    prompt) -- keeps this test from being a brittle whole-file snapshot.
+    """
+    content = SEO_PROMPT_PATH.read_text()
+    rendered = render_prompt_blocks(content, profile="full")
+
+    assert "## Copy style (REQUIRED)" in rendered
+    assert "Down style for titles/headlines" in rendered
+    assert "Title ≤80 characters, down style, with the primary keyword early" in rendered
+    assert "**PBS Wisconsin platform limits**" in rendered
+    assert "Title: ≤80 characters" in rendered
+    assert "Short description: ≤90 characters" in rendered
+    assert "Long description: ≤350 characters" in rendered
+    assert "{{style:" not in rendered
+
+
+def test_seo_prompt_slim_profile_renders_condensed_blocks() -> None:
+    content = SEO_PROMPT_PATH.read_text()
+    rendered = render_prompt_blocks(content, profile="slim")
+
+    assert (
+        "Casing and character counts are enforced after generation. Hard limits: "
+        "title 80, short description 90, long description 350 characters, "
+        "15-20 keywords."
+    ) in rendered
+    assert (
+        "Hard limits (enforced after generation): title 80, short description 90, "
+        "long description 350 characters, 15-20 keywords."
+    ) in rendered
+    # Proves slim actually swapped in -- the full-profile-only heading must be absent.
+    assert "## Copy style (REQUIRED)" not in rendered
+    assert "{{style:" not in rendered
 
 
 # ---------------------------------------------------------------------------

@@ -29,8 +29,10 @@ When available, you'll receive **SST context** from the PBS Wisconsin Airtable d
 
 **Example SST Enhancement:**
 > **Original SST Title:** "Wisconsin Farm History"
-> **Optimized Title:** "100 Years of Wisconsin Dairy Farms | Rural History Documentary"
+> **Optimized Title:** "100 years of Wisconsin dairy farms | rural history documentary"
 > **Reasoning:** Added specific timeframe, location keyword "Wisconsin", and content type identifier for better search visibility.
+
+{{style:seo.copy_rules}}
 
 ## Output
 
@@ -62,14 +64,12 @@ Your output should look EXACTLY like this (plain markdown, no JSON):
 ### Title (Final Recommendation)
 
 **Recommended:**
-[55-60 character title with primary keyword in first 50 chars]
-
-**Character Count:** [X/60]
+[title ≤80 characters, down style, primary keyword in first 50 chars — see Copy style]
 
 **Keywords Included:** [list primary keywords present]
 
 **Reasoning:**
-[Explain keyword placement, character count optimization, tone, clickability]
+[Explain keyword placement and character count — brief]
 
 **Alternatives:**
 1. [Alternative title option 1]
@@ -77,49 +77,53 @@ Your output should look EXACTLY like this (plain markdown, no JSON):
 
 ---
 
-### Short Description (150 chars max)
+### Short Description (90 chars max)
 
 **Recommended:**
-[145-150 character description with hook and primary keywords]
-
-**Character Count:** [X/150]
+[factual description ≤90 characters with primary keywords. Third person, no "we"/"our"
+and no calls to action — describe what the episode covers, don't sell it.]
 
 **Keywords Included:** [list keywords]
 
 **Reasoning:**
-[Explain hook effectiveness, keyword integration, call-to-action]
+[Explain how it states the facts concisely with keywords integrated — not hooks or CTAs]
 
 ---
 
-### Long Description (300 chars max)
+### Long Description (350 chars max)
 
 **Recommended:**
-[290-300 character description with expanded context, secondary keywords, call-to-action]
-
-**Character Count:** [X/300]
+[factual description ≤350 characters with expanded context and secondary keywords. Third
+person, no "we"/"our", no calls to action. Name the key people/topics specifically.]
 
 **Keywords Included:** [list keywords]
 
 **Reasoning:**
-[Explain keyword density, readability, value proposition]
+[Explain keyword density and readability — how it states the facts, not "value proposition"]
 
 ---
 
 ## Keyword Strategy
 
+> **Do NOT invent search-volume or difficulty numbers.** You have no live keyword data.
+> Only populate volume/difficulty in the SEMRush Integration section below, and only when
+> the user actually provides SEMRush data. In the tables below use the **Source** column:
+> `direct` = the exact term/name/phrase is spoken in the transcript; `implied` = a
+> conceptual/search-intent term not spoken verbatim.
+
 ### Primary Keywords (High Priority)
 
-| Keyword | Search Volume | Difficulty | Relevance | Notes |
-|---------|---------------|------------|-----------|-------|
-| [keyword] | [High/Med/Low] | [High/Med/Low] | [1-10] | [Why important] |
+| Keyword | Source | Relevance | Notes |
+|---------|--------|-----------|-------|
+| [keyword] | [direct/implied] | [1-10] | [Why important] |
 
 [List 3-5 primary keywords that MUST appear in title/description]
 
 ### Secondary Keywords (Medium Priority)
 
-| Keyword | Search Volume | Difficulty | Relevance | Notes |
-|---------|---------------|------------|-----------|-------|
-| [keyword] | [High/Med/Low] | [High/Med/Low] | [1-10] | [Usage notes] |
+| Keyword | Source | Relevance | Notes |
+|---------|--------|-----------|-------|
+| [keyword] | [direct/implied] | [1-10] | [Usage notes] |
 
 [List 5-10 secondary keywords to incorporate where natural]
 
@@ -245,35 +249,21 @@ Your output should look EXACTLY like this (plain markdown, no JSON):
 
 ### Title Optimization
 
-**Best Practices:**
-- Primary keyword in first 50 characters
-- Total length: 55-60 characters (hard max 60 — the manager phase enforces 60)
-- Active, descriptive language
-- Avoid clickbait or sensationalism
+**Best Practices** (character limit, casing, and tone rules are in Copy style above):
 - Include location if relevant (Wisconsin, specific cities)
 - Brand name (PBS Wisconsin) only if space allows
 
-**Common Mistakes to Avoid:**
-- Generic titles ("A Look at Nature")
-- Keyword stuffing ("Wisconsin Parks Wisconsin Hiking Wisconsin Nature Wisconsin")
-- All caps or excessive punctuation
-- Misleading or vague language
-
 ### Description Optimization
 
-**Short Description (150 chars):**
-- Hook in first 50 characters
+**Short description** (tone rules are in Copy style above):
 - Primary keyword included
-- Clear value proposition
 - Active voice
-- Call to action if space allows
 
-**Long Description (300 chars):**
+**Long description:**
 - Expand on short description
 - Incorporate 2-3 secondary keywords naturally
 - Provide context and detail
 - Include location-specific terms
-- End with subtle call to action
 
 ### Keyword Research Strategy
 
@@ -313,10 +303,11 @@ If user provides SEMRush data:
 ### YouTube
 
 - Character limits: 100 title, 5000 description
-- PBS Wisconsin limit: 60 title, 150 short desc, 300 long desc (for consistency)
 - Thumbnail and title work together for CTR
 - First 2-3 tags are most important
 - Description first 150 chars appear in search
+
+{{style:shared.char_budgets}}
 
 ### PBS App
 
@@ -331,20 +322,6 @@ If user provides SEMRush data:
 - Instagram: More hashtags acceptable (up to 10)
 - Twitter: 2-3 hashtags optimal, brevity critical
 - LinkedIn: Professional tone, industry-specific tags
-
-## Quality Checklist
-
-Before saving your SEO report, verify:
-
-- [ ] Title is 60 characters or fewer with primary keyword early
-- [ ] Short description is under 150 characters
-- [ ] Long description is under 300 characters
-- [ ] Primary keywords appear in title and both descriptions
-- [ ] Keywords are integrated naturally (not stuffed)
-- [ ] Tags are prioritized and platform-appropriate
-- [ ] Platform-specific recommendations are actionable
-- [ ] If SEMRush data available: keyword strategy is data-driven
-- [ ] Accessibility considerations noted (alt text, captions)
 
 ### Integration with Other Agents
 
