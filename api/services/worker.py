@@ -2228,6 +2228,13 @@ Extract any name or spelling corrections that should be added to the glossary. S
                 extra={"job_id": job_id, "phase": phase_name},
                 exc_info=True,
             )
+            # Clean up partial style_checks entry on fail-open. If log_event
+            # raised mid-loop, the already-written context["style_checks"][phase]
+            # entry is incomplete; remove it so the QA-gate merge doesn't consume
+            # a partial event trail as if the phase checked completely.
+            checks = context.get("style_checks")
+            if isinstance(checks, dict):
+                checks.pop(phase_name, None)
             return content, None
 
     @staticmethod

@@ -563,11 +563,16 @@ class TestFailOpen:
     @patch("api.services.worker.get_llm_client")
     @patch("api.services.worker.log_event")
     @patch("api.services.worker.AGENTS_DIR")
+    @patch("api.services.style_engine.run_post_stage")
     async def test_post_fails_open_when_log_event_raises(
-        self, mock_agents_dir, mock_log_event, mock_get_llm, mock_llm_client, mock_llm_response, tmp_path
+        self, mock_run_post_stage, mock_agents_dir, mock_log_event, mock_get_llm, mock_llm_client, mock_llm_response, tmp_path
     ):
         """A style_violation log_event() failure must not fail the phase or
-        leak a partially-applied normalization -- the raw content flows."""
+        leak a partially-applied normalization -- the raw content flows.
+
+        Extended test: when log_event raises on a LATER violation (not the first),
+        the style_checks[phase] entry must be cleaned up so the QA gate doesn't
+        treat an incomplete event trail as a completed check."""
         rules_path = _write_rules(tmp_path)
         mock_llm_client.config = {
             "routing": {
@@ -577,13 +582,54 @@ class TestFailOpen:
             }
         }
         mock_get_llm.return_value = mock_llm_client
-        raw_output = _seo_report("Discover Wisconsin's Budget Story")
+        raw_output = _seo_report(
+            title="Discover Wisconsin Governor Signs New Budget Bill In Madison",
+            short_description="Wisconsin Governor DISCOVERS the budget impact.",
+            long_description="A longer description about what the Governor Discovered regarding the budget situation."
+        )
         mock_llm_response.content = raw_output
         mock_llm_client.chat = AsyncMock(return_value=mock_llm_response)
 
+        # Mock post object with MULTIPLE violations to trigger loop iterations
+        from api.services.style_engine.types import RuleViolation
+        mock_post = MagicMock()
+        mock_post.normalized_output = raw_output
+        mock_post.changed = False
+
+        # Create 2 violations to ensure loop iterates more than once
+        violations = [
+            RuleViolation(
+                rule_id="voice.forbidden.viewer_directive",
+                phase="seo",
+                severity="error",
+                message='Forbidden phrase "Discover"',
+                field="title",
+                span=[0, 8],
+                model_fixable=True,
+            ),
+            RuleViolation(
+                rule_id="casing.mismatch",
+                phase="seo",
+                severity="warning",
+                message="Unexpected casing in field",
+                field="short_description",
+                span=[10, 20],
+                model_fixable=True,
+            ),
+        ]
+        mock_check = MagicMock()
+        mock_check.violations = violations
+        mock_check.to_dict.return_value = {"violations": [v.to_dict() for v in violations]}
+        mock_post.check = mock_check
+        mock_run_post_stage.return_value = mock_post
+
+        call_count = [0]
         async def _flaky_log_event(event):
+            """Log first violation successfully, raise on the second."""
             if event.event_type == EventType.style_violation:
-                raise RuntimeError("boom")
+                call_count[0] += 1
+                if call_count[0] > 1:
+                    raise RuntimeError("boom on second violation")
             return None
 
         mock_log_event.side_effect = _flaky_log_event
@@ -599,3 +645,10 @@ class TestFailOpen:
         assert result["success"] is True
         assert result["output"] == raw_output
         assert not (tmp_path / "seo_output.raw.md").exists()
+
+        # NEW ASSERTION: style_checks[seo] must NOT exist on fail-open path
+        # (even though violations were found, the exception mid-loop leaves it partial)
+        assert "seo" not in context.get("style_checks", {}), (
+            "style_checks[seo] should be cleaned up on fail-open, "
+            "but survived with partial state"
+        )
