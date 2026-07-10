@@ -12,7 +12,7 @@ over-lowercased title both normalize to the same byte-identical string.
 from __future__ import annotations
 
 import re
-from typing import Iterable
+from collections.abc import Iterable
 
 from api.services.style_engine.rules import StyleRules
 
@@ -50,18 +50,21 @@ def to_down_style(text: str, canonical: dict[str, str]) -> str:
     alphabetic character of the result is uppercased.
 
     Idempotent for text produced by this function, given the same
-    canonical map: a second pass is a no-op as long as no canonical value
-    introduces trailing punctuation that could re-trigger a shorter
-    canonical key on the next pass (e.g. chaining an abbreviation-style
-    casing_variant like "gov" -> "Gov." back through the function a second
-    time is not guaranteed idempotent -- callers should apply this once
-    per generation, which is how the pipeline uses it).
+    canonical map: a second pass is a no-op. This holds even for
+    period-terminated casing_variants (e.g. "gov" -> "Gov.") -- restoration
+    consumes one optional pre-existing trailing period alongside the
+    matched key, so re-applying the function never doubles the period.
     """
     result = text.lower()
     for lowered, cased in sorted(canonical.items(), key=lambda kv: -len(kv[0])):
         if not lowered:
             continue
-        result = re.sub(rf"\b{re.escape(lowered)}\b", cased, result)
+        # Period-terminated canonical values (e.g. "gov" -> "Gov.") must not
+        # double their period when the source text already carries one --
+        # consume one optional pre-existing trailing period so the
+        # substitution always yields exactly one, regardless of source.
+        trailing_period = r"\.?" if cased.endswith(".") else ""
+        result = re.sub(rf"\b{re.escape(lowered)}\b{trailing_period}", cased, result)
 
     match = _FIRST_ALPHA_RE.search(result)
     if match and result[match.start()].islower():

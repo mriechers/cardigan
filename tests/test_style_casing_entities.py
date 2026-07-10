@@ -184,6 +184,45 @@ class TestCasingVariants:
 
 
 # ---------------------------------------------------------------------------
+# to_down_style -- period-bearing casing_variants must not double their
+# period on restoration (regression: "gov" -> "Gov." colliding with a
+# pre-existing "." in the source text produced "Gov..").
+# ---------------------------------------------------------------------------
+
+
+class TestCasingVariantPeriodNotDoubled:
+    def test_convergence_with_variants_no_period_doubling(self):
+        # Whether the source already carries the "Gov." period or not, the
+        # restored fragment must be byte-identical -- exactly one period.
+        canonical = build_canonical(_rules(), extra_nouns=["Tony Evers"])
+
+        from_bare = to_down_style("gov tony evers signs bill", canonical)
+        from_punctuated = to_down_style("Wisconsin Gov. Tony Evers signs bill", canonical)
+
+        assert from_punctuated == "Wisconsin Gov. Tony Evers signs bill"
+
+        fragment_bare = from_bare[from_bare.index("Gov.") :][: len("Gov. Tony Evers")]
+        fragment_punctuated = from_punctuated[from_punctuated.index("Gov.") :][
+            : len("Gov. Tony Evers")
+        ]
+        assert fragment_bare == fragment_punctuated == "Gov. Tony Evers"
+
+    def test_idempotent_with_period_bearing_variant(self):
+        canonical = build_canonical(_rules(), extra_nouns=["Tony Evers"])
+        text = "gov tony evers spoke today"
+        once = to_down_style(text, canonical)
+        twice = to_down_style(once, canonical)
+        assert once == twice
+        assert once == "Gov. Tony Evers spoke today"
+
+    def test_sentence_boundary_single_period_after_restoration(self):
+        canonical = {"gov": "Gov."}
+        result = to_down_style("meeting with the gov. next steps followed", canonical)
+        assert result == "Meeting with the Gov. next steps followed"
+        assert result.count(".") == 1
+
+
+# ---------------------------------------------------------------------------
 # CONVERGENCE TEST -- the load-bearing one for this task.
 # ---------------------------------------------------------------------------
 
