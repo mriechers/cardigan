@@ -1,0 +1,253 @@
+########################################################################
+# PBS Wisconsin house-style rule data — machine source of truth.
+#
+# Loaded by api.services.style_engine.rules.load_rules(). This file is
+# transcribed from (and must stay reconciled with) the human-canonical
+# guide plus the machine sources it was itself reconciled against:
+#
+#   - pbswi workspace skill: reference/house-style/SKILL.md   (human doc)
+#   - cardigan-v4/prompts/{seo,formatter,timestamp,validator,analyst}.md
+#   - cardigan-v4/claude-desktop-project/EDITOR_AGENT_INSTRUCTIONS.md
+#   - cardigan-v4/mcp_server/server.py (WRITABLE_FIELDS char limits)
+#   - cardigan-v4/scripts/poc_house_style_normalizer.py (RULES dict seed)
+#
+# When the human-facing SKILL.md changes, update this file too and bump
+# meta.style_guide_synced.
+########################################################################
+
+meta:
+  version: 1
+  human_doc: "pbswi workspace skill: reference/house-style/SKILL.md"
+  style_guide_synced: "2026-07-10"
+
+# ------------------------------------------------------------------
+# Voice — prohibited language + person-voice markers.
+# Tier: flag (never auto-fix — these need editorial judgment).
+# Severity: error, except "learn" and "free" (false-positive prone
+# substring/word matches) which are warning.
+# ------------------------------------------------------------------
+voice:
+  forbidden_phrases:
+    # --- viewer directives (never tell the viewer what to do) ---
+    - {id: watch_as, match: "watch as", category: viewer_directive, tier: flag, severity: error}
+    - {id: watch_how, match: "watch how", category: viewer_directive, tier: flag, severity: error}
+    - {id: see_how, match: "see how", category: viewer_directive, tier: flag, severity: error}
+    - {id: follow, match: "follow", category: viewer_directive, tier: flag, severity: error}
+    - {id: discover, match: "discover", category: viewer_directive, tier: flag, severity: error}
+    - {id: learn, match: "learn", category: viewer_directive, tier: flag, severity: warning}
+    - {id: explore, match: "explore", category: viewer_directive, tier: flag, severity: error}
+    - {id: find_out, match: "find out", category: viewer_directive, tier: flag, severity: error}
+    - {id: experience, match: "experience", category: viewer_directive, tier: flag, severity: error}
+    # --- promises (don't promise what the content will do for the viewer) ---
+    - {id: will_show, match: "will show", category: promise, tier: flag, severity: error}
+    - {id: will_teach, match: "will teach", category: promise, tier: flag, severity: error}
+    - {id: will_reveal, match: "will reveal", category: promise, tier: flag, severity: error}
+    # --- sales language ---
+    - {id: free, match: "\\bfree\\b", category: sales, tier: flag, severity: warning, regex: true}
+    # --- emotional predictions (don't tell viewers how they'll feel/what to expect) ---
+    - {id: what_viewers_can_expect, match: "what viewers can expect", category: emotional_prediction, tier: flag, severity: error}
+    # --- unevidenced superlatives ---
+    - {id: amazing, match: "amazing", category: superlative, tier: flag, severity: error}
+    - {id: incredible, match: "incredible", category: superlative, tier: flag, severity: error}
+    - {id: extraordinary, match: "extraordinary", category: superlative, tier: flag, severity: error}
+    # --- calls to action ---
+    - {id: join_us, match: "join us", category: cta, tier: flag, severity: error}
+    - {id: dont_miss, match: "don't miss", category: cta, tier: flag, severity: error}
+    - {id: tune_in, match: "tune in", category: cta, tier: flag, severity: error}
+    # --- first-person promotional voice ("we sell", not "we describe") ---
+    - {id: we_break_down, match: "we break down", category: first_person_promo, tier: flag, severity: error}
+    - {id: we_analyze, match: "we analyze", category: first_person_promo, tier: flag, severity: error}
+  # Broader first/second-person constructions (beyond the fixed forbidden
+  # phrases above) — house style is third-person, descriptive, never
+  # addresses or instructs the viewer directly.
+  first_person_markers:
+    - "\\bwe\\b"
+    - "\\bwe'll\\b"
+    - "\\bwe've\\b"
+    - "\\bour\\b"
+    - "\\bus\\b"
+    - "\\bI\\b"
+    - "\\bmy\\b"
+  second_person_markers:
+    - "\\byou\\b"
+    - "\\byou'll\\b"
+    - "\\byou're\\b"
+    - "\\byou've\\b"
+    - "\\byour\\b"
+
+# ------------------------------------------------------------------
+# Casing — down style, with a canonical-casing seed for proper nouns,
+# acronyms, and abbreviation variants. Seeded from
+# scripts/poc_house_style_normalizer.py RULES (every PoC entry kept),
+# extended with Wisconsin institutional/program terms from the house
+# style skill.
+# ------------------------------------------------------------------
+casing:
+  style: down
+  proper_nouns:
+    - Wisconsin
+    - Madison
+    - Eau Claire
+    - Democratic
+    - Republican
+    - Supreme Court
+    - Congress
+    - Senate
+    - Legislature
+    - Capitol
+    - Governor
+    - Lt. Governor
+    - Attorney General
+    - Here & Now
+    - Inside Wisconsin Politics
+    - Wisconsin Life
+    - University Place
+    - The Look Back
+    - Digital Shorts
+    - Garden Wanderings
+    - Marquette Poll
+    - PBS Wisconsin
+  acronyms:
+    - SCOTUS
+    - PBS
+    - WI
+    - US
+    - U.S.
+    - DSA
+    - ACLU
+    - CPC
+    - GOP
+  casing_variants:
+    dem: "Dem"
+    dems: "Dems"
+    gov: "Gov."
+    sen: "Sen."
+    rep: "Rep."
+    pres: "Pres."
+    "atty gen": "Atty. Gen."
+  surname_stoplist:
+    - van
+    - der
+    - de
+    - la
+    - the
+
+# ------------------------------------------------------------------
+# Field character/count limits. SINGLE numbers, sourced from
+# mcp_server/server.py:100-109 WRITABLE_FIELDS (ground truth) — NOT
+# the seo.md prompt's 150/300 or the validator.md prompt's 160, which
+# are stale and superseded by this file. See drift test.
+# ------------------------------------------------------------------
+limits:
+  fields:
+    title: {max: 80}
+    short_description: {max: 90}
+    long_description: {max: 350}
+    keywords: {count: {min: 15, max: 20}}
+    social_description: {}
+    social_tags: {}
+    facebook_description: {}
+    hashtags: {}
+  content_type_overrides:
+    short:
+      keywords: {count: {min: 5, max: 10}}
+
+# ------------------------------------------------------------------
+# Per-phase deterministic rules.
+# ------------------------------------------------------------------
+phases:
+  formatter:
+    # Enforce-tier: deterministic find/replace, word-boundary regexes,
+    # from prompts/formatter.md's "PBS Wisconsin House Style" section
+    # (and mirrored in the house-style skill §2). Sentence-initial
+    # guarding for liberals/conservatives (and their singular adjective
+    # forms) is left to the phase engine — see `note` on those entries
+    # — rather than encoded as a lookbehind, since "sentence-initial"
+    # spans more than just string-start (mid-document sentence starts
+    # too).
+    substitutions:
+      - {find: "\\b[Oo]kay\\b", replace: "OK", tier: enforce}
+      - {find: "\\b[Pp]artizan\\b", replace: "partisan", tier: enforce, note: "misspelling fix; always lowercase per AP spelling of partisan/bipartisan/nonpartisan"}
+      - {find: "\\b[Mm]arquette [Pp]oll\\b", replace: "Marquette Poll", tier: enforce}
+      - {find: "\\bSenator\\b", replace: "Sen.", tier: enforce}
+      - {find: "\\bRepresentative\\b", replace: "Rep.", tier: enforce}
+      - {find: "\\bGovernor\\b", replace: "Gov.", tier: enforce}
+      - {find: "\\bPresident\\b", replace: "Pres.", tier: enforce}
+      - {find: "\\bAttorney General\\b", replace: "Atty. Gen.", tier: enforce}
+      - {find: "\\bLiberals\\b", replace: "liberals", tier: enforce, note: "engine applies non-sentence-initial guard before matching"}
+      - {find: "\\bLiberal\\b", replace: "liberal", tier: enforce, note: "adjective form; engine applies non-sentence-initial guard before matching"}
+      - {find: "\\bConservatives\\b", replace: "conservatives", tier: enforce, note: "engine applies non-sentence-initial guard before matching"}
+      - {find: "\\bConservative\\b", replace: "conservative", tier: enforce, note: "adjective form; engine applies non-sentence-initial guard before matching"}
+      - {id: de_italicize_program_names, find: "\\*(Here & Now|University Place|Wisconsin Life|The Look Back|Digital Shorts|Garden Wanderings|Inside Wisconsin Politics)\\*", replace: "\\1", tier: enforce, note: "strips markdown italics around known program names; replace is a backreference to the matched name"}
+      # Flag-tier: context-dependent, surfaced for editorial review, never auto-fixed.
+      - {id: oxford_comma, detect: ",\\s+and\\b", tier: flag, severity: warning, note: "no Oxford comma in lists, except when a list of clauses needs it for clarity — context-dependent"}
+      - {id: capitol_capital, detect: "\\bcapital\\b", tier: flag, severity: warning, note: "'Capitol' (building/district) vs 'capital' (money/assets) — context-dependent, needs human judgment"}
+    speaker_label:
+      pattern: "^\\*\\*[A-Z][\\w.'-]+(?: [A-Z][\\w.'-]+)+:\\*\\*"
+      trailing_spaces: 2
+      blank_lines_between_turns: 1
+      no_honorifics: true
+    review_notes:
+      placement: top
+      format: html_comment
+      tier: flag
+  timestamp:
+    chapter_max_by_duration:
+      - {lt: 5, max: 3}
+      - {lt: 15, max: 5}
+      - {lt: 30, max: 7}
+      - {lt: 60, max: 8}
+      - {lt: null, max: 10}
+    first_chapter: {time: "0:00", title: "Episode intro", tier: enforce}
+    chapter_name: {case: sentence, words: {min: 2, max: 6}, tier: flag}
+    formats:
+      media_manager: {start: "H:MM:SS.000", end: "H:MM:SS.999", tier: enforce}
+      youtube: {style: "M:SS", tier: enforce}
+    constraints: {no_gaps: true, chronological: true, final_end_equals_srt_end: true}
+  validator:
+    semantic_checks:
+      - "title accurately reflects content"
+      - "description accurately reflects content"
+
+# ------------------------------------------------------------------
+# Program-specific copy formulas (house style skill §4 / EDITOR
+# instructions "PROGRAM-SPECIFIC RULES"). Only programs with documented
+# formulas get an entry here; programs without special rules fall back
+# to the cross-cutting voice/casing/limits rules above.
+# ------------------------------------------------------------------
+programs:
+  "Here & Now":
+    livestream_title_suffix: " | Here & Now"
+    title_format: "{subject} on {topic}"
+    short_description_formula: "{role} {verb} {subject}."
+    long_description_formula: "{name}, {organization_and_title}, {verb} {subject}."
+    verbs:
+      elected: [discusses]
+      non_elected: [explains, describes, considers]
+    electeds_include_party_location: true
+    capitalize_executive_titles: true
+  "University Place":
+    require_series_keyword: true
+    no_honorifics: true
+    tone: informative_not_inflammatory
+  "Wisconsin Life":
+    style: character_driven
+    location_tags: important
+    cultural_regional_context: emphasized
+  "The Look Back":
+    must_name: [hosts, institutions, historians]
+    tier: advise
+    hosts: [Nick, Taylor]
+    focus: why_it_matters_over_what_happened
+  "Digital Shorts":
+    title_words: {min: 6, max: 8}
+    description_count: 1
+    description_max: 150
+  "Garden Wanderings":
+    botanical_accuracy: critical
+    title_includes: [location, plant_species]
+    seasonal_context: when_relevant
+
+# Populated by a later task — the prompt-block renderer that turns
+# these rules into per-phase prompt sections.
+prompt_blocks: {}
