@@ -225,7 +225,7 @@ checklist *should* require, not a code defect.
 **char_limit / title_over_limit (5 items, all bucket B)**
 
 - Job 3 / seo: *"Primary title recommendation exceeds 40-character limit by 9 characters (49 chars); violates stated constraint"*
-- Job 5 / seo: *"title exceeds 60 character limit at 39 characters but includes #Shorts hashtag which is non-standard for SEO title fields"*
+- Job 5 / seo: *"title exceeds 60 character limit at 39 characters but includes #Shorts hashtag which is non-standard for SEO title fields"* (LLM's flagged count 39 vs. extracted title 46 chars — consistent with hashtag presence/absence variance; illustrates unreliable LLM char-counting noted in lint_only spot-check above)
 - Job 7 / seo: *"Recommended title exceeds 60 characters (68 characters provided; limit is 60)"*
 - Job 10 / seo: *"Recommended title is 66 characters, exceeding the 60-character limit specified in the validation checklist"*
 - Job 15 / seo: *"Title length conflict — recommended title (44 chars) exceeds stated user hard cap of 40 characters"*
@@ -236,16 +236,14 @@ checklist *should* require, not a code defect.
   15 = 46 chars. Every single one is under `config/house_style.yaml`'s
   `limits.fields.title.max: 80` -- the actual SST-write-enforced limit
   (confirmed against `mcp_server/server.py`'s `WRITABLE_FIELDS`, which lists
-  `("Release Title", ..., 80)`). `prompts/validator.md`'s checklist still
-  says *"Title is under 60 characters"* -- a number `config/house_style.yaml`
-  and the writable-field allowlist corrected to 80 as of commit `b322b99`
-  ("fix 150/300→90/350 limits") on this same branch, earlier the same day
-  these jobs' validator runs happened to predate. Zero of these five titles
-  actually violate the real limit; the LLM validator is enforcing a retired
-  number. This is **evidence for lint**, not a gap: lint reads the limit from
-  the single source of truth at call time, so it can never drift the way a
-  hard-coded number baked into a prompt string does. No lint follow-up
-  needed here; the follow-up (if any) is updating `prompts/validator.md`'s
+  `("Release Title", ..., 80)` since commit c6278b7, 2026-04-16). `prompts/validator.md`'s
+  checklist still says *"Title is under 60 characters"* -- a line unchanged
+  since at least commit 4dbb051 (2026-05-21), now stale relative to the
+  long-standing 80-character SST limit. The LLM validator is enforcing a
+  retired number. This is **evidence for lint**, not a gap: lint reads the
+  limit from the single source of truth at call time, so it can never drift
+  the way a hard-coded number baked into a prompt string does. No lint
+  follow-up needed here; the follow-up (if any) is updating `prompts/validator.md`'s
   own checklist text (60/160→80/90) so the LLM validator agrees with the
   ground truth too, or retiring that checklist item once lint supersedes it.
 
@@ -476,7 +474,8 @@ re-projected) to confirm the acceptance criterion is actually met before
 - **The validator's own checklist is demonstrably stale** (confirmed: 60/160
   char limits in `prompts/validator.md` vs. 80/90/350 in
   `config/house_style.yaml` and `mcp_server/server.py`'s `WRITABLE_FIELDS`,
-  as of commit `b322b99` earlier the same day these jobs ran) -- so this
+  which has enforced the 80-char title limit since commit c6278b7, 2026-04-16,
+  while validator.md's 60-char line dates to at least 4dbb051, 2026-05-21) -- so this
   study is partly measuring "does lint agree with an already-known-outdated
   LLM checklist," not just "does lint agree with correct human intent."
   That's exactly the trust-building question Stage 2 is meant to answer, but
