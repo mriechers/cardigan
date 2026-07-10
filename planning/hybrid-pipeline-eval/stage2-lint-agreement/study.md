@@ -1,16 +1,137 @@
 # Stage 2 -- Lint agreement study over production jobs
 
-Generated 2026-07-10T22:10:10.663249+00:00 against `http://cardigan01:8100` (read-only GETs, 0.2s
-between requests). 21 jobs studied, 21 with a stored
+**Run 2 (2026-07-10T22:49:59Z)** -- after task 2c2's two root-cause fixes. Run
+1's original numbers and full analysis are preserved verbatim (not
+overwritten) in the [Run 1 history appendix](#appendix-run-1-2026-07-10t2210z-pre-fix-history)
+at the bottom of this document.
+
+Generated against `http://cardigan01:8100` (read-only GETs, 0.2s between
+requests -- served from the existing `OUTPUT/eval/prod_artifacts/` cache,
+no `--refresh`, no new network calls). 21 jobs studied, 21 with a stored
 `validation_result`. House style rules: `config/house_style.yaml`.
 
 Produced by `python -m scripts.lint_agreement_study --jobs all` (script + tests
-committed alongside this report). Raw per-job/per-flag data lives in
-`agreement.json` next to this file. Downloaded artifacts (job records, phase
-outputs) are cached under `OUTPUT/eval/prod_artifacts/` -- git-ignored, not
-committed; only short quoted excerpts appear below.
+unchanged from Run 1). Raw per-job/per-flag data lives in `agreement.json`
+next to this file. Downloaded artifacts (job records, phase outputs) are
+cached under `OUTPUT/eval/prod_artifacts/` -- git-ignored, not committed;
+only short quoted excerpts appear below.
+
+## What changed since Run 1, and the headline result
+
+Run 1 measured 55.6% raw recall (25/45) against the Stage-2 acceptance bar
+and traced 10 of the 20 misses to two code-level root causes:
+`lint.formatter.truncation_suspect` only checked the last visible line's
+punctuation (0% hit rate across the whole sample), and
+`_LOOSE_SPEAKER_LABEL_RE` couldn't collect numbered generic labels like
+`**Speaker 1:**`. Task 2c2 fixed both:
+
+1. **Truncation coverage-vs-duration path** (commit `41021d2`, refined in
+   `01805ef`) -- compares the last parsed `(MM:SS)`/`(H:MM:SS)` timecode
+   marker in the formatter body against `duration_minutes`, firing below an
+   85% coverage floor. Verified correct against 10 new synthetic TDD tests
+   (boundary math, independence from the punctuation path, HTML-comment
+   exclusion). Read on real production artifacts, this surfaced a second bug
+   mid-implementation: the first version scanned `raw_output` unstripped, so
+   a timestamp mentioned in passing inside a `<!-- REVIEW NOTES: ... -->`
+   aside was scored as if it were a real coverage marker -- producing one
+   coincidentally-right match (job 12), one match against the *wrong* LLM
+   flag by rule_id-family (job 8, detailed below), and a genuine new false
+   positive (job 15, a 76-second clip flagged as truncated because a review
+   note mentioned "(1:01)" while discussing unclear clip origin, not
+   coverage). Commit `01805ef` strips HTML comments before scanning, closing
+   that hole.
+2. **Numbered generic speaker labels** (commit `41021d2`) -- extends
+   `_LOOSE_SPEAKER_LABEL_RE`'s continuation token to also accept bare digits,
+   so `**Speaker 1:**` / `**Reporter 2:**` now enter the candidate pool.
+   Verified with a decisive regression test
+   (`test_numbered_label_actually_enters_candidate_pool_via_superset_detection`,
+   confirmed red against the pre-fix regex, green after) that proves
+   collection actually happens, not just that no violation fires (which is
+   true either way and would have been a vacuous test on its own).
+
+**Headline result, honestly: the aggregate matrix on this 21-job sample is
+byte-for-byte IDENTICAL to Run 1.** both_caught=25, lint_only=34,
+llm_only_deterministic=20, llm_semantic=62 -- same totals, same by-phase
+breakdown, same by-category breakdown, same per-job matrix, same 20
+`llm_only_deterministic` items. **Raw recall is unchanged at 25/45 = 55.6%.**
+This is not a failed fix -- both fixes address real, TDD-confirmed
+correctness gaps in the detection logic itself -- but neither gap's
+applicable surface intersects this specific 21-job sample's actual failure
+modes, for two different, fully-diagnosed reasons documented below. Per the
+task's honesty constraint, that is reported as-is, not massaged.
+
+### Why the truncation fix measures zero movement here
+
+Every `(MM:SS)`/`(H:MM:SS)` timecode marker found anywhere in this entire
+21-job corpus's `formatter_output.md` files (3 total occurrences, in jobs 8,
+12, and 15) lives inside a `<!-- REVIEW NOTES: ... -->` HTML comment --
+**zero** appear in the visible transcript body across all 21 jobs. Confirmed
+by direct audit:
+
+```
+job8:  total_markers=1 outside_comments=0   -- "(00:07:44)" in a review note about
+                                                a speaker-attribution transition
+job12: total_markers=1 outside_comments=0   -- "(00:11:10)" in a review note about
+                                                the SRT cutoff point
+job15: total_markers=1 outside_comments=0   -- "(1:01)" in a review note about
+                                                unclear clip origin
+```
+
+The corrected (comment-stripping) implementation therefore finds **zero**
+markers to compare against duration in all 21 jobs, and the coverage path
+silently skips every time -- exactly the documented "no markers" behavior,
+working as designed. This reveals something the design assumption in the
+Task 2c2 brief didn't anticipate: PBS Wisconsin's formatter phase does not,
+as an actual production convention, embed periodic in-body timecodes in the
+visible transcript prose at all. The `(MM:SS)` markers that do appear only
+ever show up when the model self-reports a cutoff or attribution concern
+inside its own review-note commentary -- and that commentary is exactly the
+kind of freeform, unstructured text a coverage check cannot safely trust
+(see the job 8 and job 15 cases below).
+
+This does **not** mean the fix was pointless: the mechanism is correct and
+will fire on any future formatter output that *does* embed body timecodes,
+and closing the "scans review-note noise" bug prevents the false positive
+this same commit briefly introduced (job 15) from ever reaching production
+if `qa_gate.merge_flags` is flipped on later. But as a *coverage-vs-duration*
+signal specifically, it has near-zero applicable surface in this real
+corpus. The dominant real gap identified in Run 1 -- 8 of 10 bucket-A misses,
+all "closes with a punctuated sign-off despite content missing before it" --
+remains genuinely uncaught by either the punctuation or the coverage path,
+because none of those 8 transcripts cite a body timecode at all. See
+"Follow-up" in the Conclusion below for what would actually catch them.
+
+### Why the speaker-label fix measures zero movement here
+
+The regex fix is independently verified correct (job 17's real
+`**Speaker 1:**` / `**Speaker 2:**` labels are now collected -- confirmed by
+running `_LOOSE_SPEAKER_LABEL_RE` directly against the cached file and by the
+decisive superset-detection regression test). But per the Task 2c2 brief's
+own prediction, a clean 2-token generic label with no honorific correctly
+produces **no violation** by design -- generic labels are legitimate house
+style, and the point of collecting them is superset detection (e.g. "Speaker"
+and "Speaker 1" both present would now correctly flag as the same person
+labeled two ways), not flagging every generic label as malformed.
+
+Job 17's real LLM flag -- *"speaker names not identified (generic 'Speaker
+1/2' labels used throughout)"* -- turns out, on this closer post-fix
+inspection, not to be a label-FORMAT complaint at all. It's a
+content-verification request ("please cross-reference with SST/program
+credits before publication" per the formatter's own review note) that the
+keyword classifier's `generic 'speaker` substring swept into the
+`speaker_label_format` deterministic category. **This item is reclassified
+below from Run 1's "bucket A confirmed real gap" to bucket C
+(classifier/policy ambiguity)** -- it was an overreach in the original
+per-item analysis to call it a code-fixable format gap; on inspection after
+actually building and verifying the fix, it's a semantic identity-
+verification concern outside what `lint.formatter.speaker_label_inconsistent`
+is designed to judge, structurally identical to the other classifier-
+ambiguity items already documented in Run 1 (the SEO "review notes" template-
+structure false hit, the ellipsis "truncated" false hit).
 
 ## Methodology
+
+Unchanged from Run 1 -- reproduced here for completeness.
 
 `scripts/lint_agreement_study.py` pulls each studied job's record (for
 `duration_minutes`, `content_type`, `transcript_file`, and the stored
@@ -23,57 +144,32 @@ dict the worker bus assembles, and runs
 `validation_result` in this sample is the LLM validator's verdict alone,
 untouched by lint. The two arms are independent.
 
-All 21 non-pending jobs in the production queue at run time were studied (14
-`completed`, 7 `paused` -- the paused jobs had already run through
-formatter/seo/validator before being paused, so all three phase outputs and a
-`validation_result` existed for every one of them; none were excluded).
+All 21 non-pending jobs in the production queue at Run 1's fetch time were
+studied (14 `completed`, 7 `paused`); Run 2 reuses the same cached job set
+byte-for-byte (no `--refresh`), so the input corpus is identical between
+runs -- any matrix difference between Run 1 and Run 2 is attributable
+entirely to the lint.py code changes, not to production data drift.
 
 ### Graceful degradation (no transcript text)
 
 The REST API has no transcript-fetch endpoint, so raw transcript text is
 never available to this study -- only `transcript_file` (the filename) is
-passed through in context, unused. This turns out not to matter for any
-currently-implemented lint check: `run_lint` reads `analyst_output`,
-`formatter_output`, `seo_output`, `duration_minutes`, `content_type`, and
-`program` from its context -- never `transcript` -- so nothing degrades.
-`program` is also never populated here (not present on the Job record /
-queue payload); `StyleRules.limits_for()`'s `program` argument is a
-documented no-op today, so this has no effect on the limits actually
-applied.
+passed through in context, unused. `run_lint` still never reads `transcript`
+from context, so nothing degrades for lint. Worth noting for the Conclusion's
+follow-up discussion: **this is an offline-study-only limitation, not a
+production one** -- `api/services/worker.py` (line ~411/895) *does* populate
+`context["transcript"]` with real transcript content at production runtime,
+and `api/services/completeness.py`'s `check_completeness()` (already wired
+into the worker independently of lint, `DEFAULT_COVERAGE_THRESHOLD=0.70`)
+already uses it for a parallel word-count-based truncation signal outside
+this study's scope.
 
 ### Deterministic-category keyword map
 
-Each LLM validator flag string is classified as zero-or-more deterministic
-categories (substring match, case-insensitive) or SEMANTIC (no category
-matched -- content-accuracy/relevance/quality judgment, out of lint's
-scope by design):
-
-| Category | Keywords (substring, case-insensitive) | Excludes | Corresponding lint rule_id |
-|---|---|---|---|
-| output_missing | `output missing`, `output is missing`, `missing or empty`, `empty output`, `missing or has fewer than` | -- | `lint.output_missing` |
-| placeholder_text | `placeholder text`, `template artifact`, `{media_id}`, `[insert`, `{today`, `{model name`, `unfilled placeholder` | -- | `lint.placeholder_text` |
-| review_notes | `review note`, `review notes`, `html comment`, `editorial instructions`, `appear in transcript body`, `appear in the transcript body`, `embedded in transcript body`, `embedded in the transcript body`, `editorial metadata must not appear`, `agent instructions` | -- | `lint.formatter.review_notes_in_body` |
-| speaker_label_format | `single-word`, `single word label`, `labeled inconsistently`, `generic label`, `generic 'speaker`, `generic "speaker`, `honorific`, `speaker label` | `misattribut`, `attribut`, `unclear`, `ambigu`, `unverified`, `unconfirmed`, `unresolved`, `inverted` | `lint.formatter.speaker_label_inconsistent` |
-| content_past_duration | `past the episode`, `past the content duration`, `exceeds the content duration`, `beyond the episode duration`, `content past duration`, `after the episode ends`, `past the video duration` | -- | `lint.formatter.content_past_duration` |
-| truncation | `truncat`, `ends abruptly`, `mid-sentence`, `cut off`, `cuts off`, `abrupt end`, `ends mid-sentence`, `cutoff`, `missing from the formatted`, `content is missing from` | -- | `lint.formatter.truncation_suspect` |
-| keyword_count | `keyword count`, `keywords recommended`, `tags recommended`, `expected 15-20`, `expected 5-10`, `too few keywords`, `too many keywords` | -- | `lint.seo.keywords_count` |
-| char_limit | requires BOTH a `char`/`character(s)` mention AND an `exceed*`/`over`/`too long` violation word | -- | field-detected: `short description` -> `lint.seo.short_over_limit`, `long description` -> `lint.seo.long_over_limit`, `title` -> `lint.seo.title_over_limit`, none of those names -> no rule_id (always lands in llm_only_deterministic) |
-
-The `speaker_label_format` category explicitly EXCLUDES flags that also
-mention attribution/ambiguity/unresolved-identity language, because those
-are judgments about whether a specific line of dialogue was assigned to the
-right speaker (semantic -- requires understanding transcript content) as
-opposed to judgments about label FORMAT (single-word label, honorific,
-same person spelled two inconsistent ways) which is what
-`lint.formatter.speaker_label_inconsistent` actually checks.
-
-This is a plain-substring keyword map, not an NLP classifier, and it is not
-perfect -- two of its misclassifications are called out explicitly in the
-per-item analysis below (a "truncated in search previews" SEO stylistic note
-that trips the `truncation` keyword, and an SEO-report-structure complaint
-that trips `review_notes`). The per-item human read below is what corrects
-for that, which is the point of doing it by hand rather than trusting the
-keyword map's output verbatim.
+Unchanged from Run 1 -- see the full table in the
+[Run 1 history appendix](#appendix-run-1-2026-07-10t2210z-pre-fix-history);
+not reproduced twice here for brevity. No category definitions or keywords
+changed for this re-run.
 
 ### Matrix cells
 
@@ -86,21 +182,16 @@ keyword map's output verbatim.
 - **llm_semantic** -- LLM flags outside lint's scope, listed for context
   only (not part of the acceptance criterion).
 
-Correspondence is at rule_id-family granularity (one deterministic LLM flag
-claims at most one still-unclaimed lint violation of a matching rule_id per
-phase), not exact text matching -- see `compare_phase()`'s docstring in the
-script.
+## Aggregate matrix (Run 2)
 
-## Aggregate matrix
+| Cell | Run 1 | Run 2 | Delta |
+|---|---|---|---|
+| both_caught | 25 | 25 | +0 |
+| lint_only | 34 | 34 | +0 |
+| llm_only_deterministic | 20 | 20 | +0 |
+| llm_semantic (out of lint scope) | 62 | 62 | +0 |
 
-| Cell | Count |
-|---|---|
-| both_caught | 25 |
-| lint_only | 34 |
-| llm_only_deterministic | 20 |
-| llm_semantic (out of lint scope) | 62 |
-
-By phase:
+By phase (Run 2 == Run 1 in every cell):
 
 | Phase | both_caught | lint_only | llm_only_deterministic | llm_semantic |
 |---|---|---|---|---|
@@ -108,7 +199,7 @@ By phase:
 | formatter | 15 | 8 | 11 | 31 |
 | seo | 10 | 26 | 8 | 28 |
 
-By deterministic category:
+By deterministic category (Run 2 == Run 1 in every cell):
 
 | Category | both_caught | llm_only_deterministic |
 |---|---|---|
@@ -118,18 +209,35 @@ By deterministic category:
 | truncation | 0 | 10 |
 
 `output_missing`, `placeholder_text`, `content_past_duration`, and
-`keyword_count` all show zero in both the both_caught and
-llm_only_deterministic columns -- no LLM flag in this 21-job sample was ever
-classified into any of those four categories (no job had a missing phase
-output or a literal placeholder token flagged; no LLM flag ever complained
-about a timecode past duration or an out-of-range keyword count). That's an
-absence of test coverage for those specific categories in this sample, not a
-claim they work -- flagged as a limitation below. (Lint itself *did* still
-independently find a real `lint.seo.keywords_count` violation on job 4, via
-the lint_only side -- see the spot-check -- just with no matching LLM flag
-to classify against.)
+`keyword_count` remain untested in this sample for the same reason as Run 1
+(no job exercises them) -- unchanged limitation, see below.
 
-## Per-job matrix
+## Delta-vs-Run-1 table, per bucket
+
+Bucket assignments from Run 1's per-item analysis, re-verified against the
+fixed code and reclassified where the fix's actual behavior (rather than the
+pre-fix prediction) warrants it:
+
+| Bucket | Run 1 count | Run 2 count | What moved |
+|---|---|---|---|
+| A -- real lint code gap, still open | 10 | 9 | Speaker-label item (job 17/formatter) reclassified out of bucket A into bucket C (see above) -- it was never going to close via this fix, as the Task 2c2 brief itself predicted. All 9 remaining bucket-A items are the truncation root cause (8 items, unchanged -- 0 markers exist in any of their bodies to compare) plus the pre-existing, out-of-scope analyst-phase review-note gap (job 15, unaffected by this task). |
+| B -- stale validator checklist, lint is correct | 5 | 5 | Unchanged -- all 5 are `title_over_limit` flags against a retired 60-char limit; unrelated to either fix. |
+| C -- policy question / classifier ambiguity, not a code defect | 5 | 6 | +1: job 17/formatter speaker_label_format moves in from bucket A (see "Why the speaker-label fix measures zero movement" above). |
+
+Bucket totals sum to 9+5+6=20, matching the unchanged
+`llm_only_deterministic` total. **Adjusted recall** (both_caught + bucket A,
+i.e. "what lint should catch once every code-fixable gap is closed") moves
+from Run 1's 25/(25+10)=35 → 71.4% to Run 2's 25/(25+9)=34 → **73.5%** -- a
+real but small improvement, entirely explained by the reclassification
+above, not by either fix actually resolving a production case. Both the raw
+(55.6%) and adjusted (73.5%) numbers remain well short of the ≥100%
+acceptance bar.
+
+## Per-job matrix (Run 2)
+
+Identical to Run 1's per-job matrix in every cell (verified programmatically
+against `agreement.json`, not just spot-checked) -- reproduced here as this
+run's own record rather than cross-referencing the appendix:
 
 | Job | Status | Content type | Duration (min) | Validation result | both_caught | lint_only | llm_only_det | llm_semantic |
 |---|---|---|---|---|---|---|---|---|
@@ -155,7 +263,270 @@ to classify against.)
 | 20 | completed | full | 18.5 | present | 0 | 2 | 0 | 0 |
 | 21 | paused | full | 18.1 | present | 3 | 0 | 1 | 5 |
 
-## llm_only_deterministic -- every miss, verbatim, with analysis
+## llm_only_deterministic -- every miss, verbatim, with re-verified analysis
+
+The same 20 flags as Run 1 (confirmed identical). Bucketed as **(A) real
+lint gaps**, **(B) stale-limit mismatches** (lint's silence is correct), or
+**(C) policy/scope disagreements** (not a code defect) -- see Run 1's
+methodology above. Items unaffected by either fix are summarized briefly
+with a pointer to the appendix for full original text; items the fixes
+touch (truncation, speaker_label_format) get fresh, code-verified analysis
+below.
+
+**Truncation (10 items -- 8 bucket A, one root cause, unresolved; 1 bucket C
+cross-phase meta-commentary; 1 keyword-map false hit) -- unchanged from Run
+1, root cause confirmed and now precisely diagnosed:**
+
+- Job 1 / formatter, Job 8 / formatter (both flags), Job 12 / formatter, Job
+  17 / formatter, Job 18 / formatter, Job 19 / formatter, Job 21 / formatter
+  -- same 8 verbatim flags as Run 1 (full text in the appendix). **Re-verified
+  root cause, more precisely than Run 1 could establish**: none of these 8
+  jobs' `formatter_output.md` files contain **any** `(MM:SS)`/`(H:MM:SS)`
+  timecode marker anywhere in the document (comment or body) -- confirmed by
+  direct regex audit against the cached artifacts. The coverage-vs-duration
+  path therefore has literally nothing to compare against duration for any
+  of these 8 cases and correctly, silently skips, exactly as its "no
+  markers" contract specifies. Every one of these transcripts still closes
+  with a complete, terminally-punctuated sign-off paragraph (unchanged
+  observation from Run 1), so the punctuation path stays silent too. **These
+  8 misses are the study's single largest remaining gap and neither existing
+  truncation-detection path can see them** -- see Conclusion for what would
+  actually need to change.
+- Job 7 / seo -- ellipsis keyword-map false hit (unchanged, see appendix;
+  not a code gap).
+- Job 17 / seo -- cross-phase meta-commentary, bucket C (unchanged, see
+  appendix; not actionable as a lint change).
+
+**char_limit / title_over_limit (5 items, all bucket B) -- unchanged from
+Run 1**, unaffected by either fix. Full analysis in the appendix: all 5 are
+`prompts/validator.md` enforcing a stale 60-char title limit against titles
+that are all correctly under `config/house_style.yaml`'s real 80-char limit.
+
+**review_notes (4 items -- 2 bucket C policy disagreement, 1 bucket C
+classifier ambiguity, 1 bucket A minor scope gap) -- unchanged from Run 1**,
+unaffected by either fix (this task's scope was formatter-phase truncation
+and speaker labels, not the review-notes placement-policy question or the
+analyst-phase scope gap). Full analysis in the appendix.
+
+**speaker_label_format (1 item) -- RECLASSIFIED from Run 1's bucket A to
+bucket C:**
+
+- Job 17 / formatter: *"speaker names not identified (generic 'Speaker 1/2'
+  labels used throughout)"*
+
+  **Bucket C (was bucket A in Run 1) -- classifier ambiguity, not a code
+  defect, confirmed by building and testing the actual fix.** Run 1's
+  analysis called this "a confirmed real gap" based on the observation that
+  `_LOOSE_SPEAKER_LABEL_RE` couldn't even see `**Speaker 1:**`/`**Speaker
+  2:**` in `job17/formatter_output.md`. That collection gap was real and is
+  now fixed (`_LOOSE_SPEAKER_LABEL_RE.finditer()` against the cached file now
+  correctly yields both labels -- verified directly). But once collected, a
+  clean 2-token label with no honorific correctly produces **no violation**
+  under `_check_speaker_label_inconsistent` -- and it shouldn't: house style
+  explicitly permits generic numbered labels when real names aren't
+  available (per the formatter's own review note on this job: *"Speaker
+  names not provided in captions... Generic labels used -- please
+  cross-reference with SST/program credits before publication"*). The LLM's
+  flag isn't complaining about label *shape* (which is all
+  `speaker_label_inconsistent` is designed to judge) -- it's asking someone
+  to go find the real names, a content-verification task. The keyword
+  classifier's `generic 'speaker` substring rule swept this semantic request
+  into the deterministic bucket; it's the same class of false hit as the
+  ellipsis/"truncated" and SEO-template-structure items already documented
+  in Run 1, just not caught by hand until this fix was actually built and
+  verified against it. No further lint code change indicated here -- the
+  collection fix (which does newly enable superset detection, e.g. a
+  document mixing bare `**Speaker:**` and `**Speaker 1:**` would now
+  correctly flag as inconsistent) was worth making on its own merits, but it
+  was never going to close this specific miss.
+
+## lint_only spot-check (5 picks)
+
+Unchanged from Run 1 -- lint_only's count and content are identical between
+runs (verified programmatically), so Run 1's 5 hand-picked spot-checks (job
+1 short/long description over-limit, job 9 long description blowout, job 2
+"Narrator" single-word false positive, job 4 keywords-count) remain
+representative. Full write-ups preserved in the appendix. **One update
+worth flagging explicitly**: the pre-fix (uncommitted) version of this
+commit briefly produced a *new*, genuine `lint_only` false positive on job
+15/formatter (`lint.formatter.truncation_suspect`, "Last timecode marker
+(1:01) covers only 80.8%..." against a 76-second clip, sourced from an
+unrelated review note about clip origin) -- this was caught during this same
+re-run process (not shipped) and closed by commit `01805ef` before the final
+numbers above were produced. It's called out here for the audit trail, not
+because it appears in the final `lint_only` set (it doesn't).
+
+## Conclusion
+
+**Raw recall against the Stage-2 acceptance criterion is unchanged at
+25/45 = 55.6% in this 21-job sample after both root-cause fixes.** The
+suite does not meet the ≥100% bar and stays off. Adjusted recall (excluding
+bucket B and the now-reclassified bucket C item) moves marginally from
+71.4% to 73.5%, entirely from the job-17 reclassification, not from either
+fix resolving a production case.
+
+This is not evidence the fixes were wrong or wasted -- both are
+independently verified correct via dedicated TDD (10 new synthetic tests for
+the coverage path covering the exact boundary math, independence between the
+two truncation-detection paths, and HTML-comment exclusion; 7 new tests plus
+one decisive red→green regression test for numbered speaker labels), and
+both close real, confirmed defects in the detection *mechanism* itself. What
+this re-run demonstrates is that **neither defect was actually the
+proximate cause of any of the 20 `llm_only_deterministic` misses in this
+specific real-world sample**:
+
+- The truncation coverage-vs-duration mechanism requires a `(MM:SS)` marker
+  in the formatter body to compare against duration. Across this entire
+  21-job corpus, zero such markers exist anywhere in any visible transcript
+  body -- the 3 markers that do exist all live inside freeform review-note
+  commentary, which the corrected implementation now correctly excludes as
+  noise (it was briefly *not* excluded mid-implementation, and that version
+  produced one coincidentally-right match, one flag-mismatched match, and
+  one new false positive -- all closed before the final run). PBS
+  Wisconsin's formatter phase, as actually used in production, simply
+  doesn't embed in-body timecodes as a routine convention this check can
+  read.
+- The speaker-label regex now correctly collects numbered generic labels,
+  but house style correctly treats them as legitimate when unaccompanied by
+  a conflicting label for the same apparent person -- so the one real-world
+  case this fix targeted (job 17) was, on closer inspection, a semantic
+  identity-verification request the keyword classifier over-eagerly swept
+  into the deterministic bucket, not a label-format defect.
+
+**Follow-up, updated from Run 1's recommendation given this new evidence:**
+the 8-item truncation root cause (unchanged, still this study's single
+largest gap by a wide margin) needs a fundamentally different signal than
+"compare the last body timecode to duration," because body timecodes
+essentially don't exist in this corpus. Two candidates, in order of
+plausibility:
+
+1. **Word-count coverage vs. source transcript** -- `api/services/
+   completeness.py`'s `check_completeness()` (already wired into the worker
+   independently, `DEFAULT_COVERAGE_THRESHOLD=0.70`) does exactly this
+   comparison and *does* have access to real transcript text at production
+   runtime (`context["transcript"]`, populated by `worker.py`) -- this
+   offline study simply can't validate it because the REST API has no
+   transcript-fetch endpoint (see Methodology). A `lint.*` check built on
+   the same word-count-ratio approach, wired to run only where transcript
+   text is actually available in the live worker context, is the most
+   promising untested path and should be the next study iteration's target
+   before further duration-marker approaches are attempted.
+2. **Mid-document speaker-turn punctuation** (Run 1's original alternate
+   suggestion, still untried) -- scan speaker turns for one that ends
+   without terminal punctuation immediately followed by a new `**Name:**`
+   header, catching a mid-document cutoff distinct from the existing
+   end-of-document check. Doesn't require transcript text, so it's testable
+   in this same offline harness, but based on the cached artifacts examined
+   during this fix (jobs 1, 17, 18, 19, 21 all close with intact, punctuated
+   turns even where content is genuinely missing before them) it's unclear
+   this pattern actually occurs in practice either -- worth a quick audit
+   before investing more implementation time.
+
+Neither the stale-title-limit misses (bucket B) nor the review-notes-
+placement policy question (bucket C) require lint changes, unchanged from
+Run 1. `routing.style_engine.qa_gate.merge_flags` stays off pending a study
+run that actually clears the truncation gap -- likely requiring the
+word-count approach above, run against a version of this study wired to
+real transcript text (a scope change beyond what this offline,
+REST-API-only harness can do today).
+
+### Limitations of this study (updated for Run 2)
+
+- **Small, PBS-Wisconsin-specific sample** -- unchanged from Run 1 (21 jobs,
+  two dominant programs); `output_missing`, `placeholder_text`,
+  `content_past_duration`, and the SEO title-limit check's true-positive
+  path remain untested here.
+- **Keyword classifier is a blunt instrument** -- Run 1 caught 2 false hits
+  by hand; this re-run surfaces a 3rd (job 17's speaker_label_format flag,
+  reclassified above) that Run 1's initial pass didn't catch, discovered
+  only by actually building and testing the fix it originally recommended.
+  This is itself a small piece of evidence that the original study's
+  bucket-A count may have had further, undiscovered classifier-ambiguity
+  items beyond the two it flagged -- a caution for reading any single-pass
+  hand analysis as final.
+- **This offline study cannot exercise transcript-text-dependent checks** --
+  confirmed concretely this run: the most promising fix for the dominant
+  truncation gap (word-count coverage vs. source transcript, mirroring
+  `api/services/completeness.py`) is unverifiable through this REST-API-only
+  harness, because the harness has no transcript-fetch endpoint even though
+  production's real worker context does carry transcript text. Any future
+  study iteration targeting the truncation gap needs either a transcript-
+  fetch endpoint added to the read-only REST surface, or a different
+  offline-reproducible harness (e.g. running against a local copy of the
+  transcripts directory rather than the production API).
+- **The validator's own checklist is demonstrably stale** -- unchanged
+  finding from Run 1 (60/160 char limits in `prompts/validator.md` vs.
+  80/90/350 in `config/house_style.yaml`).
+- **A code fix that measures zero movement on a fixed sample is still worth
+  shipping** -- both fixes in this task close real, TDD-verified defects
+  (confirmed independently of this study's aggregate numbers) and the
+  HTML-comment-exclusion correction specifically prevents a genuine false
+  positive (job 15) that the uncorrected version of this same commit
+  produced. Recall movement on any single 21-job sample is a noisy signal
+  for code correctness in either direction -- this run is a reminder to
+  read the per-item root-cause analysis, not just the top-line percentage.
+
+---
+
+## Appendix: Run 1 (2026-07-10T22:10Z) -- pre-fix history
+
+Preserved verbatim below for audit continuity -- this is Run 1's original
+report, produced before either task-2c2 fix landed. Do not edit; superseded
+by the sections above but kept complete so no history is lost.
+
+### Run 1 aggregate matrix
+
+| Cell | Count |
+|---|---|
+| both_caught | 25 |
+| lint_only | 34 |
+| llm_only_deterministic | 20 |
+| llm_semantic (out of lint scope) | 62 |
+
+By phase:
+
+| Phase | both_caught | lint_only | llm_only_deterministic | llm_semantic |
+|---|---|---|---|---|
+| analyst | 0 | 0 | 1 | 3 |
+| formatter | 15 | 8 | 11 | 31 |
+| seo | 10 | 26 | 8 | 28 |
+
+By deterministic category:
+
+| Category | both_caught | llm_only_deterministic |
+|---|---|---|
+| char_limit | 10 | 5 |
+| review_notes | 15 | 4 |
+| speaker_label_format | 0 | 1 |
+| truncation | 0 | 10 |
+
+### Run 1 per-job matrix
+
+| Job | Status | Content type | Duration (min) | Validation result | both_caught | lint_only | llm_only_det | llm_semantic |
+|---|---|---|---|---|---|---|---|---|
+| 1 | completed | full | 32.9 | present | 1 | 2 | 1 | 8 |
+| 2 | completed | full | 1.8 | present | 3 | 1 | 0 | 4 |
+| 3 | completed | short | 1.9 | present | 1 | 2 | 2 | 0 |
+| 4 | completed | short | 1.6 | present | 1 | 3 | 0 | 1 |
+| 5 | completed | short | 1.6 | present | 2 | 1 | 1 | 1 |
+| 6 | completed | short | 1.8 | present | 0 | 4 | 0 | 0 |
+| 7 | completed | full | 33.0 | present | 0 | 1 | 3 | 6 |
+| 8 | completed | full | 32.3 | present | 1 | 2 | 2 | 1 |
+| 9 | completed | full | 47.0 | present | 1 | 3 | 0 | 4 |
+| 10 | completed | full | 32.5 | present | 2 | 0 | 2 | 3 |
+| 11 | completed | full | 32.5 | present | 1 | 1 | 0 | 0 |
+| 12 | completed | full | 18.3 | present | 1 | 2 | 1 | 3 |
+| 13 | paused | full | 4.0 | present | 1 | 1 | 0 | 1 |
+| 14 | completed | full | 4.0 | present | 0 | 1 | 0 | 0 |
+| 15 | paused | short | 1.3 | present | 2 | 2 | 2 | 10 |
+| 16 | paused | short | 1.0 | present | 2 | 2 | 0 | 7 |
+| 17 | paused | full | 2.8 | present | 1 | 1 | 3 | 3 |
+| 18 | paused | full | 2.8 | present | 1 | 2 | 1 | 0 |
+| 19 | paused | full | 2.8 | present | 1 | 1 | 1 | 5 |
+| 20 | completed | full | 18.5 | present | 0 | 2 | 0 | 0 |
+| 21 | paused | full | 18.1 | present | 3 | 0 | 1 | 5 |
+
+### Run 1 llm_only_deterministic -- every miss, verbatim, with analysis
 
 Twenty flags. Read against the real cached artifacts (`OUTPUT/eval/prod_artifacts/`),
 they fall into three buckets: **(A) real lint gaps** -- lint should have
@@ -314,7 +685,13 @@ classifier ambiguity, 1 bucket A minor scope gap)**
   currently a blind spot for exactly the placeholder-identity pattern the
   check exists to catch.
 
-## lint_only spot-check (5 picks)
+  > **Run 2 update:** this fix was made and independently verified correct
+  > (see the main report above), but the underlying LLM flag turned out not
+  > to close as a result -- reclassified to bucket C in Run 2. Left
+  > unedited here for historical accuracy; see the main report for the
+  > corrected analysis.
+
+### Run 1 lint_only spot-check (5 picks)
 
 Hand-picked for variety rather than document order -- covers a clear
 severe true positive, a marginal true positive with an interesting
@@ -384,7 +761,7 @@ positive.
      same underlying prompt/config synchronization gap as the title/
      description limits, applied to keyword count instead of characters.
 
-## Conclusion
+### Run 1 conclusion (original text, preserved)
 
 **Raw recall against the Stage-2 acceptance criterion ("lint catches ≥100%
 of LLM-caught deterministic-category failures") is 25/45 = 55.6% in this
@@ -457,7 +834,15 @@ check. Once (1) and (2) are fixed, this study should be **re-run** (not
 re-projected) to confirm the acceptance criterion is actually met before
 `routing.style_engine.qa_gate` is switched on.
 
-### Limitations of this study
+> **Run 2 update:** (1) and (2) were fixed and independently TDD-verified
+> (see the main report above), and this study was re-run as specified
+> rather than re-projected. The re-run shows the acceptance criterion is
+> **not yet met** -- raw recall is unchanged at 55.6%, because this
+> specific sample's failure modes don't intersect either fix's applicable
+> surface (see "What changed since Run 1" above for the full diagnosis and
+> updated follow-up recommendation).
+
+### Run 1 limitations of this study (original text, preserved)
 
 - **Small, PBS-Wisconsin-specific sample.** 21 jobs, dominated by two
   programs (`Inside Wisconsin Politics`, several `Digital Shorts`/education
