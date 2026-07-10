@@ -223,6 +223,88 @@ class TestCasingVariantPeriodNotDoubled:
 
 
 # ---------------------------------------------------------------------------
+# to_down_style -- multi-word, internally-punctuated casing_variants must
+# not LOSE casing on re-application (regression: "atty gen" -> "Atty. Gen."
+# -- the canonical value's own lowercase form, "atty. gen.", no longer
+# matched the "atty gen" key pattern because the value injects a period
+# *inside* the multi-word term, not just at the end).
+# ---------------------------------------------------------------------------
+
+
+class TestMultiWordPunctuatedVariantIdempotence:
+    def test_atty_gen_repro_idempotent_and_correct(self):
+        # canonical is built via build_canonical (not a bare literal dict)
+        # because the fix's guarantee lives in build_canonical's mirrored
+        # value-lower registration -- this is the realistic construction
+        # path every production canonical map goes through.
+        rules = StyleRules(
+            raw={
+                "meta": {"version": 1},
+                "casing": {"casing_variants": {"atty gen": "Atty. Gen."}},
+            }
+        )
+        canonical = build_canonical(rules)
+
+        once = to_down_style("the atty gen. spoke today", canonical)
+        twice = to_down_style(once, canonical)
+
+        assert once == twice
+        assert once == "The Atty. Gen. spoke today"
+
+    def test_bare_and_punctuated_atty_gen_with_name_converge(self):
+        rules = StyleRules(
+            raw={
+                "meta": {"version": 1},
+                "casing": {"casing_variants": {"atty gen": "Atty. Gen."}},
+            }
+        )
+        canonical = build_canonical(rules, extra_nouns=["Josh Kaul"])
+
+        from_bare = to_down_style("atty gen josh kaul responds", canonical)
+        from_punctuated = to_down_style("Atty. Gen. Josh Kaul responds", canonical)
+
+        assert from_bare == from_punctuated
+        assert from_bare == "Atty. Gen. Josh Kaul responds"
+
+
+class TestFixedPointProperty:
+    """Synthetic canonical map covering every casing-variant shape: a plain
+    proper noun, an acronym, a single-word period variant ("gov" -> "Gov."),
+    and a multi-word internally-punctuated variant ("atty gen" ->
+    "Atty. Gen."). Every already-canonical value must be a fixed point of
+    to_down_style, and a sentence containing all the keys must converge
+    after one pass (second pass is a no-op).
+    """
+
+    @staticmethod
+    def _rules_all_shapes() -> StyleRules:
+        return StyleRules(
+            raw={
+                "meta": {"version": 1},
+                "casing": {
+                    "proper_nouns": ["Wisconsin"],
+                    "acronyms": ["PBS"],
+                    "casing_variants": {"gov": "Gov.", "atty gen": "Atty. Gen."},
+                },
+            }
+        )
+
+    def test_every_canonical_value_is_a_fixed_point(self):
+        canonical = build_canonical(self._rules_all_shapes())
+        for value in set(canonical.values()):
+            assert to_down_style(value, canonical) == value
+
+    def test_second_pass_is_a_no_op_for_sentence_with_all_shapes(self):
+        canonical = build_canonical(self._rules_all_shapes())
+        sentence = "wisconsin pbs gov atty gen responds"
+
+        once = to_down_style(sentence, canonical)
+        twice = to_down_style(once, canonical)
+
+        assert once == twice
+
+
+# ---------------------------------------------------------------------------
 # CONVERGENCE TEST -- the load-bearing one for this task.
 # ---------------------------------------------------------------------------
 

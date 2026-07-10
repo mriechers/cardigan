@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from api.services.style_engine.casing import build_canonical, to_down_style
 from api.services.style_engine.rules import StyleRulesError, load_rules
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -219,3 +220,42 @@ class TestSmokeLevelCompleteness:
         rules = load_rules(CONFIG_PATH)
         here_and_now = rules.program_rules("Here & Now")
         assert here_and_now["short_description_formula"] == "{role} {verb} {subject}."
+
+
+def _real_casing_variants() -> dict[str, str]:
+    rules = load_rules(CONFIG_PATH)
+    casing = rules.raw.get("casing", {}) or {}
+    return dict(casing.get("casing_variants", {}) or {})
+
+
+class TestCasingVariantsIdempotenceAgainstRealConfig:
+    """Real-config guard against the "atty gen" -> "Atty. Gen." idempotence
+    regression (see tests/test_style_casing_entities.py's
+    TestMultiWordPunctuatedVariantIdempotence for the synthetic repro).
+
+    This is the test that would have caught the original bug: it loads the
+    REAL config/house_style.yaml casing.casing_variants and asserts every
+    entry's fixed-point + single-pass-convergence properties hold, so a
+    future editor adding a new internally-punctuated multi-word variant
+    (another "atty gen"-shaped entry) fails CI instead of shipping a casing
+    regression to production output.
+    """
+
+    @pytest.mark.parametrize("key,value", sorted(_real_casing_variants().items()))
+    def test_casing_variant_value_is_fixed_point(self, key, value):
+        """Already-canonical text (the casing_variant's own value) must be
+        unchanged by a to_down_style pass -- it's already in restored form.
+        """
+        rules = load_rules(CONFIG_PATH)
+        canonical = build_canonical(rules)
+        assert to_down_style(value, canonical) == value
+
+    @pytest.mark.parametrize("key,value", sorted(_real_casing_variants().items()))
+    def test_casing_variant_bare_and_punctuated_converge(self, key, value):
+        """The bare (lowercase, unpunctuated) key and the fully-punctuated
+        canonical value must down-style to byte-identical output -- the
+        single-pass convergence guarantee the down-style engine exists for.
+        """
+        rules = load_rules(CONFIG_PATH)
+        canonical = build_canonical(rules)
+        assert to_down_style(f"{key} follows", canonical) == to_down_style(f"{value} follows", canonical)
