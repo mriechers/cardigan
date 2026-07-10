@@ -242,23 +242,23 @@ export default function ReadyForWork() {
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       {/* Page Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Ready for Work</h1>
           <p className="text-surface-400 mt-1">
             Transcripts from the ingest server ready for processing
           </p>
         </div>
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center justify-between sm:justify-end gap-3">
           {lastScanAt && (
-            <span className="text-sm text-surface-400" title={new Date(lastScanAt + 'Z').toLocaleString()}>
+            <span className="text-sm text-surface-400 shrink-0" title={new Date(lastScanAt + 'Z').toLocaleString()}>
               Last scan: {formatRelativeTime(lastScanAt + 'Z')}
             </span>
           )}
           <button
             onClick={handleScan}
             disabled={scanning}
-            className="px-4 py-2 bg-pbs-500 hover:bg-pbs-400 disabled:opacity-50 text-white rounded-lg transition-colors font-medium"
+            className="px-4 py-2 bg-pbs-500 hover:bg-pbs-400 disabled:opacity-50 text-white rounded-lg transition-colors font-medium shrink-0"
           >
             {scanning ? 'Checking...' : 'Check for New Files'}
           </button>
@@ -266,8 +266,8 @@ export default function ReadyForWork() {
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-4">
-        <div className="flex-1 max-w-sm">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex-1 min-w-[200px] max-w-sm">
           <label htmlFor="search" className="sr-only">Search</label>
           <input
             id="search"

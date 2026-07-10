@@ -113,7 +113,8 @@ function CostBreakdownTable({ phases }: { phases: JobPhase[] }) {
   return (
     <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
       <h2 className="text-lg font-medium text-white mb-3">Cost Breakdown</h2>
-      <table className="w-full text-sm">
+      <div className="overflow-x-auto">
+      <table className="w-full text-sm min-w-[28rem]">
         <thead>
           <tr className="text-gray-500 text-left">
             <th className="pb-2">Phase</th>
@@ -150,6 +151,7 @@ function CostBreakdownTable({ phases }: { phases: JobPhase[] }) {
           </tr>
         </tbody>
       </table>
+      </div>
     </div>
   )
 }
@@ -769,7 +771,7 @@ export default function JobDetail() {
       )}
 
       {/* Job Metadata */}
-      <div className="flex items-center gap-6 text-sm text-gray-400">
+      <div className="grid grid-cols-2 sm:flex sm:items-center gap-y-2 gap-x-6 text-sm text-gray-400">
         <span>Status: <span className="text-white">{job.status}</span></span>
         <span>Priority: <span className="text-white">{job.priority}</span></span>
         <span>Cost: <span className="text-green-400 font-mono">{job.actual_cost ? `$${job.actual_cost.toFixed(4)}` : '-'}</span></span>
@@ -788,8 +790,8 @@ export default function JobDetail() {
                 key={idx}
                 className="py-3 border-b border-surface-700 last:border-0"
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center space-x-3 min-w-0 flex-wrap">
                     {phaseStatusIcon(phase.status)}
                     <span className="text-white">{phase.name}</span>
                     {job.validation_result?.phase_results?.[phase.name] && (
@@ -802,8 +804,11 @@ export default function JobDetail() {
                       </span>
                     )}
                     {phase.model && (
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-surface-700 text-surface-300 font-mono">
-                        {phase.model}
+                      <span
+                        className="text-xs px-2 py-0.5 rounded-full bg-surface-700 text-surface-300 font-mono max-w-[9rem] truncate"
+                        title={phase.model}
+                      >
+                        {phase.model.split('/').pop()}
                       </span>
                     )}
                     {phase.attempts && phase.attempts > 1 && (
@@ -820,7 +825,7 @@ export default function JobDetail() {
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center space-x-4 text-sm text-surface-400">
+                  <div className="flex items-center space-x-4 text-sm text-surface-400 shrink-0">
                     {phase.cost !== undefined && (
                       <span>${phase.cost.toFixed(4)}</span>
                     )}

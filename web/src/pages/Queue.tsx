@@ -336,7 +336,7 @@ export default function Queue() {
       )}
 
       {/* Filter Tabs */}
-      <div className="flex items-center space-x-1 bg-surface-800 rounded-lg p-1 w-fit">
+      <div className="flex items-center space-x-1 bg-surface-800 rounded-lg p-1 overflow-x-auto">
         {['all', 'pending', 'in_progress', 'completed', 'failed', 'cancelled'].map((status) => {
           const count = stats
             ? status === 'all'
@@ -348,7 +348,7 @@ export default function Queue() {
             <button
               key={status}
               onClick={() => handleFilterChange(status)}
-              className={`px-3 py-1.5 text-sm rounded-md transition-colors flex items-center space-x-1.5 ${
+              className={`px-3 py-1.5 text-sm rounded-md transition-colors flex items-center space-x-1.5 shrink-0 ${
                 filter === status
                   ? 'bg-surface-700 text-white'
                   : 'text-surface-400 hover:text-white'
@@ -384,7 +384,8 @@ export default function Queue() {
             No jobs found
           </div>
         ) : (
-          <table className="w-full">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[600px]">
             <thead className="bg-surface-850 border-b border-surface-700">
               <tr className="text-left text-sm text-surface-300">
                 <th className="px-4 py-3 font-medium">ID</th>
@@ -471,6 +472,7 @@ export default function Queue() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
         </div>
       )}
