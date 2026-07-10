@@ -441,6 +441,30 @@ class TestSpeakerLabelInconsistent:
         assert not any("Program" in v.message for v in violations)
         assert not any("Duration" in v.message for v in violations)
 
+    def test_field_label_stoplist_skips_note_annotation(self):
+        # A "**Note:**" inline annotation in the body shares the loose
+        # bold-colon shape with a real speaker label but is a known
+        # non-name field -- must be skipped at collection, not flagged as
+        # a malformed single-word speaker label.
+        body = (
+            "**John Smith:**\nDialogue text that is long enough to matter here.\n\n"
+            "**Note:** inline annotation about the edit.\n\n"
+            "**Sarah Johnson:**\nMore dialogue text that is also long enough."
+        )
+        rules = _rules()
+        result = run_lint({"formatter_output": _formatter_output(body=body)}, rules)
+        violations = _violations_for(result, "formatter", "lint.formatter.speaker_label_inconsistent")
+        assert not any("Note" in v.message for v in violations)
+
+    def test_field_label_stoplist_does_not_suppress_real_single_word_label(self):
+        # The stoplist must be narrow -- a genuine single-word speaker label
+        # not on the stoplist still fires.
+        body = "**Sarah:**\nDialogue text here that is long enough.\n\n**John Smith:**\nMore dialogue text."
+        rules = _rules()
+        result = run_lint({"formatter_output": _formatter_output(body=body)}, rules)
+        violations = _violations_for(result, "formatter", "lint.formatter.speaker_label_inconsistent")
+        assert any("Sarah" in v.message and "single word" in v.message for v in violations)
+
 
 # ---------------------------------------------------------------------------
 # lint.formatter.speaker_label_inconsistent -- liveness against the REAL

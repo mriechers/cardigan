@@ -83,6 +83,17 @@ _HONORIFIC_RE = re.compile(r"^(?:Dr|Mr|Ms|Mrs|Prof)\.?\s", re.IGNORECASE)
 # is only to find everything that looks label-shaped so it can be judged.
 _LOOSE_SPEAKER_LABEL_RE = re.compile(r"^\*\*[A-Z][\w.'-]*(?:\s[A-Z][\w.'-]*)*:\*\*", re.MULTILINE)
 
+# Known non-name field labels that share the loose "**Word:**" bold-colon
+# shape (e.g. "**Note:** inline annotation") but are never speaker labels.
+# Checked case-insensitively against a candidate's FIRST token only, so a
+# label like "**Notes on Sarah:**" is still skipped (it is not a name) while
+# a genuine name never collides (no legitimate speaker is named "Note").
+# Candidates matching this stoplist are skipped at COLLECTION time, before
+# the single-word/honorific/superset checks ever see them.
+_FIELD_LABEL_STOPLIST = frozenset(
+    {"note", "notes", "status", "warning", "important", "update", "correction", "source", "example"}
+)
+
 # (MM:SS) or (H:MM:SS) timecode markers, e.g. "(12:34)" / "(1:02:03)".
 _TIMECODE_RE = re.compile(r"\((\d{1,2}(?::\d{2}){1,2})\)")
 _DURATION_SLACK_SECONDS = 60
@@ -284,9 +295,12 @@ def _check_speaker_label_inconsistent(raw_output: str, rules: StyleRules, phase:
     seen: set[str] = set()
     for match in _LOOSE_SPEAKER_LABEL_RE.finditer(_body_region(raw_output)):
         name = _label_text(match.group(0))
-        if name and name not in seen:
-            seen.add(name)
-            labels.append(name)
+        if not name or name in seen:
+            continue
+        if name.split()[0].lower() in _FIELD_LABEL_STOPLIST:
+            continue
+        seen.add(name)
+        labels.append(name)
 
     violations: list[RuleViolation] = []
 

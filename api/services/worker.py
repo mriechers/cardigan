@@ -992,6 +992,7 @@ Extract any name or spelling corrections that should be added to the glossary. S
                 if phase_name == "validator" and phase_result.get("output"):
                     try:
                         validation_data = self._parse_validation_result(phase_result["output"])
+                        validation_data = await self._apply_style_lint(job_id, context, validation_data)
                         from api.models.job import JobUpdate as JU
                         from api.services.database import update_job as db_update_job
 
@@ -1437,6 +1438,7 @@ Extract any name or spelling corrections that should be added to the glossary. S
         reval = await self._run_phase(job_id, "validator", context, project_path)
         if reval and reval.get("success"):
             verdict = self._parse_validation_result(reval.get("output", ""))
+            verdict = await self._apply_style_lint(job_id, context, verdict)
             escalated_models["validator"] = {"model": reval.get("model"), "cost": reval.get("cost")}
         else:
             verdict = {"overall": "fail"}
@@ -2236,6 +2238,77 @@ Extract any name or spelling corrections that should be added to the glossary. S
             if isinstance(checks, dict):
                 checks.pop(phase_name, None)
             return content, None
+
+    async def _apply_style_lint(
+        self, job_id: int, context: Dict[str, Any], validation_data: Optional[dict]
+    ) -> Optional[dict]:
+        """Run the deterministic lint suite and merge style flags into the validator verdict.
+
+        Returns the (possibly merged) ``validation_data``. Fail-open: any
+        exception logs a warning and returns ``validation_data`` unchanged,
+        exactly as if the hook were off.
+
+        Shadow mode records ``context["lint_checks"]`` and logs
+        ``style_violation`` events (``source: "lint"``) but returns
+        ``validation_data`` untouched. Enforce mode combines each canonical
+        phase's post-stage ``context["style_checks"]`` entry (if any, from
+        ``_apply_style_post``) with its ``run_lint`` result -- post-stage
+        violations first, lint violations appended after, deduped by
+        ``(rule_id, message)`` -- and merges the combined result into
+        ``validation_data`` via ``merge_style_flags`` so BOTH deterministic
+        sources (not lint alone) reach the persisted QA verdict.
+        """
+        cfg = self._style_cfg()
+        mode = cfg.get("phases", {}).get("validator", {}).get("lint", "off")
+        if not (cfg.get("enabled") and mode in ("shadow", "enforce")):
+            return validation_data
+        try:
+            from api.services.style_engine import load_rules, merge_style_flags, run_lint
+
+            rules = load_rules(cfg.get("rules_file", "config/house_style.yaml"))
+            lint_results = run_lint(context, rules)  # {phase: PhaseCheckResult}
+
+            # Combine: post-stage style_checks (context) + lint results, per
+            # phase -- post-stage violations first, lint appended after,
+            # deduped by (rule_id, message) within a phase.
+            post_checks = context.get("style_checks") or {}
+            combined: Dict[str, dict] = {}
+            for phase, lint_check in lint_results.items():
+                lint_dict = lint_check.to_dict()
+                post_violations = list((post_checks.get(phase) or {}).get("violations") or [])
+                seen = {(v.get("rule_id"), v.get("message")) for v in post_violations}
+                merged_violations = list(post_violations)
+                for violation in lint_dict.get("violations") or []:
+                    key = (violation.get("rule_id"), violation.get("message"))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    merged_violations.append(violation)
+                combined[phase] = {**lint_dict, "violations": merged_violations}
+
+            for phase, check in lint_results.items():
+                for violation in check.violations:
+                    await log_event(
+                        EventCreate(
+                            job_id=job_id,
+                            event_type=EventType.style_violation,
+                            data=EventData(
+                                phase=phase,
+                                extra={**violation.to_dict(), "source": "lint", "mode": mode},
+                            ),
+                        )
+                    )
+
+            context["lint_checks"] = {p: c.to_dict() for p, c in lint_results.items()}
+
+            if mode == "shadow":
+                return validation_data  # record-only
+
+            return merge_style_flags(validation_data, combined, cfg.get("qa_gate", {}))
+        except Exception:
+            logger.warning("style lint failed open", extra={"job_id": job_id}, exc_info=True)
+            context.pop("lint_checks", None)  # no partial state (1b precedent)
+            return validation_data
 
     @staticmethod
     def _section_tail(content: str, max_chars: int = 200) -> str:

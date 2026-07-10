@@ -20,12 +20,15 @@ Follows tests/api/test_worker.py's fixture/mocking conventions (mock_llm_client,
 mock_llm_response, AGENTS_DIR patched to redirect into tmp_path).
 """
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
 
 from api.models.events import EventType
+from api.services import worker as worker_mod
+from api.services.escalation import classify_qa_failure
 from api.services.worker import JobWorker
 
 # ---------------------------------------------------------------------------
@@ -59,13 +62,16 @@ def mock_llm_response():
     return response
 
 
-def _style_engine_cfg(rules_file, phases=None, enabled=True, keep_raw_on_fix=True):
-    return {
+def _style_engine_cfg(rules_file, phases=None, enabled=True, keep_raw_on_fix=True, qa_gate=None):
+    cfg = {
         "enabled": enabled,
         "rules_file": str(rules_file),
         "keep_raw_on_fix": keep_raw_on_fix,
         "phases": phases or {},
     }
+    if qa_gate is not None:
+        cfg["qa_gate"] = qa_gate
+    return cfg
 
 
 def _write_rules(tmp_path, title_max=80, short_max=90, long_max=350):
@@ -652,3 +658,304 @@ class TestFailOpen:
             "style_checks[seo] should be cleaned up on fail-open, "
             "but survived with partial state"
         )
+
+
+# ---------------------------------------------------------------------------
+# 5. Validator lint + merge hook (_apply_style_lint, task 2b)
+#
+# Wires `run_lint`/`merge_style_flags` (api/services/style_engine/{lint,
+# qa_merge}.py, task 2a) into the worker's validation flow behind
+# `routing.style_engine.phases.validator.lint` (off | shadow | enforce).
+# ---------------------------------------------------------------------------
+
+
+def _bare_worker(style_engine_cfg: dict) -> JobWorker:
+    """A JobWorker with only `llm.config.routing.style_engine` stubbed --
+    enough for `_apply_style_lint` (and, for the wiring test below,
+    `_finalize_with_qa_gate`) without touching the DB/queue machinery."""
+    worker = JobWorker.__new__(JobWorker)
+    worker.llm = MagicMock()
+    worker.llm.config = {"routing": {"style_engine": style_engine_cfg}}
+    return worker
+
+
+_CLEAN_FORMATTER_BODY = (
+    "**John Smith:**\nDialogue text that is long enough to matter here and ends properly."
+)
+
+
+def _passing_verdict() -> dict:
+    return {
+        "overall": "pass",
+        "phase_results": {
+            "analyst": {"status": "pass", "flags": []},
+            "formatter": {"status": "pass", "flags": []},
+            "seo": {"status": "pass", "flags": []},
+        },
+    }
+
+
+class TestValidatorLintHook:
+    @pytest.mark.asyncio
+    async def test_lint_off_explicit_is_passthrough(self, tmp_path, monkeypatch):
+        """`validator.lint: "off"` -- the explicit off case (kill switch is
+        covered generally by test_worker.py staying green; this is the
+        lint-specific off assertion)."""
+        rules_path = _write_rules(tmp_path)
+        cfg = _style_engine_cfg(rules_path, phases={"validator": {"lint": "off"}})
+        worker = _bare_worker(cfg)
+        monkeypatch.setattr(worker_mod, "log_event", AsyncMock())
+
+        context = {
+            "analyst_output": ANALYST_TABLE,
+            "formatter_output": _CLEAN_FORMATTER_BODY,
+            "seo_output": _seo_report("A reasonably short seo title"),
+        }
+        validation_data = _passing_verdict()
+
+        result = await worker._apply_style_lint(job_id=1, context=context, validation_data=validation_data)
+
+        assert result is validation_data
+        assert "lint_checks" not in context
+
+    @pytest.mark.asyncio
+    async def test_shadow_records_events_and_lint_checks_without_merging(self, tmp_path, monkeypatch):
+        rules_path = _write_rules(tmp_path, title_max=40)
+        cfg = _style_engine_cfg(rules_path, phases={"validator": {"lint": "shadow"}})
+        worker = _bare_worker(cfg)
+
+        logged_events = []
+
+        async def _capture(event):
+            logged_events.append(event)
+
+        monkeypatch.setattr(worker_mod, "log_event", _capture)
+
+        over_limit_title = "This SEO Title Is Deliberately Written To Exceed The Forty Character Limit"
+        context = {
+            "analyst_output": ANALYST_TABLE,
+            "formatter_output": _CLEAN_FORMATTER_BODY,
+            "seo_output": _seo_report(over_limit_title),
+        }
+        validation_data = _passing_verdict()
+
+        result = await worker._apply_style_lint(job_id=1, context=context, validation_data=validation_data)
+
+        # Shadow mode is strictly record-only -- same object, no merge.
+        assert result is validation_data
+
+        assert "lint_checks" in context
+        seo_violations = context["lint_checks"]["seo"]["violations"]
+        assert any(v["rule_id"] == "lint.seo.title_over_limit" for v in seo_violations)
+
+        lint_events = [e for e in logged_events if e.event_type == EventType.style_violation]
+        assert lint_events, "expected at least one style_violation event from the lint suite"
+        assert all(e.data.extra.get("source") == "lint" for e in lint_events)
+        assert all(e.data.extra.get("mode") == "shadow" for e in lint_events)
+
+    @pytest.mark.asyncio
+    async def test_enforce_fail_on_error_appends_flag_and_flips_status(self, tmp_path, monkeypatch):
+        rules_path = _write_rules(tmp_path, title_max=40)
+        cfg = _style_engine_cfg(
+            rules_path,
+            phases={"validator": {"lint": "enforce"}},
+            qa_gate={"merge_flags": True, "fail_on_error": True},
+        )
+        worker = _bare_worker(cfg)
+        monkeypatch.setattr(worker_mod, "log_event", AsyncMock())
+
+        over_limit_title = "This SEO Title Is Deliberately Written To Exceed The Forty Character Limit"
+        context = {
+            "analyst_output": ANALYST_TABLE,
+            "formatter_output": _CLEAN_FORMATTER_BODY,
+            "seo_output": _seo_report(over_limit_title),
+        }
+        validation_data = _passing_verdict()
+
+        result = await worker._apply_style_lint(job_id=1, context=context, validation_data=validation_data)
+
+        assert result is not validation_data  # merge returns a fresh dict
+        seo_flags = result["phase_results"]["seo"]["flags"]
+        assert any(f.startswith("[style:lint.seo.title_over_limit]") for f in seo_flags)
+        assert result["phase_results"]["seo"]["status"] == "fail"
+        assert result["overall"] == "fail"
+        # merge_style_flags never mutates its input.
+        assert validation_data["overall"] == "pass"
+        assert validation_data["phase_results"]["seo"]["flags"] == []
+
+    @pytest.mark.asyncio
+    async def test_enforce_nonfixable_lint_hit_routes_escalation_false(self, tmp_path, monkeypatch):
+        """Formatter output missing -> lint.output_missing (model_fixable=False)
+        -> merged flag carries the "[style-nonfixable:...]" prefix ->
+        classify_qa_failure over the MERGED result returns escalate=False.
+        Proves the end-to-end routing the escalation.py change enables."""
+        rules_path = _write_rules(tmp_path)
+        cfg = _style_engine_cfg(
+            rules_path,
+            phases={"validator": {"lint": "enforce"}},
+            qa_gate={"merge_flags": True, "fail_on_error": True},
+        )
+        worker = _bare_worker(cfg)
+        monkeypatch.setattr(worker_mod, "log_event", AsyncMock())
+
+        context = {
+            "analyst_output": ANALYST_TABLE,
+            # formatter_output intentionally omitted -> lint.output_missing
+            "seo_output": _seo_report("A reasonably short seo title"),
+        }
+        validation_data = _passing_verdict()
+
+        result = await worker._apply_style_lint(job_id=1, context=context, validation_data=validation_data)
+
+        formatter_flags = result["phase_results"]["formatter"]["flags"]
+        assert any(f.startswith("[style-nonfixable:lint.output_missing]") for f in formatter_flags)
+        assert result["phase_results"]["formatter"]["status"] == "fail"
+        assert result["overall"] == "fail"
+
+        classed = classify_qa_failure(result, context)
+        assert classed["escalate"] is False
+        assert classed["nonfixable"]
+
+    @pytest.mark.asyncio
+    async def test_fail_open_on_bogus_rules_file(self, tmp_path, monkeypatch):
+        cfg = _style_engine_cfg(
+            tmp_path / "does_not_exist.yaml",
+            phases={"validator": {"lint": "enforce"}},
+            qa_gate={"merge_flags": True, "fail_on_error": True},
+        )
+        worker = _bare_worker(cfg)
+        monkeypatch.setattr(worker_mod, "log_event", AsyncMock())
+        warning_calls = []
+        monkeypatch.setattr(
+            worker_mod.logger, "warning", lambda *a, **kw: warning_calls.append((a, kw))
+        )
+
+        context = {
+            "analyst_output": ANALYST_TABLE,
+            "formatter_output": _CLEAN_FORMATTER_BODY,
+            "seo_output": _seo_report("A reasonably short seo title"),
+        }
+        validation_data = _passing_verdict()
+
+        result = await worker._apply_style_lint(job_id=1, context=context, validation_data=validation_data)
+
+        assert result is validation_data
+        assert "lint_checks" not in context
+        assert warning_calls, "fail-open must log a warning"
+
+    @pytest.mark.asyncio
+    async def test_none_validation_data_enforce_builds_merged_skeleton(self, tmp_path, monkeypatch):
+        """Unparseable LLM validator output -> validation_data is None ->
+        _apply_style_lint must still merge the lint flags into qa_merge's
+        None-skeleton (exercises qa_merge's None path through the worker)."""
+        rules_path = _write_rules(tmp_path)
+        cfg = _style_engine_cfg(
+            rules_path,
+            phases={"validator": {"lint": "enforce"}},
+            qa_gate={"merge_flags": True, "fail_on_error": True},
+        )
+        worker = _bare_worker(cfg)
+        monkeypatch.setattr(worker_mod, "log_event", AsyncMock())
+
+        context: dict = {}  # all 3 canonical phase outputs missing
+
+        result = await worker._apply_style_lint(job_id=1, context=context, validation_data=None)
+
+        assert result["_merged_from_none"] is True
+        assert result["overall"] == "fail"
+        for phase in ("analyst", "formatter", "seo"):
+            flags = result["phase_results"][phase]["flags"]
+            assert any(f.startswith("[style-nonfixable:lint.output_missing]") for f in flags)
+            assert result["phase_results"][phase]["status"] == "fail"
+
+
+class TestFinalizeQaGateLintWiring:
+    """Proves the SECOND call site (`_finalize_with_qa_gate`'s re-validation
+    parse, ~worker.py:1440) routes through `_apply_style_lint` before the
+    merged verdict decides completed vs. paused -- not just the main-loop
+    parse point covered by TestValidatorLintHook above."""
+
+    @pytest.mark.asyncio
+    async def test_revalidation_merges_lint_flags_before_gate_decision(self, tmp_path, monkeypatch):
+        rules_path = _write_rules(tmp_path)
+        style_cfg = _style_engine_cfg(
+            rules_path,
+            phases={"validator": {"lint": "enforce"}},
+            qa_gate={"merge_flags": True, "fail_on_error": True},
+        )
+
+        worker = JobWorker.__new__(JobWorker)
+        worker.llm = MagicMock()
+        worker.llm.config = {
+            "qa_escalation": {
+                "on_validation_fail": True,
+                "max_auto_escalations": 1,
+                "exclude_variants": ["fast", "fable"],
+            },
+            "routing": {"style_engine": style_cfg},
+        }
+
+        monkeypatch.setattr(worker_mod, "get_job", AsyncMock(return_value=None))
+        monkeypatch.setattr(
+            worker_mod, "resolve_escalated_model", AsyncMock(return_value="anthropic/claude-sonnet-4-6")
+        )
+        pause = AsyncMock()
+        monkeypatch.setattr(worker_mod, "pause_and_suggest", pause)
+        update_job_mock = AsyncMock()
+        monkeypatch.setattr(worker_mod, "update_job", update_job_mock)
+        monkeypatch.setattr(worker_mod, "log_event", AsyncMock())
+
+        passing_verdict_json = json.dumps(_passing_verdict())
+        escalated_seo_output = (
+            "Escalated seo output content that is comfortably longer than the "
+            "fifty character substantive-length floor."
+        )
+
+        async def fake_run_phase(job_id, phase_name, context, project_path, model_override=None):
+            if phase_name == "validator":
+                return {"success": True, "output": passing_verdict_json, "model": "validator-model"}
+            return {"success": True, "output": escalated_seo_output, "model": "strong-model"}
+
+        monkeypatch.setattr(worker, "_run_phase", fake_run_phase)
+
+        initial_validation_result = {
+            "overall": "fail",
+            "phase_results": {
+                "analyst": {"status": "pass", "flags": []},
+                "formatter": {"status": "pass", "flags": []},
+                "seo": {"status": "fail", "flags": ["seo title needs shortening"]},
+            },
+        }
+        context = {
+            "analyst_output": ANALYST_TABLE,
+            "seo_output": "stale pre-escalation seo output",
+            # formatter_output intentionally omitted -- lint.output_missing
+            # fires during the re-validation's _apply_style_lint call even
+            # though the LLM's re-validation JSON claims formatter passed.
+        }
+
+        outcome = await worker._finalize_with_qa_gate(
+            job_id=99,
+            context=context,
+            project_path=str(tmp_path),
+            validation_result=initial_validation_result,
+            phase_order=["analyst", "formatter", "seo", "validator"],
+        )
+
+        # Without the merge wired in, the LLM's re-validation JSON says
+        # "pass" and the gate would complete. With it wired in, the missing
+        # formatter output surfaces a non-fixable flag that flips the
+        # persisted verdict to "fail" -- the gate must pause instead.
+        assert outcome == "paused"
+        pause.assert_awaited_once()
+
+        persisted = [
+            c.args[1]
+            for c in update_job_mock.await_args_list
+            if len(c.args) >= 2 and hasattr(c.args[1], "validation_result")
+        ]
+        assert persisted, "update_job was never called with a validation_result payload"
+        merged = persisted[-1].validation_result
+        assert merged["overall"] == "fail"
+        formatter_flags = merged["phase_results"]["formatter"]["flags"]
+        assert any(f.startswith("[style-nonfixable:lint.output_missing]") for f in formatter_flags)
