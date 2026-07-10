@@ -26,6 +26,7 @@ class EventType(str, Enum):
     user_action = "user_action"
     api_call = "api_call"
     job_deferred = "job_deferred"  # local backend busy; job requeued with backoff
+    style_violation = "style_violation"  # house-style rule violation flagged by the style engine
 
 
 class EventData(BaseModel):

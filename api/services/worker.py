@@ -9,7 +9,7 @@ import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from api.models.events import EventCreate, EventData, EventType
 from api.models.job import JobStatus
@@ -43,7 +43,7 @@ from api.services.llm import (
     start_run_tracking,
 )
 from api.services.logging import get_logger, setup_logging
-from api.services.style_engine import render_prompt_blocks
+from api.services.style_engine import PostStageResult, render_prompt_blocks
 from api.services.style_engine.prompt_blocks import resolve_prompt_profile
 from api.services.utils import calculate_transcript_metrics
 
@@ -1930,6 +1930,31 @@ Extract any name or spelling corrections that should be added to the glossary. S
 
                 context["transcript"] = split_interior_speaker_changes(context.get("transcript", ""))
 
+        # Style-engine pre-generation hook (kill-switched by default; see
+        # routing.style_engine in config/llm-config.json). Placed ahead of the
+        # chunking branch so a chunked formatter path would inherit it once
+        # that phase is wired (later task). Stale-state guard is unconditional
+        # so a prior phase's style_pre never leaks into this phase's prompt.
+        context.pop("style_pre", None)
+        style_cfg = self._style_cfg()
+        if style_cfg.get("enabled") and style_cfg.get("phases", {}).get(phase_name, {}).get("pre"):
+            try:
+                from api.services.style_engine import load_rules, run_pre_stage
+
+                pre = run_pre_stage(
+                    phase_name,
+                    context,
+                    load_rules(style_cfg.get("rules_file", "config/house_style.yaml")),
+                )
+                if pre.prompt_section:
+                    context["style_pre"] = {"prompt_section": pre.prompt_section, **pre.data}
+            except Exception:
+                logger.warning(
+                    "style pre-stage failed open",
+                    extra={"job_id": job_id, "phase": phase_name},
+                    exc_info=True,
+                )
+
         # Check for chunked formatter processing
         if phase_name == "formatter":
             chunking_config = self.llm.config.get("routing", {}).get("chunking", {})
@@ -2013,6 +2038,17 @@ Extract any name or spelling corrections that should be added to the glossary. S
                 timeout=effective_timeout,
             )
 
+            # Style-engine post-generation hook (kill-switched by default; see
+            # routing.style_engine in config/llm-config.json). Shadow mode
+            # records checks/events but returns the raw content unchanged;
+            # enforce mode returns normalized content plus the full result so
+            # the persist step below can write provenance + a pre-fix raw
+            # archive. Off (default) returns (response.content, None) as a
+            # pure passthrough.
+            final_content, style_post = await self._apply_style_post(
+                job_id, phase_name, response.content, context, project_path
+            )
+
             # Save output
             output_file = project_path / f"{phase_name}_output.md"
             if output_file.exists():
@@ -2029,7 +2065,13 @@ Extract any name or spelling corrections that should be added to the glossary. S
             provenance_header = (
                 f"<!-- model: {response.model} | cost: ${response.cost:.4f} | tokens: {response.total_tokens} -->\n"
             )
-            output_file.write_text(provenance_header + response.content)
+            style_line = ""
+            if style_post is not None:
+                style_line = (
+                    f"<!-- style-engine: fixes: {len(style_post.check.fixes)} | "
+                    f"flags: {len(style_post.check.violations)} -->\n"
+                )
+            output_file.write_text(provenance_header + style_line + final_content)
 
             # Log phase completed
             await log_event(
@@ -2047,7 +2089,7 @@ Extract any name or spelling corrections that should be added to the glossary. S
 
             return {
                 "success": True,
-                "output": response.content,
+                "output": final_content,
                 "cost": response.cost,
                 "tokens": response.total_tokens,
                 "input_tokens": response.input_tokens,
@@ -2112,6 +2154,81 @@ Extract any name or spelling corrections that should be added to the glossary. S
                 )
             )
             return {"success": False, "error": str(e), "cost": 0, "tokens": 0}
+
+    def _style_cfg(self) -> dict:
+        """The `routing.style_engine` config block (empty dict when absent).
+
+        Absent block, or `enabled: false`, or a phase mode of "off" is the
+        kill switch: every hook that reads this must degrade to a no-op.
+        """
+        return self.llm.config.get("routing", {}).get("style_engine", {}) or {}
+
+    async def _apply_style_post(
+        self,
+        job_id: int,
+        phase_name: str,
+        content: str,
+        context: Dict[str, Any],
+        project_path: Path,
+    ) -> Tuple[str, Optional[PostStageResult]]:
+        """Run the style-engine post-generation stage for one phase's raw output.
+
+        Returns ``(final_content, PostStageResult | None)``. Fail-open on any
+        exception (rules load failure, engine bug, event-logging failure) --
+        logs a warning and returns the original ``content`` unchanged, exactly
+        as if the hook were off. The engine can never fail a job.
+
+        Shadow mode records events + `context["style_checks"]` but returns the
+        raw ``content`` untouched (``PostStageResult`` is discarded -- callers
+        use the ``None`` sentinel to know no provenance/raw-archive handling
+        is needed). Enforce mode returns the normalized output and the full
+        result so the caller can persist provenance + the pre-normalization
+        raw file.
+        """
+        cfg = self._style_cfg()
+        mode = cfg.get("phases", {}).get(phase_name, {}).get("post", "off")
+        if not (cfg.get("enabled") and mode in ("shadow", "enforce")):
+            return content, None
+        try:
+            from api.services.style_engine import load_rules, run_post_stage
+
+            post = run_post_stage(
+                phase_name,
+                content,
+                context,
+                load_rules(cfg.get("rules_file", "config/house_style.yaml")),
+            )
+            context.setdefault("style_checks", {})[phase_name] = post.check.to_dict()
+            for violation in post.check.violations:
+                await log_event(
+                    EventCreate(
+                        job_id=job_id,
+                        event_type=EventType.style_violation,
+                        data=EventData(
+                            phase=phase_name,
+                            extra={
+                                **violation.to_dict(),
+                                "mode": mode,
+                                "action": "flagged" if mode == "enforce" else "shadow",
+                            },
+                        ),
+                    )
+                )
+
+            if mode == "shadow":
+                return content, None  # record-only: raw content flows
+
+            if post.changed and cfg.get("keep_raw_on_fix", True):
+                (project_path / f"{phase_name}_output.raw.md").write_text(content)
+
+            return post.normalized_output, post
+        except Exception:
+            logger.warning(
+                "style post-stage failed open",
+                extra={"job_id": job_id, "phase": phase_name},
+                exc_info=True,
+            )
+            return content, None
 
     @staticmethod
     def _section_tail(content: str, max_chars: int = 200) -> str:
@@ -2591,6 +2708,13 @@ Output a structured JSON checklist with:
             prompt += "\n\n## Previous Output (for reference)\n\n"
             prompt += "Use this as a starting point. Fix the flagged issues while preserving what worked:\n\n"
             prompt += f"---\n{previous_output}\n---"
+
+        # Append the style-engine pre-generation prompt section (if the
+        # kill-switched hook in `_run_phase` produced one for this phase).
+        style_pre = context.get("style_pre") or {}
+        section = style_pre.get("prompt_section")
+        if section:
+            prompt = f"{prompt}\n\n{section}"
 
         return prompt
 
