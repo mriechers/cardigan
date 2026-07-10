@@ -1,0 +1,300 @@
+"""Tests for the style_engine prompt-block token renderer.
+
+Covers api.services.style_engine.prompt_blocks: substituting
+``{{style:KEY}}`` tokens in agent prompt text with rule text drawn from the
+house-style rules YAML's ``prompt_blocks`` section, plus the pure
+``resolve_prompt_profile`` helper used by the worker to pick the "full" vs
+"slim" profile. All rule data is synthetic (built with pytest's ``tmp_path``
+fixture) except the no-op guarantee tests, which read the real
+``prompts/*.md`` files to prove this task changed no prompt content.
+
+Mirrors the fixture/helper style of tests/test_style_rules.py.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from api.services.style_engine.prompt_blocks import (
+    PromptBlockError,
+    render_prompt_blocks,
+    resolve_prompt_profile,
+)
+
+PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
+
+REAL_PROMPT_PHASES = ["analyst", "formatter", "seo", "validator", "timestamp", "copy_editor"]
+
+# ---------------------------------------------------------------------------
+# Fixtures / helpers
+# ---------------------------------------------------------------------------
+
+MINIMAL_YAML = 'meta: {version: 1, style_guide_synced: "2026-07-10"}\n'
+
+SAMPLE_YAML = r"""
+meta: {version: 1, style_guide_synced: "2026-07-10"}
+prompt_blocks:
+  voice_rules:
+    full: |
+      Avoid viewer directives like "watch as" or "discover."
+      Never use first-person promotional voice ("we break down").
+    slim: |
+      No viewer directives. No first-person promo voice.
+  casing_rules:
+    full: |
+      Use down style casing except for proper nouns.
+"""
+
+NESTED_TOKEN_YAML = r"""
+meta: {version: 1, style_guide_synced: "2026-07-10"}
+prompt_blocks:
+  outer:
+    full: "See also {{style:other}} for details."
+"""
+
+NEWLINE_YAML = r"""
+meta: {version: 1, style_guide_synced: "2026-07-10"}
+prompt_blocks:
+  block_a:
+    full: |
+      Rule line one.
+      Rule line two.
+"""
+
+GOLDEN_YAML = r"""
+meta: {version: 1, style_guide_synced: "2026-07-10"}
+prompt_blocks:
+  greeting:
+    full: |
+      Hello there.
+      Be kind.
+"""
+
+
+def _write(tmp_path: Path, content: str, name: str = "house_style.yaml") -> Path:
+    """Write synthetic YAML content to a file under tmp_path and return its path."""
+    path = tmp_path / name
+    path.write_text(content)
+    return path
+
+
+# ---------------------------------------------------------------------------
+# 1. Identity: token-free text short-circuits without loading rules
+# ---------------------------------------------------------------------------
+
+
+def test_identity_no_token_returns_unchanged_without_loading_rules(tmp_path: Path) -> None:
+    text = "You are the SEO agent for PBS Wisconsin. Write a title under 60 characters."
+    missing_rules = tmp_path / "nonexistent.yaml"
+
+    # Must NOT raise even though missing_rules does not exist -- proves the
+    # rules file is never touched when there are no tokens.
+    result = render_prompt_blocks(text, rules_path=missing_rules)
+
+    assert result == text
+
+
+# ---------------------------------------------------------------------------
+# 2. Single + multiple token substitution
+# ---------------------------------------------------------------------------
+
+
+def test_single_token_substitution(tmp_path: Path) -> None:
+    rules_path = _write(tmp_path, SAMPLE_YAML)
+    text = "Intro.\n\n{{style:voice_rules}}\n\nOutro."
+
+    result = render_prompt_blocks(text, rules_path=rules_path)
+
+    assert "{{style:voice_rules}}" not in result
+    assert "watch as" in result
+    assert "we break down" in result
+
+
+def test_multiple_token_substitution(tmp_path: Path) -> None:
+    rules_path = _write(tmp_path, SAMPLE_YAML)
+    text = "{{style:voice_rules}}\n\n{{style:casing_rules}}"
+
+    result = render_prompt_blocks(text, rules_path=rules_path)
+
+    assert "viewer directives" in result
+    assert "down style casing" in result
+    assert "{{style:" not in result
+
+
+# ---------------------------------------------------------------------------
+# 3. Profile selection
+# ---------------------------------------------------------------------------
+
+
+def test_profile_slim_selects_slim_text(tmp_path: Path) -> None:
+    rules_path = _write(tmp_path, SAMPLE_YAML)
+    text = "{{style:voice_rules}}"
+
+    result = render_prompt_blocks(text, profile="slim", rules_path=rules_path)
+
+    assert result == "No viewer directives. No first-person promo voice."
+
+
+def test_profile_falls_back_to_full_when_slim_missing(tmp_path: Path) -> None:
+    rules_path = _write(tmp_path, SAMPLE_YAML)
+    text = "{{style:casing_rules}}"
+
+    result = render_prompt_blocks(text, profile="slim", rules_path=rules_path)
+
+    assert result == "Use down style casing except for proper nouns."
+
+
+# ---------------------------------------------------------------------------
+# 4. Errors
+# ---------------------------------------------------------------------------
+
+
+def test_unknown_key_raises_naming_the_key(tmp_path: Path) -> None:
+    rules_path = _write(tmp_path, SAMPLE_YAML)
+    text = "{{style:nonexistent_key}}"
+
+    with pytest.raises(PromptBlockError, match="nonexistent_key"):
+        render_prompt_blocks(text, rules_path=rules_path)
+
+
+def test_missing_prompt_blocks_section_raises(tmp_path: Path) -> None:
+    rules_path = _write(tmp_path, MINIMAL_YAML)
+    text = "{{style:voice_rules}}"
+
+    with pytest.raises(PromptBlockError, match="prompt_blocks"):
+        render_prompt_blocks(text, rules_path=rules_path)
+
+
+def test_missing_rules_file_raises(tmp_path: Path) -> None:
+    text = "{{style:voice_rules}}"
+    missing_rules = tmp_path / "nonexistent.yaml"
+
+    with pytest.raises(PromptBlockError):
+        render_prompt_blocks(text, rules_path=missing_rules)
+
+
+def test_profile_and_key_both_missing_raises(tmp_path: Path) -> None:
+    # A block that has neither the requested profile nor a "full" fallback.
+    yaml_text = """
+meta: {version: 1, style_guide_synced: "2026-07-10"}
+prompt_blocks:
+  weird_block:
+    slim: "slim only"
+"""
+    rules_path = _write(tmp_path, yaml_text)
+    text = "{{style:weird_block}}"
+
+    with pytest.raises(PromptBlockError, match="weird_block"):
+        render_prompt_blocks(text, profile="enforce", rules_path=rules_path)
+
+
+# ---------------------------------------------------------------------------
+# 5. No re-expansion (single pass)
+# ---------------------------------------------------------------------------
+
+
+def test_no_reexpansion_of_nested_token(tmp_path: Path) -> None:
+    rules_path = _write(tmp_path, NESTED_TOKEN_YAML)
+    text = "{{style:outer}}"
+
+    # If this were multi-pass, the literal {{style:other}} inside the
+    # rendered block would be looked up too and raise (no "other" key
+    # exists in prompt_blocks). Single-pass substitution leaves it literal.
+    result = render_prompt_blocks(text, rules_path=rules_path)
+
+    assert result == "See also {{style:other}} for details."
+
+
+# ---------------------------------------------------------------------------
+# 6. Trailing-newline handling
+# ---------------------------------------------------------------------------
+
+
+def test_trailing_newline_stripped_once_no_doubled_blank_lines(tmp_path: Path) -> None:
+    rules_path = _write(tmp_path, NEWLINE_YAML)
+    text = "Before.\n{{style:block_a}}\nAfter."
+
+    result = render_prompt_blocks(text, rules_path=rules_path)
+
+    assert result == "Before.\nRule line one.\nRule line two.\nAfter."
+    assert "\n\n\n" not in result
+    assert "\n\n" not in result
+
+
+# ---------------------------------------------------------------------------
+# 7. No-op guarantee on real prompts
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("phase", REAL_PROMPT_PHASES)
+def test_no_op_guarantee_on_real_prompt_files(phase: str) -> None:
+    prompt_path = PROMPTS_DIR / f"{phase}.md"
+    content = prompt_path.read_text()
+
+    # Guards that this task did not add tokens to any prompt file.
+    assert "{{style:" not in content
+
+    # And proves the renderer is a true identity function on that content
+    # (uses the DEFAULT_RULES_PATH default -- irrelevant here since the
+    # short-circuit means the rules file is never touched).
+    assert render_prompt_blocks(content) == content
+
+
+# ---------------------------------------------------------------------------
+# 8. Snapshot: golden-string test
+# ---------------------------------------------------------------------------
+
+
+def test_golden_snapshot_exact_rendered_output(tmp_path: Path) -> None:
+    rules_path = _write(tmp_path, GOLDEN_YAML)
+    text = "# SEO Agent\n\n{{style:greeting}}\n\nWrite a title under 60 characters."
+
+    result = render_prompt_blocks(text, rules_path=rules_path)
+
+    assert result == ("# SEO Agent\n\nHello there.\nBe kind.\n\nWrite a title under 60 characters.")
+
+
+# ---------------------------------------------------------------------------
+# 9. Worker wiring: resolve_prompt_profile pure function
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_prompt_profile_missing_cfg_returns_full() -> None:
+    assert resolve_prompt_profile({}, "seo") == "full"
+
+
+def test_resolve_prompt_profile_disabled_returns_full() -> None:
+    cfg = {"enabled": False, "phases": {"seo": {"post": "enforce"}}}
+    assert resolve_prompt_profile(cfg, "seo") == "full"
+
+
+def test_resolve_prompt_profile_enabled_mode_off_returns_full() -> None:
+    cfg = {"enabled": True, "phases": {"seo": {"post": "off"}}}
+    assert resolve_prompt_profile(cfg, "seo") == "full"
+
+
+def test_resolve_prompt_profile_enabled_mode_shadow_returns_full() -> None:
+    cfg = {"enabled": True, "phases": {"seo": {"post": "shadow"}}}
+    assert resolve_prompt_profile(cfg, "seo") == "full"
+
+
+def test_resolve_prompt_profile_enabled_mode_enforce_returns_slim() -> None:
+    cfg = {"enabled": True, "phases": {"seo": {"post": "enforce"}}}
+    assert resolve_prompt_profile(cfg, "seo") == "slim"
+
+
+def test_resolve_prompt_profile_phase_missing_defaults_full() -> None:
+    cfg = {"enabled": True, "phases": {}}
+    assert resolve_prompt_profile(cfg, "seo") == "full"
+
+
+def test_resolve_prompt_profile_validator_uses_lint_key_not_post() -> None:
+    cfg = {"enabled": True, "phases": {"validator": {"lint": "enforce", "post": "off"}}}
+    assert resolve_prompt_profile(cfg, "validator") == "slim"
+
+
+def test_resolve_prompt_profile_validator_missing_lint_defaults_full() -> None:
+    cfg = {"enabled": True, "phases": {"validator": {"post": "enforce"}}}
+    assert resolve_prompt_profile(cfg, "validator") == "full"

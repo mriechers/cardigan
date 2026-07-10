@@ -43,6 +43,8 @@ from api.services.llm import (
     start_run_tracking,
 )
 from api.services.logging import get_logger, setup_logging
+from api.services.style_engine import render_prompt_blocks
+from api.services.style_engine.prompt_blocks import resolve_prompt_profile
 from api.services.utils import calculate_transcript_metrics
 
 # Initialize logging for worker
@@ -2458,6 +2460,18 @@ Please format this transcript section:
                 "cost": 0,
             }
 
+    def _style_prompt_profile(self, phase_name: str) -> str:
+        """Which prompt-block profile ("full" or "slim") to render for this phase.
+
+        Reads `routing.style_engine` from the LLM config (empty dict when
+        absent, which is the case today -- no prompt contains tokens yet, so
+        this always resolves to "full"). Delegates to the pure
+        `resolve_prompt_profile` so the selection logic is unit-testable
+        without a DB-backed worker.
+        """
+        cfg = self.llm.config.get("routing", {}).get("style_engine", {})
+        return resolve_prompt_profile(cfg, phase_name)
+
     def _load_agent_prompt(self, phase_name: str, model: Optional[str] = None) -> str:
         """Load the system prompt for an agent phase.
 
@@ -2467,6 +2481,12 @@ Please format this transcript section:
           the model identifier, if provided. Without this, the LLM would
           hallucinate (typically a date near its training cutoff and a generic
           model name).
+
+        Finally, whichever path produced the text (file or hardcoded
+        fallback), it flows through a single `render_prompt_blocks` call at
+        the end of this method to substitute any `{{style:KEY}}` tokens. No
+        prompt contains tokens today, so this is a no-op short-circuit; it
+        becomes live as later tasks add tokens.
         """
         prompt_file = AGENTS_DIR / f"{phase_name}.md"
 
@@ -2479,11 +2499,10 @@ Please format this transcript section:
             if model:
                 text = text.replace("{model name you are running as}", model)
                 text = text.replace("{the model you are running as}", model)
-            return text
-
-        # Fallback prompts if files don't exist
-        fallback_prompts = {
-            "analyst": """You are a transcript analyst for PBS Wisconsin. Your role is to analyze raw video transcripts and identify:
+        else:
+            # Fallback prompts if files don't exist
+            fallback_prompts = {
+                "analyst": """You are a transcript analyst for PBS Wisconsin. Your role is to analyze raw video transcripts and identify:
 
 1. Key topics and themes discussed
 2. Speaker identification and roles
@@ -2492,7 +2511,7 @@ Please format this transcript section:
 5. Items that may need human review (unclear audio, names to verify)
 
 Output a detailed analysis document in markdown format that will guide the formatting and SEO agents.""",
-            "formatter": """You are a transcript formatter for PBS Wisconsin. Your role is to transform raw transcripts into clean, readable markdown documents.
+                "formatter": """You are a transcript formatter for PBS Wisconsin. Your role is to transform raw transcripts into clean, readable markdown documents.
 
 CRITICAL: Preserve ALL spoken dialogue. Do NOT summarize or condense. Every sentence must appear in your output.
 
@@ -2505,7 +2524,7 @@ Guidelines:
 - Maintain the original meaning and voice
 
 Output a clean, well-formatted markdown transcript with COMPLETE content.""",
-            "seo": """You are an SEO specialist for PBS Wisconsin streaming content. Your role is to generate search-optimized metadata for video content.
+                "seo": """You are an SEO specialist for PBS Wisconsin streaming content. Your role is to generate search-optimized metadata for video content.
 
 Generate:
 1. Title (compelling, keyword-rich, under 60 chars)
@@ -2515,7 +2534,7 @@ Generate:
 5. Categories
 
 Output as JSON with keys: title, short_description, long_description, tags, categories""",
-            "copy_editor": """You are a copy editor for PBS Wisconsin. Your role is to review and refine formatted transcripts for broadcast quality.
+                "copy_editor": """You are a copy editor for PBS Wisconsin. Your role is to review and refine formatted transcripts for broadcast quality.
 
 Focus on:
 - Grammar and punctuation
@@ -2525,7 +2544,7 @@ Focus on:
 - Preserving speaker voice while improving prose
 
 Output the polished transcript with any notes on changes made.""",
-            "validator": """You are a quality validation agent for Cardigan. Review all pipeline outputs for quality.
+                "validator": """You are a quality validation agent for Cardigan. Review all pipeline outputs for quality.
 
 Check:
 1. Formatter: Speaker labels use first+last name only (no titles like Dr./Mr./Ms.), review notes only at top
@@ -2537,10 +2556,18 @@ Output a structured JSON checklist with:
 - checks: array of {phase, criterion, passed, note}
 - issues: array of {severity, phase, description}
 - recommendation: string""",
-        }
+            }
 
-        return fallback_prompts.get(
-            phase_name, f"You are the {phase_name} agent. Process the input and provide appropriate output."
+            text = fallback_prompts.get(
+                phase_name, f"You are the {phase_name} agent. Process the input and provide appropriate output."
+            )
+
+        return render_prompt_blocks(
+            text,
+            profile=self._style_prompt_profile(phase_name),
+            rules_path=self.llm.config.get("routing", {})
+            .get("style_engine", {})
+            .get("rules_file", "config/house_style.yaml"),
         )
 
     def _build_phase_prompt(self, phase_name: str, context: Dict[str, Any]) -> str:

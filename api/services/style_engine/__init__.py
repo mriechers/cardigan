@@ -7,6 +7,11 @@ result/violation dataclasses (types.py) that later pipeline-stage tasks
 on. Nothing here touches the DB, async code, or FastAPI.
 """
 
+from api.services.style_engine.prompt_blocks import (
+    PromptBlockError,
+    render_prompt_blocks,
+    resolve_prompt_profile,
+)
 from api.services.style_engine.rules import (
     DEFAULT_RULES_PATH,
     StyleRules,
@@ -26,6 +31,9 @@ __all__ = [
     "StyleRules",
     "StyleRulesError",
     "load_rules",
+    "PromptBlockError",
+    "render_prompt_blocks",
+    "resolve_prompt_profile",
     "AppliedFix",
     "PhaseCheckResult",
     "PostStageResult",
