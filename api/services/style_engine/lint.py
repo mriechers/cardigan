@@ -81,7 +81,16 @@ _HONORIFIC_RE = re.compile(r"^(?:Dr|Mr|Ms|Mrs|Prof)\.?\s", re.IGNORECASE)
 # the pool and the single-word check below could never fire. The configured
 # pattern remains the definition of a *conforming* label; this pattern's job
 # is only to find everything that looks label-shaped so it can be judged.
-_LOOSE_SPEAKER_LABEL_RE = re.compile(r"^\*\*[A-Z][\w.'-]*(?:\s[A-Z][\w.'-]*)*:\*\*", re.MULTILINE)
+#
+# The continuation group accepts either another capitalized word OR a bare
+# number token -- this is what lets generic numbered labels like
+# "**Speaker 1:**" / "**Reporter 2:**" enter the candidate pool at all
+# (previously invisible to collection since "1"/"2" don't match [A-Z]).
+# Collecting them is for superset detection and future canon checks, not to
+# flag them as malformed: a "Speaker 1" candidate has 2 tokens and no
+# honorific, so it correctly passes the single-word/honorific checks
+# silently -- generic labels are legitimate per analyst rules.
+_LOOSE_SPEAKER_LABEL_RE = re.compile(r"^\*\*[A-Z][\w.'-]*(?:\s(?:[A-Z][\w.'-]*|\d+))*:\*\*", re.MULTILINE)
 
 # Known non-name field labels that share the loose "**Word:**" bold-colon
 # shape (e.g. "**Note:** inline annotation") but are never speaker labels.
@@ -100,6 +109,14 @@ _DURATION_SLACK_SECONDS = 60
 
 _TERMINAL_PUNCT = (".", "?", "!", '"', "'", "”", "’")
 _STATUS_FOOTER_RE = re.compile(r"^\*\*Status:\*\*", re.IGNORECASE)
+
+# Minimum fraction of the stated episode duration the LAST parsed
+# (MM:SS)/(H:MM:SS) timecode marker in the formatter body must reach before
+# truncation_suspect's coverage-vs-duration path fires. Overridable per-call
+# via _check_truncation_suspect's ``coverage_floor`` keyword arg -- same
+# module-constant-default pattern as
+# api.services.completeness.DEFAULT_COVERAGE_THRESHOLD.
+DEFAULT_TRUNCATION_COVERAGE_FLOOR = 0.85
 
 
 def run_lint(context: Mapping[str, Any], rules: StyleRules) -> dict[str, PhaseCheckResult]:
@@ -147,7 +164,7 @@ def run_lint(context: Mapping[str, Any], rules: StyleRules) -> dict[str, PhaseCh
             violations += _check_review_notes_in_body(raw_output, rules, phase)
             violations += _check_speaker_label_inconsistent(raw_output, rules, phase)
             violations += _check_content_past_duration(raw_output, context, phase)
-            violations += _check_truncation_suspect(raw_output, phase)
+            violations += _check_truncation_suspect(raw_output, context, phase)
 
         results[phase] = PhaseCheckResult(phase=phase, violations=violations)
 
@@ -397,7 +414,33 @@ def _parse_timecode_seconds(text: str) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _check_truncation_suspect(raw_output: str, phase: str) -> list[RuleViolation]:
+def _check_truncation_suspect(
+    raw_output: str,
+    context: Mapping[str, Any],
+    phase: str,
+    coverage_floor: float = DEFAULT_TRUNCATION_COVERAGE_FLOOR,
+) -> list[RuleViolation]:
+    """Two independent detection paths, same rule_id/severity/model_fixable.
+
+    1. Last-line punctuation (original): the last visible prose line lacks
+       terminal punctuation -- a same-document mid-sentence cutoff.
+    2. Coverage-vs-duration (new): the LAST parsed timecode marker in the
+       body falls short of ``coverage_floor`` of the stated episode
+       duration -- catches the dominant real-world gap the punctuation path
+       cannot see at all: content that stops well short of the full episode
+       while still closing with a clean, fully-punctuated sign-off
+       paragraph (measured at a 0% hit rate across 21 production jobs in
+       the Stage-2 agreement study despite 8 real truncations in that
+       sample). Silently skipped when duration_minutes is missing/zero or
+       no timecode marker is present in the body -- never guesses.
+    """
+    violations: list[RuleViolation] = []
+    violations += _check_truncation_punctuation(raw_output, phase)
+    violations += _check_truncation_coverage(raw_output, context, phase, coverage_floor)
+    return violations
+
+
+def _check_truncation_punctuation(raw_output: str, phase: str) -> list[RuleViolation]:
     text = _HTML_COMMENT_RE.sub("", raw_output)
 
     last_prose: str | None = None
@@ -424,6 +467,50 @@ def _check_truncation_suspect(raw_output: str, phase: str) -> list[RuleViolation
             model_fixable=False,
         )
     ]
+
+
+def _check_truncation_coverage(
+    raw_output: str, context: Mapping[str, Any], phase: str, coverage_floor: float
+) -> list[RuleViolation]:
+    duration_minutes = context.get("duration_minutes")
+    if not duration_minutes:
+        return []
+
+    markers = list(_TIMECODE_RE.finditer(raw_output))
+    if not markers:
+        return []
+
+    last_marker = markers[-1]
+    last_seconds = _parse_timecode_seconds(last_marker.group(1))
+    duration_seconds = duration_minutes * 60
+    coverage_ratio = last_seconds / duration_seconds if duration_seconds else 0.0
+
+    if coverage_ratio >= coverage_floor:
+        return []
+
+    duration_display = _format_seconds_as_timecode(duration_seconds)
+    return [
+        RuleViolation(
+            rule_id="lint.formatter.truncation_suspect",
+            phase=phase,
+            severity="warning",
+            message=(
+                f"Last timecode marker {last_marker.group(0)} covers only {coverage_ratio:.1%} of the "
+                f"{duration_display} content duration (coverage floor {coverage_floor:.0%}) -- possible truncation"
+            ),
+            model_fixable=False,
+        )
+    ]
+
+
+def _format_seconds_as_timecode(total_seconds: float) -> str:
+    """Render a seconds count as ``H:MM:SS`` (or ``M:SS`` under an hour)."""
+    whole_seconds = int(round(total_seconds))
+    hours, remainder = divmod(whole_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes}:{seconds:02d}"
 
 
 # ---------------------------------------------------------------------------

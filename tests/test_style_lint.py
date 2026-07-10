@@ -513,6 +513,98 @@ class TestSpeakerLabelInconsistentLiveAgainstRealPattern:
 
 
 # ---------------------------------------------------------------------------
+# lint.formatter.speaker_label_inconsistent -- numbered generic labels
+# (task 2c2). Regression coverage for the bug where _LOOSE_SPEAKER_LABEL_RE's
+# continuation token required [A-Z], so "**Speaker 1:**" / "**Reporter 2:**"
+# never even entered the candidate pool (confirmed in the Stage-2 agreement
+# study: job 17 used "**Speaker 1:**"/"**Speaker 2:**" and lint never flagged
+# it, while the LLM validator did). Generic numbered labels are LEGITIMATE
+# per analyst rules -- the point of collecting them is superset detection,
+# NOT flagging them as malformed. A 2-token "Speaker 1" candidate with no
+# honorific must flow through the existing classification and pass silently.
+# ---------------------------------------------------------------------------
+
+
+class TestSpeakerLabelNumberedGenericLabels:
+    def test_numbered_label_alone_produces_no_violation(self):
+        rules = _rules()
+        body = "**Speaker 1:**\nDialogue text here that is long enough to matter for this test."
+        result = run_lint({"formatter_output": _formatter_output(body=body)}, rules)
+        assert _violations_for(result, "formatter", "lint.formatter.speaker_label_inconsistent") == []
+
+    def test_two_numbered_labels_produce_no_violation(self):
+        rules = _rules()
+        body = (
+            "**Speaker 1:**\nDialogue text here that is long enough to matter for this test.\n\n"
+            "**Speaker 2:**\nMore dialogue text that is also long enough to matter here."
+        )
+        result = run_lint({"formatter_output": _formatter_output(body=body)}, rules)
+        assert _violations_for(result, "formatter", "lint.formatter.speaker_label_inconsistent") == []
+
+    def test_reporter_numbered_label_also_collected_without_violation(self):
+        rules = _rules()
+        body = "**Reporter 2:**\nDialogue text here that is long enough to matter for this test."
+        result = run_lint({"formatter_output": _formatter_output(body=body)}, rules)
+        assert _violations_for(result, "formatter", "lint.formatter.speaker_label_inconsistent") == []
+
+    def test_generic_numbered_label_and_unrelated_real_name_still_behaves_sensibly(self):
+        # "Speaker 1" (generic) and "John Smith" (real name) share no words
+        # -- collection must not spuriously pair them as a superset match.
+        rules = _rules()
+        body = (
+            "**Speaker 1:**\nDialogue text here that is long enough to matter for this test.\n\n"
+            "**John Smith:**\nMore dialogue text that is also long enough to matter here."
+        )
+        result = run_lint({"formatter_output": _formatter_output(body=body)}, rules)
+        violations = _violations_for(result, "formatter", "lint.formatter.speaker_label_inconsistent")
+        assert violations == []
+
+    def test_field_label_stoplist_still_honored_alongside_numbered_label(self):
+        rules = _rules()
+        body = (
+            "**Speaker 1:**\nDialogue text here that is long enough to matter for this test.\n\n"
+            "**Note:** inline annotation about the edit.\n\n"
+            "**John Smith:**\nMore dialogue text that is also long enough to matter here."
+        )
+        result = run_lint({"formatter_output": _formatter_output(body=body)}, rules)
+        violations = _violations_for(result, "formatter", "lint.formatter.speaker_label_inconsistent")
+        assert not any("Note" in v.message for v in violations)
+
+    def test_numbered_label_actually_enters_candidate_pool_via_superset_detection(self):
+        # Decisive regression check: "Speaker" (bare, single word) and
+        # "Speaker 1" (numbered) share an overlapping word -- the superset
+        # check only fires if "Speaker 1" was actually collected as a
+        # candidate. Before the fix, "**Speaker 1:**" was entirely invisible
+        # to collection (continuation token required [A-Z]), so this pair
+        # would never be flagged as the same speaker labeled two ways --
+        # this test would fail against the pre-fix regex.
+        rules = _rules()
+        body = (
+            "**Speaker:**\nDialogue text here that is long enough to matter for this test.\n\n"
+            "**Speaker 1:**\nMore dialogue text that is also long enough to matter here."
+        )
+        result = run_lint({"formatter_output": _formatter_output(body=body)}, rules)
+        violations = _violations_for(result, "formatter", "lint.formatter.speaker_label_inconsistent")
+        assert any("labeled inconsistently" in v.message for v in violations)
+
+    def test_numbered_label_collection_does_not_suppress_real_single_word_label(self):
+        # A genuine single-word real name alongside a numbered generic label
+        # must still fire the single-word check -- collecting "Speaker 1"
+        # must not interfere with classification of unrelated candidates.
+        rules = _rules()
+        body = (
+            "**Speaker 1:**\nDialogue text here that is long enough to matter for this test.\n\n"
+            "**Sarah:**\nMore dialogue text that is also long enough to matter here."
+        )
+        result = run_lint({"formatter_output": _formatter_output(body=body)}, rules)
+        violations = _violations_for(result, "formatter", "lint.formatter.speaker_label_inconsistent")
+        assert any("Sarah" in v.message and "single word" in v.message for v in violations)
+        # "Speaker 1" is 2 tokens and not on the stoplist -- it must not be
+        # flagged itself, and must not pair with "Sarah" (disjoint words).
+        assert len(violations) == 1
+
+
+# ---------------------------------------------------------------------------
 # lint.formatter.content_past_duration (warning)
 # ---------------------------------------------------------------------------
 
@@ -596,6 +688,108 @@ class TestTruncationSuspect:
         body = "**John Smith:**\nThe budget debate continued late into the evening and\n\n<!-- trailing comment -->"
         result = run_lint({"formatter_output": _formatter_output(body=body)}, rules)
         assert len(_violations_for(result, "formatter", "lint.formatter.truncation_suspect")) == 1
+
+
+# ---------------------------------------------------------------------------
+# lint.formatter.truncation_suspect -- coverage-vs-duration path (task 2c2).
+#
+# The punctuation-only check above fired ZERO times across 21 real
+# production jobs in the Stage-2 agreement study, despite 8 real
+# truncations, because every one of those transcripts happened to close
+# with a complete, punctuated sign-off paragraph even though the content
+# stopped well short of the full episode. This complementary path compares
+# the LAST parsed (MM:SS)/(H:MM:SS) timecode marker in the body against
+# duration_minutes -- duration_minutes=100 (6000s) is used throughout so
+# the boundary math (0.85 * 6000 = 5100.0 exactly) has no floating-point
+# surprises: (1:24:54) = 5094s = 84.9% coverage (fires), (1:25:00) = 5100s
+# = 85% exactly (silent, boundary).
+# ---------------------------------------------------------------------------
+
+
+class TestTruncationSuspectCoverageVsDuration:
+    def test_fires_at_84_9_percent_coverage(self):
+        rules = _rules()
+        body = (
+            "**John Smith:**\n"
+            "The discussion opens early in the recording and covers several topics.\n\n"
+            "**Sarah Johnson:**\n"
+            "By (1:24:54) the conversation had wrapped up its main points nicely."
+        )
+        context = {"formatter_output": _formatter_output(body=body), "duration_minutes": 100}
+        result = run_lint(context, rules)
+        violations = _violations_for(result, "formatter", "lint.formatter.truncation_suspect")
+        assert len(violations) == 1
+        assert violations[0].severity == "warning"
+        assert violations[0].model_fixable is False
+
+    def test_silent_at_85_percent_boundary(self):
+        rules = _rules()
+        body = (
+            "**John Smith:**\n"
+            "The discussion opens early in the recording and covers several topics.\n\n"
+            "**Sarah Johnson:**\n"
+            "By (1:25:00) the conversation had wrapped up its main points nicely."
+        )
+        context = {"formatter_output": _formatter_output(body=body), "duration_minutes": 100}
+        result = run_lint(context, rules)
+        assert _violations_for(result, "formatter", "lint.formatter.truncation_suspect") == []
+
+    def test_no_markers_skips_coverage_path_silently(self):
+        rules = _rules()
+        body = "**John Smith:**\nThe discussion wraps up its main points nicely and closes right on time."
+        context = {"formatter_output": _formatter_output(body=body), "duration_minutes": 100}
+        result = run_lint(context, rules)
+        assert _violations_for(result, "formatter", "lint.formatter.truncation_suspect") == []
+
+    def test_missing_duration_skips_coverage_path_silently(self):
+        rules = _rules()
+        body = "**John Smith:**\nThe recording only ever reaches (0:10) before this closes out cleanly."
+        result = run_lint({"formatter_output": _formatter_output(body=body)}, rules)
+        assert _violations_for(result, "formatter", "lint.formatter.truncation_suspect") == []
+
+    def test_zero_duration_skips_coverage_path_silently(self):
+        rules = _rules()
+        body = "**John Smith:**\nThe recording only ever reaches (0:10) before this closes out cleanly."
+        context = {"formatter_output": _formatter_output(body=body), "duration_minutes": 0}
+        result = run_lint(context, rules)
+        assert _violations_for(result, "formatter", "lint.formatter.truncation_suspect") == []
+
+    def test_coverage_path_fires_independently_when_punctuation_is_clean(self):
+        # Last prose line IS properly punctuated (punctuation path silent),
+        # but the last timecode marker falls well short of the duration.
+        rules = _rules()
+        body = "**John Smith:**\nThe recording only ever reaches (1:00) before this closes out cleanly."
+        context = {"formatter_output": _formatter_output(body=body), "duration_minutes": 100}
+        result = run_lint(context, rules)
+        violations = _violations_for(result, "formatter", "lint.formatter.truncation_suspect")
+        assert len(violations) == 1
+        assert "covers only" in violations[0].message
+
+    def test_punctuation_path_fires_independently_when_coverage_is_sufficient(self):
+        # Last prose line lacks terminal punctuation (punctuation path
+        # fires), but the last timecode marker covers the full duration.
+        rules = _rules()
+        body = "**John Smith:**\nThe budget debate wraps up around (1:39:50) and then trails off and"
+        context = {"formatter_output": _formatter_output(body=body), "duration_minutes": 100}
+        result = run_lint(context, rules)
+        violations = _violations_for(result, "formatter", "lint.formatter.truncation_suspect")
+        assert len(violations) == 1
+        assert "terminal punctuation" in violations[0].message
+
+    def test_message_contains_both_timestamps(self):
+        rules = _rules()
+        body = (
+            "**John Smith:**\n"
+            "The discussion opens early in the recording and covers several topics.\n\n"
+            "**Sarah Johnson:**\n"
+            "By (1:24:54) the conversation had wrapped up its main points nicely."
+        )
+        context = {"formatter_output": _formatter_output(body=body), "duration_minutes": 100}
+        result = run_lint(context, rules)
+        violations = _violations_for(result, "formatter", "lint.formatter.truncation_suspect")
+        assert len(violations) == 1
+        assert "1:24:54" in violations[0].message
+        assert "1:40:00" in violations[0].message
 
 
 # ---------------------------------------------------------------------------
