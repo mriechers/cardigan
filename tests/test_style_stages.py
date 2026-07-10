@@ -450,3 +450,133 @@ class TestPostStageUnknownPhase:
         assert result.changed is False
         assert result.check.violations == []
         assert result.check.fixes == []
+
+
+# ---------------------------------------------------------------------------
+# run_pre_stage -- validator phase (task 2a)
+# ---------------------------------------------------------------------------
+
+
+def _validator_rules(semantic_checks: list[str] | None = None) -> StyleRules:
+    if semantic_checks is None:
+        semantic_checks = ["title accurately reflects content", "description accurately reflects content"]
+    raw = {
+        "meta": {"version": 1},
+        "phases": {"validator": {"semantic_checks": semantic_checks}},
+    }
+    return StyleRules(raw=raw)
+
+
+def _style_check(*violations: dict) -> dict:
+    return {"phase": "seo", "violations": list(violations), "fixes": [], "parse_ok": True, "skipped": False}
+
+
+def _violation_dict(severity: str) -> dict:
+    return {
+        "rule_id": "lint.seo.title_over_limit",
+        "phase": "seo",
+        "severity": severity,
+        "message": "irrelevant for these tests",
+        "field": "title",
+        "span": None,
+        "model_fixable": True,
+    }
+
+
+class TestPreStageValidatorEmpty:
+    def test_no_style_checks_key_returns_empty_result(self):
+        rules = _validator_rules()
+        result = run_pre_stage("validator", {}, rules)
+        assert result.phase == "validator"
+        assert result.prompt_section == ""
+        assert result.data == {}
+
+    def test_none_style_checks_returns_empty_result(self):
+        rules = _validator_rules()
+        result = run_pre_stage("validator", {"style_checks": None}, rules)
+        assert result.prompt_section == ""
+        assert result.data == {}
+
+    def test_empty_dict_style_checks_returns_empty_result(self):
+        rules = _validator_rules()
+        result = run_pre_stage("validator", {"style_checks": {}}, rules)
+        assert result.prompt_section == ""
+        assert result.data == {}
+
+
+class TestPreStageValidatorPromptSection:
+    def test_section_header_present(self):
+        rules = _validator_rules()
+        style_checks = {"seo": _style_check(_violation_dict("error"))}
+        result = run_pre_stage("validator", {"style_checks": style_checks}, rules)
+        assert "## Deterministic checks already performed" in result.prompt_section
+
+    def test_per_phase_summary_counts_error_and_warning_flags(self):
+        rules = _validator_rules()
+        style_checks = {
+            "seo": _style_check(_violation_dict("error"), _violation_dict("error"), _violation_dict("warning")),
+        }
+        result = run_pre_stage("validator", {"style_checks": style_checks}, rules)
+        assert "seo: 2 error flag(s), 1 warning(s)" in result.prompt_section
+        assert "mechanical limits/casing already enforced/flagged by the pipeline" in result.prompt_section
+
+    def test_multiple_phases_each_summarized(self):
+        rules = _validator_rules()
+        style_checks = {
+            "seo": _style_check(_violation_dict("error")),
+            "formatter": _style_check(_violation_dict("warning")),
+        }
+        result = run_pre_stage("validator", {"style_checks": style_checks}, rules)
+        assert "seo: 1 error flag(s), 0 warning(s)" in result.prompt_section
+        assert "formatter: 0 error flag(s), 1 warning(s)" in result.prompt_section
+
+    def test_phase_with_zero_violations_still_summarized(self):
+        rules = _validator_rules()
+        style_checks = {"analyst": _style_check()}
+        result = run_pre_stage("validator", {"style_checks": style_checks}, rules)
+        assert "analyst: 0 error flag(s), 0 warning(s)" in result.prompt_section
+
+    def test_instruction_do_not_recheck_mechanics_present(self):
+        rules = _validator_rules()
+        style_checks = {"seo": _style_check(_violation_dict("error"))}
+        result = run_pre_stage("validator", {"style_checks": style_checks}, rules)
+        assert (
+            "Do NOT re-check character limits, casing, or format mechanics — they are handled "
+            "deterministically." in result.prompt_section
+        )
+
+    def test_default_two_semantic_checks_render_exact_instruction_text(self):
+        rules = _validator_rules()  # default: title + description
+        style_checks = {"seo": _style_check(_violation_dict("error"))}
+        result = run_pre_stage("validator", {"style_checks": style_checks}, rules)
+        assert (
+            "Judge ONLY: (1) title accurately reflects content; "
+            "(2) description accurately reflects content; keywords relevant to content."
+        ) in result.prompt_section
+
+    def test_semantic_checks_are_data_driven_not_hardcoded(self):
+        # A synthetic, unrelated semantic_checks list must show up verbatim --
+        # proves the (1)/(2)/... list is rendered from rules, not hardcoded.
+        rules = _validator_rules(
+            semantic_checks=["tone matches house style", "no fabricated claims", "keywords appear naturally"]
+        )
+        style_checks = {"seo": _style_check(_violation_dict("error"))}
+        result = run_pre_stage("validator", {"style_checks": style_checks}, rules)
+        assert (
+            "(1) tone matches house style; (2) no fabricated claims; (3) keywords appear naturally; "
+            "keywords relevant to content."
+        ) in result.prompt_section
+
+    def test_empty_semantic_checks_list_still_renders_fixed_suffix(self):
+        rules = _validator_rules(semantic_checks=[])
+        style_checks = {"seo": _style_check(_violation_dict("error"))}
+        result = run_pre_stage("validator", {"style_checks": style_checks}, rules)
+        assert "Judge ONLY: keywords relevant to content." in result.prompt_section
+
+    def test_data_carries_style_checks_summary(self):
+        rules = _validator_rules()
+        style_checks = {
+            "seo": _style_check(_violation_dict("error"), _violation_dict("warning")),
+        }
+        result = run_pre_stage("validator", {"style_checks": style_checks}, rules)
+        assert result.data["style_checks_summary"]["seo"] == {"error_count": 1, "warning_count": 1}

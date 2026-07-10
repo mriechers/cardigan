@@ -4,15 +4,17 @@ Foundation package for the Cardigan hybrid deterministic-LLM pipeline. This
 package holds the YAML house-style rule loader (rules.py), the shared
 result/violation dataclasses (types.py), the prompt-block renderer
 (prompt_blocks.py), the engine primitives (casing.py, entities.py,
-scanner.py, limits.py, phase_io.py), and the pure pipeline-stage modules
-(pre_stage.py, post_stage.py) that the job worker (a later task) wires
-into each phase's generation call. Nothing here touches the DB, async
-code, or FastAPI.
+scanner.py, limits.py, phase_io.py), the pure pipeline-stage modules
+(pre_stage.py, post_stage.py), the deterministic validator checklist
+(lint.py), and the QA-verdict merge (qa_merge.py) that the job worker (a
+later task) wires into each phase's generation call and the validator's QA
+gate. Nothing here touches the DB, async code, or FastAPI.
 """
 
 from api.services.style_engine.casing import build_canonical, to_down_style
 from api.services.style_engine.entities import extract_proper_nouns
 from api.services.style_engine.limits import check_field_limits
+from api.services.style_engine.lint import run_lint
 from api.services.style_engine.phase_io import (
     FieldSpan,
     SeoFields,
@@ -26,6 +28,7 @@ from api.services.style_engine.prompt_blocks import (
     render_prompt_blocks,
     resolve_prompt_profile,
 )
+from api.services.style_engine.qa_merge import merge_style_flags
 from api.services.style_engine.rules import (
     DEFAULT_RULES_PATH,
     StyleRules,
@@ -66,4 +69,6 @@ __all__ = [
     "splice_seo_fields",
     "run_pre_stage",
     "run_post_stage",
+    "run_lint",
+    "merge_style_flags",
 ]

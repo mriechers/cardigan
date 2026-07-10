@@ -1,0 +1,436 @@
+"""Deterministic validator checklist -- the code replacement for most of the
+LLM validator's mechanical checks (``prompts/validator.md``).
+
+Pure stdlib + style_engine internals -- no worker/DB/async/FastAPI imports.
+``run_lint`` re-runs the validator's "output missing", "placeholder text",
+"character limits", "review notes in body", "speaker label consistency",
+"content past duration", and "truncation suspect" checks over the phase
+outputs already sitting in the job's ``context`` bus, producing the exact
+same ``RuleViolation``/``PhaseCheckResult`` shapes the rest of style_engine
+uses. Detection only -- nothing here rewrites a phase's output.
+
+Every numeric limit is read from ``StyleRules`` (via
+``limits.check_field_limits``/``rules.limits_for``) at call time, never
+hard-coded, so this module tracks whatever ``config/house_style.yaml`` (or a
+caller's synthetic ``StyleRules``) says even though the character counts
+quoted in ``prompts/validator.md`` itself are stale.
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Mapping
+from dataclasses import replace
+from typing import Any
+
+from api.services.style_engine.limits import check_field_limits
+from api.services.style_engine.phase_io import extract_seo_fields
+from api.services.style_engine.rules import StyleRules
+from api.services.style_engine.types import PhaseCheckResult, RuleViolation
+
+# The validator's contract covers exactly these three required phases --
+# "timestamp" is optional/out of scope for v1 (see qa_merge.py's docstring).
+_CANONICAL_PHASES = ("analyst", "formatter", "seo")
+
+# A phase output shorter than this (after stripping HTML comments and all
+# whitespace) is treated as functionally missing -- matches the validator's
+# "missing/empty output -> automatic fail" rule (prompts/validator.md #6).
+_MIN_SUBSTANTIVE_CHARS = 50
+
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+
+# Literal template artifacts that mean the model echoed prompt scaffolding
+# instead of real content. Deliberately literal/case-sensitive -- these are
+# exact placeholder tokens quoted in the phase prompts, not general English.
+_PLACEHOLDER_LITERALS = ("{media_id}", "{TODAY", "[INSERT", "{model name")
+
+# A "**Recommended:**" line (seo.md's field template) whose captured value is
+# empty, or is itself still a bracketed placeholder like
+# "[55-60 character...]", means the model never filled in the field. Single
+# ``\n`` (not ``\n+``) so a genuinely blank value line is captured as "" --
+# consuming multiple newlines would skip past it to the next non-blank line.
+_RECOMMENDED_VALUE_RE = re.compile(r"\*\*Recommended:\*\*[ \t]*\n([^\n]*)")
+_BRACKET_PLACEHOLDER_RE = re.compile(r"^\[.*\]$")
+
+# seo_output.md's "### YouTube Tags (15-20 recommended)" section is the only
+# keyword/tag block with a well-defined item count -- the comma-separated
+# list lives in the fenced code block immediately under the heading.
+_YOUTUBE_TAGS_RE = re.compile(r"###\s*YouTube Tags.*?```[ \t]*\n(.*?)\n```", re.DOTALL | re.IGNORECASE)
+
+# limits.check_field_limits rule_ids -> this module's lint.* rule_ids. Reused
+# rather than duplicated: check_field_limits already reads its bounds from
+# StyleRules.limits_for(), so this mapping is the only seo-limits logic here.
+_LIMIT_RULE_ID_MAP = {
+    "limits.title.max": "lint.seo.title_over_limit",
+    "limits.short_description.max": "lint.seo.short_over_limit",
+    "limits.long_description.max": "lint.seo.long_over_limit",
+    "limits.keywords.count": "lint.seo.keywords_count",
+}
+
+_HR_LINE_RE = re.compile(r"^-{3,}[ \t]*$", re.MULTILINE)
+_REVIEW_NOTE_MARKER_RE = re.compile(r"<!--\s*review|NEEDS_REVIEW|^##\s*Review Notes", re.IGNORECASE | re.MULTILINE)
+
+_HONORIFIC_RE = re.compile(r"^(?:Dr|Mr|Ms|Mrs|Prof)\.?\s", re.IGNORECASE)
+
+# (MM:SS) or (H:MM:SS) timecode markers, e.g. "(12:34)" / "(1:02:03)".
+_TIMECODE_RE = re.compile(r"\((\d{1,2}(?::\d{2}){1,2})\)")
+_DURATION_SLACK_SECONDS = 60
+
+_TERMINAL_PUNCT = (".", "?", "!", '"', "'", "”", "’")
+_STATUS_FOOTER_RE = re.compile(r"^\*\*Status:\*\*", re.IGNORECASE)
+
+
+def run_lint(context: Mapping[str, Any], rules: StyleRules) -> dict[str, PhaseCheckResult]:
+    """Deterministic validator checklist over the phase outputs in ``context``.
+
+    ``context`` keys read (all optional): ``analyst_output``,
+    ``formatter_output``, ``seo_output`` (the worker's per-phase output bus),
+    plus ``transcript``, ``transcript_file``, ``duration_minutes``,
+    ``content_type``, ``program``.
+
+    Always returns exactly one entry per canonical phase (``analyst``,
+    ``formatter``, ``seo``) -- a phase whose ``<phase>_output`` key is absent,
+    ``None``, or effectively empty (comment-only/whitespace-only, under 50
+    substantive characters) gets a ``PhaseCheckResult`` carrying only the
+    ``lint.output_missing`` violation, since the validator's contract is
+    "missing/empty output -> auto-fail" and there is no real content left to
+    run the other checks against.
+    """
+    results: dict[str, PhaseCheckResult] = {}
+
+    for phase in _CANONICAL_PHASES:
+        raw_output = context.get(f"{phase}_output")
+
+        if _substantive_length(raw_output) < _MIN_SUBSTANTIVE_CHARS:
+            results[phase] = PhaseCheckResult(
+                phase=phase,
+                violations=[
+                    RuleViolation(
+                        rule_id="lint.output_missing",
+                        phase=phase,
+                        severity="error",
+                        message=f"{phase} output is missing or has fewer than "
+                        f"{_MIN_SUBSTANTIVE_CHARS} characters of substantive content",
+                        model_fixable=False,
+                    )
+                ],
+            )
+            continue
+
+        violations: list[RuleViolation] = list(_check_placeholder_text(raw_output, phase))
+
+        if phase == "seo":
+            violations += _check_seo_limits(raw_output, context, rules, phase)
+        elif phase == "formatter":
+            violations += _check_review_notes_in_body(raw_output, rules, phase)
+            violations += _check_speaker_label_inconsistent(raw_output, rules, phase)
+            violations += _check_content_past_duration(raw_output, context, phase)
+            violations += _check_truncation_suspect(raw_output, phase)
+
+        results[phase] = PhaseCheckResult(phase=phase, violations=violations)
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# lint.output_missing helper
+# ---------------------------------------------------------------------------
+
+
+def _substantive_length(raw_output: str | None) -> int:
+    """Length of ``raw_output`` with HTML comments and all whitespace removed."""
+    text = raw_output or ""
+    text = _HTML_COMMENT_RE.sub("", text)
+    return len(re.sub(r"\s+", "", text))
+
+
+# ---------------------------------------------------------------------------
+# lint.placeholder_text -- all 3 phases
+# ---------------------------------------------------------------------------
+
+
+def _check_placeholder_text(raw_output: str, phase: str) -> list[RuleViolation]:
+    violations: list[RuleViolation] = []
+
+    for literal in _PLACEHOLDER_LITERALS:
+        if literal in raw_output:
+            violations.append(
+                RuleViolation(
+                    rule_id="lint.placeholder_text",
+                    phase=phase,
+                    severity="error",
+                    message=f'Template placeholder "{literal}" found in {phase} output',
+                    model_fixable=True,
+                )
+            )
+
+    for match in _RECOMMENDED_VALUE_RE.finditer(raw_output):
+        value = match.group(1).strip()
+        if value == "" or _BRACKET_PLACEHOLDER_RE.match(value):
+            shown = value if value else "(empty)"
+            violations.append(
+                RuleViolation(
+                    rule_id="lint.placeholder_text",
+                    phase=phase,
+                    severity="error",
+                    message=f'"**Recommended:**" line has an unfilled placeholder value: {shown}',
+                    model_fixable=True,
+                )
+            )
+
+    return violations
+
+
+# ---------------------------------------------------------------------------
+# lint.seo.title_over_limit / short_over_limit / long_over_limit /
+# keywords_count -- seo phase only
+# ---------------------------------------------------------------------------
+
+
+def _check_seo_limits(
+    raw_output: str, context: Mapping[str, Any], rules: StyleRules, phase: str
+) -> list[RuleViolation]:
+    fields = extract_seo_fields(raw_output)
+    values: dict[str, str | list[str]] = {}
+    if fields.title is not None:
+        values["title"] = fields.title.value
+    if fields.short_description is not None:
+        values["short_description"] = fields.short_description.value
+    if fields.long_description is not None:
+        values["long_description"] = fields.long_description.value
+
+    keywords = _extract_keyword_tags(raw_output)
+    if keywords is not None:
+        values["keywords"] = keywords
+
+    program = context.get("program")
+    content_type = context.get("content_type") or "full"
+
+    raw_violations = check_field_limits(values, rules, phase, program=program, content_type=content_type)
+
+    return [replace(v, rule_id=_LIMIT_RULE_ID_MAP.get(v.rule_id, v.rule_id)) for v in raw_violations]
+
+
+def _extract_keyword_tags(seo_output: str) -> list[str] | None:
+    """Comma-separated items from the "### YouTube Tags" fenced block, if present.
+
+    Returns ``None`` when the section can't be identified -- callers must
+    skip the keywords-count check silently in that case, never guess.
+    """
+    match = _YOUTUBE_TAGS_RE.search(seo_output)
+    if not match:
+        return None
+    items = [item.strip() for item in match.group(1).split(",")]
+    items = [item for item in items if item]
+    return items or None
+
+
+# ---------------------------------------------------------------------------
+# lint.formatter.review_notes_in_body -- formatter phase only
+# ---------------------------------------------------------------------------
+
+
+def _check_review_notes_in_body(raw_output: str, rules: StyleRules, phase: str) -> list[RuleViolation]:
+    review_notes_cfg = _phase_cfg(rules, "formatter").get("review_notes") or {}
+    if review_notes_cfg.get("placement") != "top":
+        return []
+
+    hr_match = _HR_LINE_RE.search(raw_output)
+    if not hr_match:
+        return []
+
+    after_first_rule = raw_output[hr_match.end() :]
+    marker_match = _REVIEW_NOTE_MARKER_RE.search(after_first_rule)
+    if not marker_match:
+        return []
+
+    return [
+        RuleViolation(
+            rule_id="lint.formatter.review_notes_in_body",
+            phase=phase,
+            severity="error",
+            message=(
+                f'Review-note marker "{marker_match.group(0).strip()}" appears after the first '
+                "horizontal rule -- review notes must sit at the top of the document"
+            ),
+            model_fixable=False,
+        )
+    ]
+
+
+# ---------------------------------------------------------------------------
+# lint.formatter.speaker_label_inconsistent -- formatter phase only
+# ---------------------------------------------------------------------------
+
+
+def _check_speaker_label_inconsistent(raw_output: str, rules: StyleRules, phase: str) -> list[RuleViolation]:
+    speaker_label_cfg = _phase_cfg(rules, "formatter").get("speaker_label") or {}
+    pattern = speaker_label_cfg.get("pattern")
+    if not pattern:
+        return []
+    no_honorifics = bool(speaker_label_cfg.get("no_honorifics"))
+
+    labels: list[str] = []
+    seen: set[str] = set()
+    for match in re.finditer(pattern, _body_region(raw_output), re.MULTILINE):
+        name = _label_text(match.group(0))
+        if name and name not in seen:
+            seen.add(name)
+            labels.append(name)
+
+    violations: list[RuleViolation] = []
+
+    for name in labels:
+        if len(name.split()) == 1:
+            violations.append(_speaker_violation(phase, f'Speaker label "{name}" is a single word (expected first + last name)'))
+        if no_honorifics and _HONORIFIC_RE.match(name):
+            violations.append(
+                _speaker_violation(phase, f'Speaker label "{name}" carries an honorific (house style: names only)')
+            )
+
+    for i, a in enumerate(labels):
+        a_words = set(a.split())
+        for b in labels[i + 1 :]:
+            b_words = set(b.split())
+            if a_words == b_words or not (a_words < b_words or b_words < a_words):
+                continue
+            shorter, longer = (a, b) if a_words < b_words else (b, a)
+            violations.append(
+                _speaker_violation(
+                    phase,
+                    f'Speaker labels "{shorter}" and "{longer}" look like the same person labeled inconsistently',
+                )
+            )
+
+    return violations
+
+
+def _speaker_violation(phase: str, message: str) -> RuleViolation:
+    return RuleViolation(
+        rule_id="lint.formatter.speaker_label_inconsistent",
+        phase=phase,
+        severity="warning",
+        message=message,
+        model_fixable=True,
+    )
+
+
+def _label_text(matched: str) -> str:
+    """Strip a matched "**Name:**"-shaped label down to the bare name."""
+    text = re.sub(r"^\*+", "", matched)
+    text = re.sub(r":?\*+$", "", text)
+    return text.strip()
+
+
+# ---------------------------------------------------------------------------
+# lint.formatter.content_past_duration -- formatter phase only
+# ---------------------------------------------------------------------------
+
+
+def _check_content_past_duration(raw_output: str, context: Mapping[str, Any], phase: str) -> list[RuleViolation]:
+    duration_minutes = context.get("duration_minutes")
+    if not duration_minutes:
+        return []
+
+    limit_seconds = duration_minutes * 60 + _DURATION_SLACK_SECONDS
+
+    violations: list[RuleViolation] = []
+    seen_markers: set[str] = set()
+    for match in _TIMECODE_RE.finditer(raw_output):
+        marker = match.group(0)
+        if marker in seen_markers:
+            continue
+        seconds = _parse_timecode_seconds(match.group(1))
+        if seconds > limit_seconds:
+            seen_markers.add(marker)
+            violations.append(
+                RuleViolation(
+                    rule_id="lint.formatter.content_past_duration",
+                    phase=phase,
+                    severity="warning",
+                    message=(
+                        f"Timecode marker {marker} exceeds the content duration "
+                        f"({duration_minutes} min) plus {_DURATION_SLACK_SECONDS}s slack"
+                    ),
+                    model_fixable=False,
+                )
+            )
+
+    return violations
+
+
+def _parse_timecode_seconds(text: str) -> int:
+    parts = [int(p) for p in text.split(":")]
+    if len(parts) == 2:
+        minutes, seconds = parts
+        return minutes * 60 + seconds
+    hours, minutes, seconds = parts
+    return hours * 3600 + minutes * 60 + seconds
+
+
+# ---------------------------------------------------------------------------
+# lint.formatter.truncation_suspect -- formatter phase only
+# ---------------------------------------------------------------------------
+
+
+def _check_truncation_suspect(raw_output: str, phase: str) -> list[RuleViolation]:
+    text = _HTML_COMMENT_RE.sub("", raw_output)
+
+    last_prose: str | None = None
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if _STATUS_FOOTER_RE.match(stripped):
+            continue
+        if re.fullmatch(r"-{3,}", stripped):
+            continue
+        last_prose = stripped
+
+    if last_prose is None or last_prose[-1] in _TERMINAL_PUNCT:
+        return []
+
+    excerpt = last_prose if len(last_prose) <= 60 else f"...{last_prose[-60:]}"
+    return [
+        RuleViolation(
+            rule_id="lint.formatter.truncation_suspect",
+            phase=phase,
+            severity="warning",
+            message=f'Last line lacks terminal punctuation, possible mid-sentence cutoff: "{excerpt}"',
+            model_fixable=False,
+        )
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+
+def _body_region(text: str) -> str:
+    """Best-effort slice between the first and last horizontal-rule lines.
+
+    The formatter document template is header / ``---`` / body (speaker
+    turns, optionally review notes) / ``---`` / ``**Status:**`` footer. The
+    header and footer both use the same "**Field:**" bold-colon markdown as
+    real speaker labels (``**Project:**``, ``**Status:**``, ...), so speaker
+    -label collection is scoped to strictly between the two rules when both
+    are present -- otherwise those metadata fields would be mistaken for
+    (single-word) speaker labels. Falls back to the full text when fewer
+    than two horizontal rules are found.
+    """
+    matches = list(_HR_LINE_RE.finditer(text))
+    if len(matches) >= 2:
+        return text[matches[0].end() : matches[-1].start()]
+    return text
+
+
+def _phase_cfg(rules: StyleRules, phase: str) -> dict:
+    """Read-only access to ``rules.raw["phases"][phase]``.
+
+    ``rules.raw`` is the mtime-cached document shared by every caller of
+    ``load_rules`` for this path -- the returned mapping (and anything nested
+    in it) must never be mutated, only read.
+    """
+    phases = rules.raw.get("phases") or {}
+    return phases.get(phase) or {}

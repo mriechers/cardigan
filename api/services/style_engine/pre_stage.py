@@ -2,17 +2,20 @@
 
 Pure stdlib + style_engine internals -- no worker/DB/async/FastAPI imports.
 Computes the per-job data a phase's prompt needs (proper nouns, character
-budgets, transcript-verified keyword candidates, program formula) and
-renders it as a markdown "Style Rules (authoritative)" section that gets
-injected into the agent prompt ahead of generation. Only the ``seo`` phase
-has behavior today; every other phase name degrades gracefully to an empty
-result so later tasks can register formatter/timestamp/etc. behind the same
-interface without touching this module's call sites.
+budgets, transcript-verified keyword candidates, program formula for
+``seo``; a summary of already-run deterministic checks for ``validator``)
+and renders it as a markdown prompt section injected into the agent prompt
+ahead of generation.
 
 Every value quoted in the rendered prompt section is read from ``rules`` (or
 computed from ``context``) at call time -- nothing here hard-codes a limit
 number or a forbidden-phrase list, so the section always reflects whatever
 ``config/house_style.yaml`` (or a caller's synthetic ``StyleRules``) says.
+
+The ``seo`` and ``validator`` phases have behavior today; every other phase
+name degrades gracefully to an empty result so later tasks can register
+formatter/timestamp/etc. behind the same interface without touching this
+module's call sites.
 """
 
 from __future__ import annotations
@@ -57,12 +60,26 @@ def run_pre_stage(phase: str, context: Mapping[str, Any], rules: StyleRules) -> 
       transcript -- source transcript text
       content_type -- "full" | "short" (default "full")
       program -- program name if known (e.g. "Here & Now")
+      style_checks -- validator phase only; ``{"seo": PhaseCheckResult.to_dict(),
+        ...}`` accumulated by the post-stages and ``lint.run_lint``
 
     For ``phase == "seo"`` this computes ``proper_nouns``, ``char_budgets``,
     ``keyword_candidates``, and ``program_rules`` and renders them into a
-    "## Style Rules (authoritative)" markdown section. For any other phase
-    (v1), returns ``PreStageResult(phase=phase, prompt_section="", data={})``.
+    "## Style Rules (authoritative)" markdown section.
+
+    For ``phase == "validator"``, when ``context["style_checks"]`` is
+    non-empty, renders a "## Deterministic checks already performed" section
+    summarizing each phase's error/warning flag counts plus an instruction
+    to skip re-checking mechanics and judge only the semantic checks listed
+    in ``rules`` ``phases.validator.semantic_checks``. An empty/missing
+    ``style_checks`` renders nothing (prompt unchanged).
+
+    For any other phase (v1), returns
+    ``PreStageResult(phase=phase, prompt_section="", data={})``.
     """
+    if phase == "validator":
+        return _run_validator_pre_stage(context, rules)
+
     if phase != "seo":
         return PreStageResult(phase=phase, prompt_section="", data={})
 
@@ -95,6 +112,66 @@ def run_pre_stage(phase: str, context: Mapping[str, Any], rules: StyleRules) -> 
     prompt_section = _render_seo_prompt_section(data, rules, program)
 
     return PreStageResult(phase=phase, prompt_section=prompt_section, data=data)
+
+
+# ---------------------------------------------------------------------------
+# validator phase
+# ---------------------------------------------------------------------------
+
+_VALIDATOR_INSTRUCTION_PREFIX = (
+    "Do NOT re-check character limits, casing, or format mechanics — they are "
+    "handled deterministically. Judge ONLY: "
+)
+# Semantic checks beyond the data-driven title/description pair -- keyword
+# relevance is inherently subjective (unlike the now-deterministic keyword
+# *count* check in lint.py) so it stays a fixed instruction, not YAML data.
+_VALIDATOR_INSTRUCTION_SUFFIX = "keywords relevant to content."
+
+
+def _run_validator_pre_stage(context: Mapping[str, Any], rules: StyleRules) -> PreStageResult:
+    style_checks = context.get("style_checks") or {}
+    if not style_checks:
+        return PreStageResult(phase="validator", prompt_section="", data={})
+
+    summary = {
+        phase_name: _phase_flag_counts(check) for phase_name, check in style_checks.items()
+    }
+    semantic_checks = list(
+        (rules.raw.get("phases", {}) or {}).get("validator", {}).get("semantic_checks") or []
+    )
+
+    prompt_section = _render_validator_prompt_section(summary, semantic_checks)
+
+    return PreStageResult(
+        phase="validator",
+        prompt_section=prompt_section,
+        data={"style_checks_summary": summary},
+    )
+
+
+def _phase_flag_counts(check: Mapping[str, Any]) -> dict[str, int]:
+    violations = (check or {}).get("violations") or []
+    error_count = sum(1 for v in violations if v.get("severity") == "error")
+    warning_count = sum(1 for v in violations if v.get("severity") == "warning")
+    return {"error_count": error_count, "warning_count": warning_count}
+
+
+def _render_validator_prompt_section(summary: dict[str, dict[str, int]], semantic_checks: list[str]) -> str:
+    lines = ["## Deterministic checks already performed", ""]
+    for phase_name, counts in summary.items():
+        lines.append(
+            f"- {phase_name}: {counts['error_count']} error flag(s), {counts['warning_count']} warning(s) "
+            "— mechanical limits/casing already enforced/flagged by the pipeline"
+        )
+    lines.append("")
+    lines.append(_render_semantic_instruction(semantic_checks))
+    return "\n".join(lines) + "\n"
+
+
+def _render_semantic_instruction(semantic_checks: list[str]) -> str:
+    numbered = "; ".join(f"({i}) {check}" for i, check in enumerate(semantic_checks, start=1))
+    body = f"{numbered}; {_VALIDATOR_INSTRUCTION_SUFFIX}" if numbered else _VALIDATOR_INSTRUCTION_SUFFIX
+    return f"{_VALIDATOR_INSTRUCTION_PREFIX}{body}"
 
 
 def _render_seo_prompt_section(data: dict, rules: StyleRules, program: str | None) -> str:
