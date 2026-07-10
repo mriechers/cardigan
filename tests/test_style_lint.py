@@ -428,6 +428,65 @@ class TestSpeakerLabelInconsistent:
         result = run_lint({"formatter_output": _formatter_output(body=body)}, rules)
         assert _violations_for(result, "formatter", "lint.formatter.speaker_label_inconsistent") == []
 
+    def test_header_fields_do_not_leak_into_label_collection(self):
+        # _body_region scoping (strictly between the two "---" rules) must
+        # keep "**Project:**" / "**Date Processed:**"-style header fields
+        # out of the candidate pool -- otherwise "Project" (a single bold
+        # word) would spuriously trip the single-word check every time.
+        rules = _rules()
+        result = run_lint({"formatter_output": _formatter_output()}, rules)
+        violations = _violations_for(result, "formatter", "lint.formatter.speaker_label_inconsistent")
+        assert not any("Project" in v.message for v in violations)
+        assert not any("Date Processed" in v.message for v in violations)
+        assert not any("Program" in v.message for v in violations)
+        assert not any("Duration" in v.message for v in violations)
+
+
+# ---------------------------------------------------------------------------
+# lint.formatter.speaker_label_inconsistent -- liveness against the REAL
+# house_style.yaml strict pattern (2+ words required). Regression coverage
+# for the bug where candidate labels were COLLECTED using the configured
+# pattern itself: since the real config/house_style.yaml pattern requires
+# 2+ words, a malformed single-word label like "**Sarah:**" would never
+# enter the candidate pool at all, and the single-word branch could never
+# fire in production. Collection must use a loose built-in pattern;
+# classification (single-word / honorific / superset) runs over whatever
+# that loose pattern finds, independent of how strict the configured
+# pattern is.
+# ---------------------------------------------------------------------------
+
+# Copied verbatim from config/house_style.yaml's phases.formatter.speaker_label.pattern.
+_REAL_STRICT_SPEAKER_PATTERN = r"^\*\*[A-Z][\w.'-]+(?: [A-Z][\w.'-]+)+:\*\*"
+
+
+class TestSpeakerLabelInconsistentLiveAgainstRealPattern:
+    def test_single_word_label_fires_with_real_strict_pattern_configured(self):
+        rules = _rules(speaker_label_pattern=_REAL_STRICT_SPEAKER_PATTERN)
+        body = (
+            "**Sarah:**  \nDialogue text here that is long enough to matter for this test.\n\n"
+            "**John Smith:**\nMore dialogue text that is also long enough."
+        )
+        result = run_lint({"formatter_output": _formatter_output(body=body)}, rules)
+        violations = _violations_for(result, "formatter", "lint.formatter.speaker_label_inconsistent")
+        assert any("Sarah" in v.message and "single word" in v.message for v in violations)
+        assert all(v.model_fixable is True and v.severity == "warning" for v in violations)
+
+    def test_honorific_label_fires_with_real_strict_pattern_configured(self):
+        rules = _rules(speaker_label_pattern=_REAL_STRICT_SPEAKER_PATTERN, no_honorifics=True)
+        body = (
+            "**Dr. Sarah Johnson:**\nDialogue text that is long enough to matter here.\n\n"
+            "**John Smith:**\nMore dialogue text that is also long enough."
+        )
+        result = run_lint({"formatter_output": _formatter_output(body=body)}, rules)
+        violations = _violations_for(result, "formatter", "lint.formatter.speaker_label_inconsistent")
+        assert any("honorific" in v.message for v in violations)
+
+    def test_header_fields_do_not_leak_with_real_strict_pattern_configured(self):
+        rules = _rules(speaker_label_pattern=_REAL_STRICT_SPEAKER_PATTERN)
+        result = run_lint({"formatter_output": _formatter_output()}, rules)
+        violations = _violations_for(result, "formatter", "lint.formatter.speaker_label_inconsistent")
+        assert not any("Date Processed" in v.message for v in violations)
+
 
 # ---------------------------------------------------------------------------
 # lint.formatter.content_past_duration (warning)

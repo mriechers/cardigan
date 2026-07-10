@@ -88,12 +88,12 @@ OUTPUT/{project}/formatter_output.md
 **Duration:** {Duration from transcript - calculate from SRT timecodes if needed}
 **Date Processed:** {TODAY'S DATE in YYYY-MM-DD format}
 
----
-
 <!-- REVIEW NOTES (only if needed):
 - Speaker unclear at 2:30: Could not identify from brainstorming doc
 - Spelling check needed: "Manitowoc" vs "Manitowac"
 -->
+
+---
 
 **John Smith:**
 Clean, readable text with proper punctuation and natural flow. Sentences grouped logically. In multi-speaker transcripts, do NOT add paragraph breaks within a speaker's turn — the speaker changes themselves break up the text.

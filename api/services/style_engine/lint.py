@@ -72,6 +72,17 @@ _REVIEW_NOTE_MARKER_RE = re.compile(r"<!--\s*review|NEEDS_REVIEW|^##\s*Review No
 
 _HONORIFIC_RE = re.compile(r"^(?:Dr|Mr|Ms|Mrs|Prof)\.?\s", re.IGNORECASE)
 
+# Loose "**Name:**" bold-colon speaker-label shape used to COLLECT candidate
+# labels for the speaker_label_inconsistent check. Deliberately more
+# permissive than any configured house_style.yaml speaker_label.pattern
+# (which typically requires 2+ words) -- collection and validation are
+# separate concerns. If candidates were collected with the strict configured
+# pattern, a malformed single-word label like "**Sarah:**" would never enter
+# the pool and the single-word check below could never fire. The configured
+# pattern remains the definition of a *conforming* label; this pattern's job
+# is only to find everything that looks label-shaped so it can be judged.
+_LOOSE_SPEAKER_LABEL_RE = re.compile(r"^\*\*[A-Z][\w.'-]*(?:\s[A-Z][\w.'-]*)*:\*\*", re.MULTILINE)
+
 # (MM:SS) or (H:MM:SS) timecode markers, e.g. "(12:34)" / "(1:02:03)".
 _TIMECODE_RE = re.compile(r"\((\d{1,2}(?::\d{2}){1,2})\)")
 _DURATION_SLACK_SECONDS = 60
@@ -265,14 +276,13 @@ def _check_review_notes_in_body(raw_output: str, rules: StyleRules, phase: str) 
 
 def _check_speaker_label_inconsistent(raw_output: str, rules: StyleRules, phase: str) -> list[RuleViolation]:
     speaker_label_cfg = _phase_cfg(rules, "formatter").get("speaker_label") or {}
-    pattern = speaker_label_cfg.get("pattern")
-    if not pattern:
+    if not speaker_label_cfg.get("pattern"):
         return []
     no_honorifics = bool(speaker_label_cfg.get("no_honorifics"))
 
     labels: list[str] = []
     seen: set[str] = set()
-    for match in re.finditer(pattern, _body_region(raw_output), re.MULTILINE):
+    for match in _LOOSE_SPEAKER_LABEL_RE.finditer(_body_region(raw_output)):
         name = _label_text(match.group(0))
         if name and name not in seen:
             seen.add(name)
