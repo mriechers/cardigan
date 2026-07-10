@@ -154,7 +154,7 @@ This runs in stdio mode — you'll see it waiting for input (that's normal).
 
 For the best experience, add these to your Claude Desktop project's knowledge folder:
 
-1. **`.claude/agents/copy_editor.md`** — Full editing workflow and Cardigan's personality
+1. **`claude-desktop-project/EDITOR_AGENT_INSTRUCTIONS.md`** — Full editing workflow and Cardigan's personality (the copy-editor agent has been relocated to the pbswi workspace root and is no longer inside this repo)
 2. **AP Stylebook reference** (if you have a PDF)
 3. **Program-specific style guides** (University Place, Here and Now, etc.)
 

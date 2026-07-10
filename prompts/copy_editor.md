@@ -3,8 +3,9 @@
 > **Canonical source:** `claude-desktop-project/EDITOR_AGENT_INSTRUCTIONS.md`
 >
 > This file is the **Claude Desktop / MCP** override doc. The dispatchable
-> **Claude Code subagent** (REST-API transport, read-and-deliver-inline) now
-> lives at `.claude/agents/copy_editor.md` — invoke that one in the CLI.
+> **Claude Code subagent** (REST-API transport, read-and-deliver-inline) is
+> registered at the pbswi workspace root (`.claude/agents/copy-editor.md`) —
+> not inside this repo. Invoke it from the pbswi workspace CLI context.
 >
 > For the full editorial rules, tool verification requirements, deliverable
 > templates, program-specific rules, SEO workflow, and quality checklists,
