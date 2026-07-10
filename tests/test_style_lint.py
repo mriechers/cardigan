@@ -776,6 +776,24 @@ class TestTruncationSuspectCoverageVsDuration:
         assert len(violations) == 1
         assert "terminal punctuation" in violations[0].message
 
+    def test_ignores_marker_inside_html_comment(self):
+        # Discovered against real production data (job 8/12/15 in the Stage-2
+        # study): every (MM:SS) marker in the real 21-job corpus lives inside
+        # a "<!-- REVIEW NOTES: ... -->" aside, not the visible transcript
+        # body -- e.g. "'The mounds' (1:01) appears without prior
+        # introduction" is a content-origin note, not a coverage signal.
+        # Scanning raw_output unstripped produces both false pairings
+        # (matching the wrong LLM flag by rule_id) and outright false
+        # positives (flagging a short, complete clip as truncated because an
+        # unrelated review note happened to mention an early timestamp).
+        rules = _rules()
+        body = "**John Smith:**\nThe segment closes out cleanly and reaches its natural conclusion."
+        review_notes = '<!-- REVIEW NOTES:\n- "The mounds" (1:01) appears without prior introduction. -->'
+        formatter = _formatter_output(body=body, review_notes=review_notes)
+        context = {"formatter_output": formatter, "duration_minutes": 1.25855}
+        result = run_lint(context, rules)
+        assert _violations_for(result, "formatter", "lint.formatter.truncation_suspect") == []
+
     def test_message_contains_both_timestamps(self):
         rules = _rules()
         body = (

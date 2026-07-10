@@ -476,7 +476,17 @@ def _check_truncation_coverage(
     if not duration_minutes:
         return []
 
-    markers = list(_TIMECODE_RE.finditer(raw_output))
+    # HTML comments (review notes, provenance headers) are stripped before
+    # scanning -- a timecode mentioned in passing inside freeform review-note
+    # prose (e.g. "the Hendrickson paragraph (00:07:44)") says nothing about
+    # how much of the actual transcript content is covered, and treating it
+    # as a coverage marker produces both false negatives (a genuine cutoff
+    # note that isn't the LAST such mention gets shadowed) and false
+    # positives (an unrelated aside coincidentally reads as a low-coverage
+    # marker). Mirrors _check_truncation_punctuation's HTML-comment handling
+    # of the same raw_output.
+    body_text = _HTML_COMMENT_RE.sub("", raw_output)
+    markers = list(_TIMECODE_RE.finditer(body_text))
     if not markers:
         return []
 
