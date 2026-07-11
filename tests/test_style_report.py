@@ -153,7 +153,9 @@ def test_summarize_violations_counts_and_groups_by_rule_and_phase():
     records = [
         normalize_violation_record(_violation_row(rule_id="voice.forbidden.cta", phase="seo", action="flagged")),
         normalize_violation_record(_violation_row(rule_id="voice.forbidden.cta", phase="seo", action="flagged")),
-        normalize_violation_record(_violation_row(rule_id="voice.forbidden.cta", phase="seo", action="shadow", mode="shadow")),
+        normalize_violation_record(
+            _violation_row(rule_id="voice.forbidden.cta", phase="seo", action="shadow", mode="shadow")
+        ),
         # Different phase -- must NOT merge with the seo rows above.
         normalize_violation_record(_violation_row(rule_id="voice.forbidden.cta", phase="formatter", action="flagged")),
         # Different rule_id entirely.
@@ -279,13 +281,23 @@ def test_diff_replacement_pairs_null_pipeline_value_returns_empty():
 def test_cluster_corrections_groups_recurring_single_word_replacement():
     records = [
         normalize_correction_record(
-            _correction_row(field="short_description", pipeline_value="The show explores art.", committed_value="The show examines art.")
+            _correction_row(
+                field="short_description",
+                pipeline_value="The show explores art.",
+                committed_value="The show examines art.",
+            )
         ),
         normalize_correction_record(
-            _correction_row(field="long_description", pipeline_value="It explores culture.", committed_value="It examines culture.")
+            _correction_row(
+                field="long_description", pipeline_value="It explores culture.", committed_value="It examines culture."
+            )
         ),
         normalize_correction_record(
-            _correction_row(field="short_description", pipeline_value="They explores nothing else.", committed_value="They examines nothing else.")
+            _correction_row(
+                field="short_description",
+                pipeline_value="They explores nothing else.",
+                committed_value="They examines nothing else.",
+            )
         ),
     ]
     clusters = cluster_corrections(records)
@@ -308,7 +320,9 @@ def test_null_pipeline_correction_counts_buckets_by_field():
         normalize_correction_record(_correction_row(field="keywords", pipeline_value=None, committed_value="d, e, f")),
         normalize_correction_record(_correction_row(field="hashtags", pipeline_value=None, committed_value="#x")),
         # Has a pipeline_value -- must NOT be counted here.
-        normalize_correction_record(_correction_row(field="title", pipeline_value="A title", committed_value="A Title")),
+        normalize_correction_record(
+            _correction_row(field="title", pipeline_value="A title", committed_value="A Title")
+        ),
     ]
     counts = null_pipeline_correction_counts(records)
     assert counts == {"keywords": 2, "hashtags": 1}
@@ -323,8 +337,20 @@ _SYNTHETIC_RULES = {
     "meta": {"version": 1},
     "voice": {
         "forbidden_phrases": [
-            {"id": "watch_as", "match": "watch as", "category": "viewer_directive", "tier": "flag", "severity": "error"},
-            {"id": "watch_how", "match": "watch how", "category": "viewer_directive", "tier": "flag", "severity": "error"},
+            {
+                "id": "watch_as",
+                "match": "watch as",
+                "category": "viewer_directive",
+                "tier": "flag",
+                "severity": "error",
+            },
+            {
+                "id": "watch_how",
+                "match": "watch how",
+                "category": "viewer_directive",
+                "tier": "flag",
+                "severity": "error",
+            },
             {"id": "join_us", "match": "join us", "category": "cta", "tier": "flag", "severity": "error"},
         ]
     },
@@ -430,7 +456,13 @@ def test_build_report_renders_all_sections_and_banner():
             committed_value="The show examines art in Wisconsin.",
         ),
     ]
-    window = {"since": "2026-06-01", "until": "2026-07-01", "app_version": None, "db_path": "dashboard.db", "generated_at": "2026-07-10T00:00:00+00:00"}
+    window = {
+        "since": "2026-06-01",
+        "until": "2026-07-01",
+        "app_version": None,
+        "db_path": "dashboard.db",
+        "generated_at": "2026-07-10T00:00:00+00:00",
+    }
     report = build_report(events, _SYNTHETIC_RULES, window)
 
     assert "# Style Feedback Report" in report
@@ -446,7 +478,13 @@ def test_build_report_renders_all_sections_and_banner():
 
 
 def test_build_report_handles_zero_events_without_raising():
-    window = {"since": None, "until": None, "app_version": None, "db_path": "dashboard.db", "generated_at": "2026-07-10T00:00:00+00:00"}
+    window = {
+        "since": None,
+        "until": None,
+        "app_version": None,
+        "db_path": "dashboard.db",
+        "generated_at": "2026-07-10T00:00:00+00:00",
+    }
     report = build_report([], {}, window)
     assert "# Style Feedback Report" in report
     assert "Total events in window: **0**" in report

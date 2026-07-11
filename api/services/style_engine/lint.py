@@ -313,7 +313,9 @@ def _check_speaker_label_inconsistent(raw_output: str, rules: StyleRules, phase:
 
     for name in labels:
         if len(name.split()) == 1:
-            violations.append(_speaker_violation(phase, f'Speaker label "{name}" is a single word (expected first + last name)'))
+            violations.append(
+                _speaker_violation(phase, f'Speaker label "{name}" is a single word (expected first + last name)')
+            )
         if no_honorifics and _HONORIFIC_RE.match(name):
             violations.append(
                 _speaker_violation(phase, f'Speaker label "{name}" carries an honorific (house style: names only)')

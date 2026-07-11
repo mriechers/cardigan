@@ -82,9 +82,7 @@ def render_prompt_blocks(
 
     prompt_blocks = rules.raw.get("prompt_blocks")
     if not isinstance(prompt_blocks, dict):
-        raise PromptBlockError(
-            f"Prompt text contains style tokens but {source_desc} has no 'prompt_blocks' section"
-        )
+        raise PromptBlockError(f"Prompt text contains style tokens but {source_desc} has no 'prompt_blocks' section")
 
     def _substitute(match: re.Match[str]) -> str:
         key = match.group(1)
@@ -94,8 +92,7 @@ def render_prompt_blocks(
         rendered = block.get(profile, block.get("full"))
         if rendered is None:
             raise PromptBlockError(
-                f"Style prompt block {key!r} in {source_desc} has neither profile {profile!r} "
-                "nor a 'full' fallback"
+                f"Style prompt block {key!r} in {source_desc} has neither profile {profile!r} " "nor a 'full' fallback"
             )
         rendered = str(rendered)
         if rendered.endswith("\n"):

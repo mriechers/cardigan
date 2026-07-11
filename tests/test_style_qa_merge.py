@@ -115,7 +115,9 @@ class TestValidationDataNone:
         result = merge_style_flags(None, style_checks, _ENABLED_CFG)
 
         assert result["_merged_from_none"] is True
-        assert result["phase_results"]["seo"]["flags"] == ["[style:lint.seo.title_over_limit] title is 90 chars (limit 80)"]
+        assert result["phase_results"]["seo"]["flags"] == [
+            "[style:lint.seo.title_over_limit] title is 90 chars (limit 80)"
+        ]
         assert result["phase_results"]["seo"]["status"] == "fail"
         assert result["overall"] == "fail"
         # Untouched phases stay clean.
@@ -187,7 +189,9 @@ class TestFlagTextAndDedupe:
     def test_never_removes_or_reorders_existing_llm_flags(self):
         existing = ["review note: media_id unresolved", "second llm flag"]
         validation_data = _validation_data(formatter={"status": "fail", "flags": list(existing)})
-        style_checks = {"formatter": _check(_violation(rule_id="lint.formatter.truncation_suspect", phase="formatter", field=None))}
+        style_checks = {
+            "formatter": _check(_violation(rule_id="lint.formatter.truncation_suspect", phase="formatter", field=None))
+        }
 
         result = merge_style_flags(validation_data, style_checks, _MERGE_ONLY_CFG)
 

@@ -27,9 +27,7 @@ _HR_LINE_RE = re.compile(r"^-{3,}[ \t]*$", re.MULTILINE)
 _REVIEW_NOTE_MARKER_RE = re.compile(r"<!--\s*review|NEEDS_REVIEW|^##\s*Review Notes", re.IGNORECASE | re.MULTILINE)
 
 
-def check_review_notes_placement(
-    raw_output: str, review_notes_cfg: Mapping | None, phase: str
-) -> list[RuleViolation]:
+def check_review_notes_placement(raw_output: str, review_notes_cfg: Mapping | None, phase: str) -> list[RuleViolation]:
     """Detect a review-note marker after the first horizontal rule.
 
     ``review_notes_cfg`` is ``phases.formatter.review_notes``-shaped (keys:

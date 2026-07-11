@@ -2326,9 +2326,7 @@ async def _log_editor_corrections(media_id: str, manifest: dict | None, proposed
                 )
             )
         except Exception:
-            logger.warning(
-                "editor_correction event logging failed for %s field=%s", media_id, field_key, exc_info=True
-            )
+            logger.warning("editor_correction event logging failed for %s field=%s", media_id, field_key, exc_info=True)
 
 
 async def handle_commit_sst_edits(arguments: dict) -> list[TextContent]:

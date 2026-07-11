@@ -395,7 +395,10 @@ class TestRoundTripGoldenString:
         assert chapters is not None
         srt_end_ms = 600000
         snapped, notes = snap_chapters(
-            chapters, srt_end_ms=srt_end_ms, max_chapters=rules.chapter_max(srt_end_ms / 60000), first_chapter_title="Cold open"
+            chapters,
+            srt_end_ms=srt_end_ms,
+            max_chapters=rules.chapter_max(srt_end_ms / 60000),
+            first_chapter_title="Cold open",
         )
         report = emit_timestamp_report(snapped, srt_end_ms=srt_end_ms, rules=rules)
 
@@ -440,7 +443,10 @@ class TestRoundTripGoldenString:
         assert chapters is not None
         srt_end_ms = 600000
         snapped, _ = snap_chapters(
-            chapters, srt_end_ms=srt_end_ms, max_chapters=rules.chapter_max(srt_end_ms / 60000), first_chapter_title="Cold open"
+            chapters,
+            srt_end_ms=srt_end_ms,
+            max_chapters=rules.chapter_max(srt_end_ms / 60000),
+            first_chapter_title="Cold open",
         )
         report = emit_timestamp_report(
             snapped, srt_end_ms=srt_end_ms, rules=rules, project_name="Sports Betting Debate"

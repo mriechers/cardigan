@@ -282,9 +282,7 @@ class TestKillSwitch:
         worker = JobWorker()
         context = {"transcript": "Test transcript"}
 
-        result = await worker._run_phase(
-            job_id=1, phase_name="seo", context=context, project_path=tmp_path
-        )
+        result = await worker._run_phase(job_id=1, phase_name="seo", context=context, project_path=tmp_path)
 
         assert result["success"] is True
         assert result["output"] == "Test output content"
@@ -321,9 +319,7 @@ class TestKillSwitch:
         worker = JobWorker()
         context = {"transcript": "Test transcript", "analyst_output": ANALYST_TABLE}
 
-        result = await worker._run_phase(
-            job_id=1, phase_name="seo", context=context, project_path=tmp_path
-        )
+        result = await worker._run_phase(job_id=1, phase_name="seo", context=context, project_path=tmp_path)
 
         assert result["output"] == "Test output content"
         assert "style_pre" not in context
@@ -342,9 +338,7 @@ class TestKillSwitch:
         rules_path = _write_rules(tmp_path)
         mock_llm_client.config = {
             "routing": {
-                "style_engine": _style_engine_cfg(
-                    rules_path, phases={"seo": {"pre": False, "post": "off"}}
-                ),
+                "style_engine": _style_engine_cfg(rules_path, phases={"seo": {"pre": False, "post": "off"}}),
             }
         }
         mock_get_llm.return_value = mock_llm_client
@@ -355,9 +349,7 @@ class TestKillSwitch:
         worker = JobWorker()
         context = {"transcript": "Test transcript", "analyst_output": ANALYST_TABLE}
 
-        result = await worker._run_phase(
-            job_id=1, phase_name="seo", context=context, project_path=tmp_path
-        )
+        result = await worker._run_phase(job_id=1, phase_name="seo", context=context, project_path=tmp_path)
 
         assert result["output"] == "Test output content"
         assert "style_pre" not in context
@@ -380,9 +372,7 @@ class TestPreHook:
         rules_path = _write_rules(tmp_path)
         mock_llm_client.config = {
             "routing": {
-                "style_engine": _style_engine_cfg(
-                    rules_path, phases={"seo": {"pre": True, "post": "off"}}
-                ),
+                "style_engine": _style_engine_cfg(rules_path, phases={"seo": {"pre": True, "post": "off"}}),
             }
         }
         mock_get_llm.return_value = mock_llm_client
@@ -393,9 +383,7 @@ class TestPreHook:
         worker = JobWorker()
         context = {"transcript": "Nick Hoffman opens the show.", "analyst_output": ANALYST_TABLE}
 
-        result = await worker._run_phase(
-            job_id=1, phase_name="seo", context=context, project_path=tmp_path
-        )
+        result = await worker._run_phase(job_id=1, phase_name="seo", context=context, project_path=tmp_path)
 
         assert result["success"] is True
         assert "style_pre" in context
@@ -416,9 +404,7 @@ class TestPreHook:
         rules_path = _write_rules(tmp_path)
         mock_llm_client.config = {
             "routing": {
-                "style_engine": _style_engine_cfg(
-                    rules_path, phases={"seo": {"pre": False, "post": "off"}}
-                ),
+                "style_engine": _style_engine_cfg(rules_path, phases={"seo": {"pre": False, "post": "off"}}),
             }
         }
         mock_get_llm.return_value = mock_llm_client
@@ -448,9 +434,7 @@ class TestPreHook:
         rules_path = _write_rules(tmp_path)
         mock_llm_client.config = {
             "routing": {
-                "style_engine": _style_engine_cfg(
-                    rules_path, phases={"seo": {"pre": False, "post": "off"}}
-                ),
+                "style_engine": _style_engine_cfg(rules_path, phases={"seo": {"pre": False, "post": "off"}}),
             }
         }
         mock_get_llm.return_value = mock_llm_client
@@ -488,9 +472,7 @@ class TestPostHookShadow:
         rules_path = _write_rules(tmp_path)
         mock_llm_client.config = {
             "routing": {
-                "style_engine": _style_engine_cfg(
-                    rules_path, phases={"seo": {"pre": False, "post": "shadow"}}
-                ),
+                "style_engine": _style_engine_cfg(rules_path, phases={"seo": {"pre": False, "post": "shadow"}}),
             }
         }
         mock_get_llm.return_value = mock_llm_client
@@ -509,9 +491,7 @@ class TestPostHookShadow:
         worker = JobWorker()
         context = {"transcript": "irrelevant"}
 
-        result = await worker._run_phase(
-            job_id=1, phase_name="seo", context=context, project_path=tmp_path
-        )
+        result = await worker._run_phase(job_id=1, phase_name="seo", context=context, project_path=tmp_path)
 
         # Result output and persisted file are the RAW response content.
         assert result["success"] is True
@@ -544,9 +524,7 @@ class TestPostHookEnforce:
         rules_path = _write_rules(tmp_path)
         mock_llm_client.config = {
             "routing": {
-                "style_engine": _style_engine_cfg(
-                    rules_path, phases={"seo": {"pre": False, "post": "enforce"}}
-                ),
+                "style_engine": _style_engine_cfg(rules_path, phases={"seo": {"pre": False, "post": "enforce"}}),
             }
         }
         mock_get_llm.return_value = mock_llm_client
@@ -560,9 +538,7 @@ class TestPostHookEnforce:
         worker = JobWorker()
         context = {"transcript": "irrelevant"}
 
-        result = await worker._run_phase(
-            job_id=1, phase_name="seo", context=context, project_path=tmp_path
-        )
+        result = await worker._run_phase(job_id=1, phase_name="seo", context=context, project_path=tmp_path)
 
         expected_title = "Wisconsin Governor signs new budget bill in Madison"
         assert result["success"] is True
@@ -592,9 +568,7 @@ class TestPostHookEnforce:
         rules_path = _write_rules(tmp_path)
         mock_llm_client.config = {
             "routing": {
-                "style_engine": _style_engine_cfg(
-                    rules_path, phases={"seo": {"pre": False, "post": "enforce"}}
-                ),
+                "style_engine": _style_engine_cfg(rules_path, phases={"seo": {"pre": False, "post": "enforce"}}),
             }
         }
         mock_get_llm.return_value = mock_llm_client
@@ -614,9 +588,7 @@ class TestPostHookEnforce:
         worker = JobWorker()
         context = {"transcript": "irrelevant"}
 
-        result = await worker._run_phase(
-            job_id=1, phase_name="seo", context=context, project_path=tmp_path
-        )
+        result = await worker._run_phase(job_id=1, phase_name="seo", context=context, project_path=tmp_path)
         assert result["success"] is True
 
         style_violation_events = [e for e in logged_events if e.event_type == EventType.style_violation]
@@ -655,9 +627,7 @@ class TestPostHookEnforce:
         worker = JobWorker()
         context = {"transcript": "irrelevant"}
 
-        result = await worker._run_phase(
-            job_id=1, phase_name="seo", context=context, project_path=tmp_path
-        )
+        result = await worker._run_phase(job_id=1, phase_name="seo", context=context, project_path=tmp_path)
 
         assert result["success"] is True
         assert not (tmp_path / "seo_output.raw.md").exists()
@@ -692,9 +662,7 @@ class TestFailOpen:
         worker = JobWorker()
         context = {"transcript": "irrelevant"}
 
-        result = await worker._run_phase(
-            job_id=1, phase_name="seo", context=context, project_path=tmp_path
-        )
+        result = await worker._run_phase(job_id=1, phase_name="seo", context=context, project_path=tmp_path)
 
         assert result["success"] is True
         assert result["output"] == "Test output content"
@@ -724,9 +692,7 @@ class TestFailOpen:
         worker = JobWorker()
         context = {"transcript": "irrelevant"}
 
-        result = await worker._run_phase(
-            job_id=1, phase_name="seo", context=context, project_path=tmp_path
-        )
+        result = await worker._run_phase(job_id=1, phase_name="seo", context=context, project_path=tmp_path)
 
         assert result["success"] is True
         assert "style_pre" not in context
@@ -737,7 +703,14 @@ class TestFailOpen:
     @patch("api.services.worker.AGENTS_DIR")
     @patch("api.services.style_engine.run_post_stage")
     async def test_post_fails_open_when_log_event_raises(
-        self, mock_run_post_stage, mock_agents_dir, mock_log_event, mock_get_llm, mock_llm_client, mock_llm_response, tmp_path
+        self,
+        mock_run_post_stage,
+        mock_agents_dir,
+        mock_log_event,
+        mock_get_llm,
+        mock_llm_client,
+        mock_llm_response,
+        tmp_path,
     ):
         """A style_violation log_event() failure must not fail the phase or
         leak a partially-applied normalization -- the raw content flows.
@@ -748,22 +721,21 @@ class TestFailOpen:
         rules_path = _write_rules(tmp_path)
         mock_llm_client.config = {
             "routing": {
-                "style_engine": _style_engine_cfg(
-                    rules_path, phases={"seo": {"pre": False, "post": "shadow"}}
-                ),
+                "style_engine": _style_engine_cfg(rules_path, phases={"seo": {"pre": False, "post": "shadow"}}),
             }
         }
         mock_get_llm.return_value = mock_llm_client
         raw_output = _seo_report(
             title="Discover Wisconsin Governor Signs New Budget Bill In Madison",
             short_description="Wisconsin Governor DISCOVERS the budget impact.",
-            long_description="A longer description about what the Governor Discovered regarding the budget situation."
+            long_description="A longer description about what the Governor Discovered regarding the budget situation.",
         )
         mock_llm_response.content = raw_output
         mock_llm_client.chat = AsyncMock(return_value=mock_llm_response)
 
         # Mock post object with MULTIPLE violations to trigger loop iterations
         from api.services.style_engine.types import RuleViolation
+
         mock_post = MagicMock()
         mock_post.normalized_output = raw_output
         mock_post.changed = False
@@ -796,6 +768,7 @@ class TestFailOpen:
         mock_run_post_stage.return_value = mock_post
 
         call_count = [0]
+
         async def _flaky_log_event(event):
             """Log first violation successfully, raise on the second."""
             if event.event_type == EventType.style_violation:
@@ -810,9 +783,7 @@ class TestFailOpen:
         worker = JobWorker()
         context = {"transcript": "irrelevant"}
 
-        result = await worker._run_phase(
-            job_id=1, phase_name="seo", context=context, project_path=tmp_path
-        )
+        result = await worker._run_phase(job_id=1, phase_name="seo", context=context, project_path=tmp_path)
 
         assert result["success"] is True
         assert result["output"] == raw_output
@@ -821,8 +792,7 @@ class TestFailOpen:
         # NEW ASSERTION: style_checks[seo] must NOT exist on fail-open path
         # (even though violations were found, the exception mid-loop leaves it partial)
         assert "seo" not in context.get("style_checks", {}), (
-            "style_checks[seo] should be cleaned up on fail-open, "
-            "but survived with partial state"
+            "style_checks[seo] should be cleaned up on fail-open, " "but survived with partial state"
         )
 
 
@@ -845,9 +815,7 @@ def _bare_worker(style_engine_cfg: dict) -> JobWorker:
     return worker
 
 
-_CLEAN_FORMATTER_BODY = (
-    "**John Smith:**\nDialogue text that is long enough to matter here and ends properly."
-)
+_CLEAN_FORMATTER_BODY = "**John Smith:**\nDialogue text that is long enough to matter here and ends properly."
 
 
 def _passing_verdict() -> dict:
@@ -992,9 +960,7 @@ class TestValidatorLintHook:
         worker = _bare_worker(cfg)
         monkeypatch.setattr(worker_mod, "log_event", AsyncMock())
         warning_calls = []
-        monkeypatch.setattr(
-            worker_mod.logger, "warning", lambda *a, **kw: warning_calls.append((a, kw))
-        )
+        monkeypatch.setattr(worker_mod.logger, "warning", lambda *a, **kw: warning_calls.append((a, kw)))
 
         context = {
             "analyst_output": ANALYST_TABLE,
@@ -1183,9 +1149,8 @@ class TestRetryRevalidationLintMerge:
 
         # Mock database operations - patch at the database module level since retry_single_phase imports locally
         from api.services import database as db_mod
-        monkeypatch.setattr(
-            db_mod, "get_job", AsyncMock(side_effect=[existing_job, existing_job, existing_job])
-        )
+
+        monkeypatch.setattr(db_mod, "get_job", AsyncMock(side_effect=[existing_job, existing_job, existing_job]))
         update_job_mock = AsyncMock()
         monkeypatch.setattr(db_mod, "update_job", update_job_mock)
         monkeypatch.setattr(worker_mod, "log_event", AsyncMock())
@@ -1277,33 +1242,41 @@ class TestChunkedFormatterStylePre:
         rules_path = _write_formatter_rules(tmp_path)
         mock_llm_client.config = {
             "routing": {
-                "style_engine": _style_engine_cfg(
-                    rules_path, phases={"formatter": {"pre": True, "post": "off"}}
-                ),
+                "style_engine": _style_engine_cfg(rules_path, phases={"formatter": {"pre": True, "post": "off"}}),
                 "chunking": {"enabled": True},
             }
         }
         mock_get_llm.return_value = mock_llm_client
         mock_split_transcript.return_value = [
             TranscriptChunk(
-                index=0, content="chunk zero dialogue", start_timecode="0", end_timecode="1",
-                word_count=3, overlap_prefix="",
+                index=0,
+                content="chunk zero dialogue",
+                start_timecode="0",
+                end_timecode="1",
+                word_count=3,
+                overlap_prefix="",
             ),
             TranscriptChunk(
-                index=1, content="chunk one dialogue", start_timecode="1", end_timecode="2",
-                word_count=3, overlap_prefix="chunk zero dialogue",
+                index=1,
+                content="chunk one dialogue",
+                start_timecode="1",
+                end_timecode="2",
+                word_count=3,
+                overlap_prefix="chunk zero dialogue",
             ),
         ]
 
         captured_user_messages = []
 
         async def fake_chat(**kwargs):
-            captured_user_messages.append(
-                next(m["content"] for m in kwargs["messages"] if m["role"] == "user")
-            )
+            captured_user_messages.append(next(m["content"] for m in kwargs["messages"] if m["role"] == "user"))
             return SimpleNamespace(
-                content="formatted chunk", cost=0.001, total_tokens=10,
-                input_tokens=5, output_tokens=5, model="test-model",
+                content="formatted chunk",
+                cost=0.001,
+                total_tokens=10,
+                input_tokens=5,
+                output_tokens=5,
+                model="test-model",
             )
 
         mock_llm_client.chat = fake_chat
@@ -1317,9 +1290,7 @@ class TestChunkedFormatterStylePre:
             "analyst_output": ANALYST_TABLE,
         }
 
-        result = await worker._run_phase(
-            job_id=1, phase_name="formatter", context=context, project_path=tmp_path
-        )
+        result = await worker._run_phase(job_id=1, phase_name="formatter", context=context, project_path=tmp_path)
 
         assert result["success"] is True
         assert len(captured_user_messages) == 2, "both chunks must have called the LLM"
@@ -1347,20 +1318,31 @@ class TestChunkedFormatterStylePost:
             user_message = next(m["content"] for m in kwargs["messages"] if m["role"] == "user")
             idx = 1 if "Continue formatting from where the previous" in user_message else 0
             return SimpleNamespace(
-                content=chunk_outputs[idx], cost=0.01, total_tokens=10,
-                input_tokens=6, output_tokens=4, model="m",
+                content=chunk_outputs[idx],
+                cost=0.01,
+                total_tokens=10,
+                input_tokens=6,
+                output_tokens=4,
+                model="m",
             )
 
         worker.llm.chat = fake_chat
 
         chunks = [
-            TranscriptChunk(index=0, content="opening", start_timecode="0", end_timecode="1", word_count=1, overlap_prefix=""),
-            TranscriptChunk(index=1, content="closing", start_timecode="1", end_timecode="2", word_count=1, overlap_prefix="opening"),
+            TranscriptChunk(
+                index=0, content="opening", start_timecode="0", end_timecode="1", word_count=1, overlap_prefix=""
+            ),
+            TranscriptChunk(
+                index=1, content="closing", start_timecode="1", end_timecode="2", word_count=1, overlap_prefix="opening"
+            ),
         ]
         context = {"analyst_output": ""}
 
         result = await worker._run_formatter_chunked(
-            job_id=1, chunks=chunks, context=context, project_path=tmp_path,
+            job_id=1,
+            chunks=chunks,
+            context=context,
+            project_path=tmp_path,
             chunking_config={"max_parallel": 2},
         )
 
@@ -1404,20 +1386,31 @@ class TestChunkedFormatterStylePost:
             user_message = next(m["content"] for m in kwargs["messages"] if m["role"] == "user")
             idx = 1 if "Continue formatting from where the previous" in user_message else 0
             return SimpleNamespace(
-                content=chunk_outputs[idx], cost=0.01, total_tokens=10,
-                input_tokens=6, output_tokens=4, model="m",
+                content=chunk_outputs[idx],
+                cost=0.01,
+                total_tokens=10,
+                input_tokens=6,
+                output_tokens=4,
+                model="m",
             )
 
         worker.llm.chat = fake_chat
 
         chunks = [
-            TranscriptChunk(index=0, content="a", start_timecode="0", end_timecode="1", word_count=1, overlap_prefix=""),
-            TranscriptChunk(index=1, content="b", start_timecode="1", end_timecode="2", word_count=1, overlap_prefix="a"),
+            TranscriptChunk(
+                index=0, content="a", start_timecode="0", end_timecode="1", word_count=1, overlap_prefix=""
+            ),
+            TranscriptChunk(
+                index=1, content="b", start_timecode="1", end_timecode="2", word_count=1, overlap_prefix="a"
+            ),
         ]
         context = {"analyst_output": ""}
 
         result = await worker._run_formatter_chunked(
-            job_id=1, chunks=chunks, context=context, project_path=tmp_path,
+            job_id=1,
+            chunks=chunks,
+            context=context,
+            project_path=tmp_path,
             chunking_config={"max_parallel": 2},
         )
 
@@ -1452,22 +1445,33 @@ class TestChunkedFormatterKillSwitch:
 
         async def fake_chat(**kwargs):
             return SimpleNamespace(
-                content="Formatted chunk content", cost=0.01, total_tokens=10,
-                input_tokens=6, output_tokens=4, model="test-model",
+                content="Formatted chunk content",
+                cost=0.01,
+                total_tokens=10,
+                input_tokens=6,
+                output_tokens=4,
+                model="test-model",
             )
 
         worker.llm.chat = fake_chat
 
         chunks = [
             TranscriptChunk(
-                index=0, content="a", start_timecode="00:00:00", end_timecode="00:00:05",
-                word_count=1, overlap_prefix="",
+                index=0,
+                content="a",
+                start_timecode="00:00:00",
+                end_timecode="00:00:05",
+                word_count=1,
+                overlap_prefix="",
             ),
         ]
         context = {"analyst_output": ""}
 
         result = await worker._run_formatter_chunked(
-            job_id=1, chunks=chunks, context=context, project_path=tmp_path,
+            job_id=1,
+            chunks=chunks,
+            context=context,
+            project_path=tmp_path,
             chunking_config={"max_parallel": 1},
         )
 
@@ -1491,19 +1495,28 @@ class TestChunkedFormatterFailOpen:
 
         async def fake_chat(**kwargs):
             return SimpleNamespace(
-                content="formatted chunk", cost=0.01, total_tokens=10,
-                input_tokens=6, output_tokens=4, model="m",
+                content="formatted chunk",
+                cost=0.01,
+                total_tokens=10,
+                input_tokens=6,
+                output_tokens=4,
+                model="m",
             )
 
         worker.llm.chat = fake_chat
 
         chunks = [
-            TranscriptChunk(index=0, content="a", start_timecode="0", end_timecode="1", word_count=1, overlap_prefix=""),
+            TranscriptChunk(
+                index=0, content="a", start_timecode="0", end_timecode="1", word_count=1, overlap_prefix=""
+            ),
         ]
         context = {"analyst_output": ""}
 
         result = await worker._run_formatter_chunked(
-            job_id=1, chunks=chunks, context=context, project_path=tmp_path,
+            job_id=1,
+            chunks=chunks,
+            context=context,
+            project_path=tmp_path,
             chunking_config={"max_parallel": 1},
         )
 
@@ -1599,9 +1612,7 @@ Main content text
 """,
         }
 
-        result = await worker._run_phase(
-            job_id=1, phase_name="timestamp", context=context, project_path=tmp_path
-        )
+        result = await worker._run_phase(job_id=1, phase_name="timestamp", context=context, project_path=tmp_path)
 
         assert result["success"] is True
 
@@ -1644,9 +1655,7 @@ Main content text
         rules_path = _write_timestamp_rules(tmp_path)
         mock_llm_client.config = {
             "routing": {
-                "style_engine": _style_engine_cfg(
-                    rules_path, phases={"timestamp": {"pre": False, "post": "enforce"}}
-                ),
+                "style_engine": _style_engine_cfg(rules_path, phases={"timestamp": {"pre": False, "post": "enforce"}}),
             }
         }
         mock_get_llm.return_value = mock_llm_client
@@ -1675,9 +1684,7 @@ Main content text
             "analyst_output": ANALYST_TABLE,
         }
 
-        result = await worker._run_phase(
-            job_id=1, phase_name="timestamp", context=context, project_path=tmp_path
-        )
+        result = await worker._run_phase(job_id=1, phase_name="timestamp", context=context, project_path=tmp_path)
 
         assert result["success"] is True
 

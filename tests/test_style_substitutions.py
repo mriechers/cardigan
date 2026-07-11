@@ -70,15 +70,10 @@ class TestApplySubstitutionsBasic:
         assert apply_substitutions("Senator Smith spoke", [SENATOR_SUB]) == "Sen. Smith spoke"
 
     def test_multiword_pair(self):
-        assert (
-            apply_substitutions("the Attorney General said", [ATTY_GEN_SUB]) == "the Atty. Gen. said"
-        )
+        assert apply_substitutions("the Attorney General said", [ATTY_GEN_SUB]) == "the Atty. Gen. said"
 
     def test_backreference_replace_strips_italics(self):
-        assert (
-            apply_substitutions("watch *Here & Now* tonight", [DE_ITALICIZE_SUB])
-            == "watch Here & Now tonight"
-        )
+        assert apply_substitutions("watch *Here & Now* tonight", [DE_ITALICIZE_SUB]) == "watch Here & Now tonight"
 
     def test_multiple_pairs_applied_in_sequence(self):
         text = "Senator Smith said that's okay"
@@ -204,9 +199,7 @@ class TestApplySubstitutionsWithFixes:
         assert fixes[0].count == 3
 
     def test_multiple_pairs_produce_separate_fix_entries(self):
-        text, fixes = apply_substitutions_with_fixes(
-            "Senator Smith said okay", [OKAY_SUB, SENATOR_SUB]
-        )
+        text, fixes = apply_substitutions_with_fixes("Senator Smith said okay", [OKAY_SUB, SENATOR_SUB])
         assert text == "Sen. Smith said OK"
         assert len(fixes) == 2
         rule_ids = {f.rule_id for f in fixes}
@@ -315,9 +308,7 @@ class TestNormalizeSpeakerTurnsBodyScoping:
         assert "**Nick Hoffman:**  \nStatement one.\n\n**Angela Fitzgerald:**  \n" in result
 
     def test_header_to_first_label_gap_untouched_with_two_hr_document(self):
-        text = (
-            "# Formatted Transcript\n---\n\n\n\n**Nick Hoffman:**\nStatement one.\n\n---\n\n**Status:** x\n"
-        )
+        text = "# Formatted Transcript\n---\n\n\n\n**Nick Hoffman:**\nStatement one.\n\n---\n\n**Status:** x\n"
         result = normalize_speaker_turns(text, SPEC)
         assert result.startswith("# Formatted Transcript\n---\n\n\n\n**Nick Hoffman:**")
 

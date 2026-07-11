@@ -121,9 +121,7 @@ def _is_rewrite_entry(sub: Mapping[str, Any]) -> bool:
     return bool(sub.get("find")) and sub.get("replace") is not None
 
 
-def _substitute_one(
-    text: str, find: str, replace: str
-) -> tuple[str, int, str | None, str | None]:
+def _substitute_one(text: str, find: str, replace: str) -> tuple[str, int, str | None, str | None]:
     """Apply one find/replace pair to ``text`` with the fence/URL + sentence-
     initial guards. Returns ``(new_text, applied_count, first_before,
     first_after)`` -- the latter two are ``None`` when nothing was applied.
@@ -210,9 +208,7 @@ def apply_substitutions_with_fixes(
             continue
         result, count, before, after = _substitute_one(result, sub["find"], sub["replace"])
         if count:
-            fixes.append(
-                AppliedFix(rule_id=_rule_id_for(sub), before=before or "", after=after or "", count=count)
-            )
+            fixes.append(AppliedFix(rule_id=_rule_id_for(sub), before=before or "", after=after or "", count=count))
     return result, fixes
 
 

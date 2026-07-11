@@ -376,9 +376,7 @@ def build_candidate_rules(rules_raw: dict) -> list[CandidateRule]:
         elif tier == "flag":
             rule_id = f"formatter.{sub.get('id') or 'unnamed_flag'}"
             label = sub.get("id") or sub.get("detect") or "unnamed_flag"
-            candidates.append(
-                CandidateRule(rule_id=rule_id, tier="flag", kind="substitution", labels=(str(label),))
-            )
+            candidates.append(CandidateRule(rule_id=rule_id, tier="flag", kind="substitution", labels=(str(label),)))
 
     voice = rules_raw.get("voice", {}) or {}
     by_category: dict[str, list[str]] = defaultdict(list)
@@ -388,7 +386,9 @@ def build_candidate_rules(rules_raw: dict) -> list[CandidateRule]:
     for category, labels in by_category.items():
         note = ""
         if len(labels) > 1:
-            note = "multiple entries share this category's event rule_id -- a hit on any one marks the whole group as hit"
+            note = (
+                "multiple entries share this category's event rule_id -- a hit on any one marks the whole group as hit"
+            )
         candidates.append(
             CandidateRule(
                 rule_id=f"voice.forbidden.{category}", tier="flag", kind="forbidden", labels=tuple(labels), note=note
@@ -480,7 +480,9 @@ def _render_header(window: dict, total: int, n_violation: int, n_correction: int
     lines.append(f"- Source DB: `{window.get('db_path', '?')}`")
     lines.append(f"- Generated: {window.get('generated_at', '?')}")
     lines.append("")
-    lines.append(f"- Total events in window: **{total}** ({n_violation} style_violation, {n_correction} editor_correction)")
+    lines.append(
+        f"- Total events in window: **{total}** ({n_violation} style_violation, {n_correction} editor_correction)"
+    )
     return lines
 
 
@@ -537,7 +539,7 @@ def _render_zero_hit(rules_raw: dict, observed_rule_ids: set[str]) -> list[str]:
 
     lines.append(
         "Note: enforce-tier substitutions apply as deterministic fixes; each applied fix is logged as "
-        "a `style_violation` event with `action: \"fixed\"` (see `_apply_style_post` in "
+        'a `style_violation` event with `action: "fixed"` (see `_apply_style_post` in '
         "`api/services/worker.py`), so a substitution that actually fired in the window shows up as a "
         "hit here under its `formatter.substitution.<slug>` rule_id -- a zero-hit result means it "
         "genuinely never fired. Forbidden-phrase entries that share a `category` also share one event "
@@ -628,7 +630,9 @@ def fetch_events(db_path: Path, since: str | None, until: str | None, app_versio
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
-        query = "SELECT id, job_id, timestamp, event_type, data, app_version FROM session_stats WHERE event_type IN (?, ?)"
+        query = (
+            "SELECT id, job_id, timestamp, event_type, data, app_version FROM session_stats WHERE event_type IN (?, ?)"
+        )
         params: list[str] = list(EVENT_TYPES)
         if since:
             query += " AND timestamp >= ?"
@@ -667,13 +671,19 @@ def fetch_events(db_path: Path, since: str | None, until: str | None, app_versio
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument(
-        "--db", type=Path, default=DEFAULT_DB_PATH, help="Path to the SQLite DB (default: $DATABASE_PATH or dashboard.db)."
+        "--db",
+        type=Path,
+        default=DEFAULT_DB_PATH,
+        help="Path to the SQLite DB (default: $DATABASE_PATH or dashboard.db).",
     )
     ap.add_argument("--since", default=None, help="YYYY-MM-DD -- only events at/after this date.")
     ap.add_argument("--until", default=None, help="YYYY-MM-DD -- only events at/before this date.")
     ap.add_argument("--app-version", default=None, help="Filter to one app_version (e.g. v4.2).")
     ap.add_argument(
-        "--rules-file", type=Path, default=DEFAULT_RULES_PATH, help="House-style rules YAML (default: config/house_style.yaml)."
+        "--rules-file",
+        type=Path,
+        default=DEFAULT_RULES_PATH,
+        help="House-style rules YAML (default: config/house_style.yaml).",
     )
     ap.add_argument("--out", type=Path, default=None, help="Write report here instead of stdout.")
     args = ap.parse_args(argv)
@@ -689,7 +699,9 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, yaml.YAMLError) as exc:
             print(f"WARNING: could not load rules file {args.rules_file}: {exc}", file=sys.stderr)
     else:
-        print(f"WARNING: rules file {args.rules_file} not found -- zero-hit-rules section will be empty", file=sys.stderr)
+        print(
+            f"WARNING: rules file {args.rules_file} not found -- zero-hit-rules section will be empty", file=sys.stderr
+        )
 
     window = {
         "since": args.since,

@@ -191,10 +191,7 @@ class TestProvenanceHeaderTolerance:
         # The comment adds a prefix, so the with-comment span must start
         # later in the document, but must still be exact for its own text.
         assert with_comment.title.start > without_comment.title.start
-        assert (
-            REALISTIC_SEO_MD[with_comment.title.start : with_comment.title.end]
-            == with_comment.title.value
-        )
+        assert REALISTIC_SEO_MD[with_comment.title.start : with_comment.title.end] == with_comment.title.value
 
 
 # ---------------------------------------------------------------------------
@@ -295,9 +292,7 @@ class TestSpliceIdentity:
     def test_replacement_for_missing_span_is_ignored(self):
         fields = extract_seo_fields(MISSING_LONG_DESC_SEO_MD)
         assert fields.long_description is None
-        spliced = splice_seo_fields(
-            MISSING_LONG_DESC_SEO_MD, fields, {"long_description": "should not appear"}
-        )
+        spliced = splice_seo_fields(MISSING_LONG_DESC_SEO_MD, fields, {"long_description": "should not appear"})
         assert spliced == MISSING_LONG_DESC_SEO_MD
 
 
@@ -336,11 +331,7 @@ class TestSpliceIntegrityGuard:
         # actually being spliced.
         fields = extract_seo_fields(REALISTIC_SEO_MD)
         same_length_tamper = "Z" * len(fields.title.value)
-        tampered = (
-            REALISTIC_SEO_MD[: fields.title.start]
-            + same_length_tamper
-            + REALISTIC_SEO_MD[fields.title.end :]
-        )
+        tampered = REALISTIC_SEO_MD[: fields.title.start] + same_length_tamper + REALISTIC_SEO_MD[fields.title.end :]
         spliced = splice_seo_fields(tampered, fields, {"short_description": "New short desc."})
         reparsed = extract_seo_fields(spliced)
         assert reparsed.short_description.value == "New short desc."

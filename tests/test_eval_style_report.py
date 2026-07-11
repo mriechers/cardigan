@@ -243,11 +243,17 @@ class TestEvalCompareConvergence:
         run_a = tmp_path / "run_a"
         run_b = tmp_path / "run_b"
         m_a = _base_metrics("run_a", 1000, 0.0, 5.0)
-        m_a["style"] = {"seo": {
-            "fields_extracted": ["title"], "violations_pre": [], "violations_post": [],
-            "title_raw": "gov evers today", "title_normalized": "Gov. Evers Today",
-            "title_changed": True, "proper_nouns_used": ["Evers"],
-        }}
+        m_a["style"] = {
+            "seo": {
+                "fields_extracted": ["title"],
+                "violations_pre": [],
+                "violations_post": [],
+                "title_raw": "gov evers today",
+                "title_normalized": "Gov. Evers Today",
+                "title_changed": True,
+                "proper_nouns_used": ["Evers"],
+            }
+        }
         m_b = _base_metrics("run_b", 1100, 0.0, 5.5)
         m_b["style"] = {"seo": dict(m_a["style"]["seo"])}
         _write_metrics(run_a, m_a)
@@ -261,17 +267,29 @@ class TestEvalCompareConvergence:
         run_a = tmp_path / "run_a"
         run_b = tmp_path / "run_b"
         m_a = _base_metrics("run_a", 1000, 0.0, 5.0)
-        m_a["style"] = {"seo": {
-            "fields_extracted": ["title"], "violations_pre": [], "violations_post": [],
-            "title_raw": "raw a", "title_normalized": "Normalized A",
-            "title_changed": True, "proper_nouns_used": [],
-        }}
+        m_a["style"] = {
+            "seo": {
+                "fields_extracted": ["title"],
+                "violations_pre": [],
+                "violations_post": [],
+                "title_raw": "raw a",
+                "title_normalized": "Normalized A",
+                "title_changed": True,
+                "proper_nouns_used": [],
+            }
+        }
         m_b = _base_metrics("run_b", 1100, 0.0, 5.5)
-        m_b["style"] = {"seo": {
-            "fields_extracted": ["title"], "violations_pre": [], "violations_post": [],
-            "title_raw": "raw b", "title_normalized": "Normalized B",
-            "title_changed": True, "proper_nouns_used": [],
-        }}
+        m_b["style"] = {
+            "seo": {
+                "fields_extracted": ["title"],
+                "violations_pre": [],
+                "violations_post": [],
+                "title_raw": "raw b",
+                "title_normalized": "Normalized B",
+                "title_changed": True,
+                "proper_nouns_used": [],
+            }
+        }
         _write_metrics(run_a, m_a)
         _write_metrics(run_b, m_b)
 
@@ -301,11 +319,17 @@ class TestEvalCompareGracefulMissingStyle:
         run_a = tmp_path / "run_a"
         run_b = tmp_path / "run_b"
         m_a = _base_metrics("run_a", 1000, 0.0, 5.0)
-        m_a["style"] = {"seo": {
-            "fields_extracted": ["title"], "violations_pre": [], "violations_post": [],
-            "title_raw": "raw a", "title_normalized": "Normalized A",
-            "title_changed": False, "proper_nouns_used": [],
-        }}
+        m_a["style"] = {
+            "seo": {
+                "fields_extracted": ["title"],
+                "violations_pre": [],
+                "violations_post": [],
+                "title_raw": "raw a",
+                "title_normalized": "Normalized A",
+                "title_changed": False,
+                "proper_nouns_used": [],
+            }
+        }
         m_b = _base_metrics("run_b", 1100, 0.0, 5.5)  # no "style" key at all
         _write_metrics(run_a, m_a)
         _write_metrics(run_b, m_b)

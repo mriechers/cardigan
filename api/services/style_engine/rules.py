@@ -60,8 +60,7 @@ def load_rules(path: str | Path = DEFAULT_RULES_PATH) -> "StyleRules":
 
     if not isinstance(data, dict):
         raise StyleRulesError(
-            f"House style rules file {resolved} must have a mapping (dict) at its root, "
-            f"got {type(data).__name__}"
+            f"House style rules file {resolved} must have a mapping (dict) at its root, " f"got {type(data).__name__}"
         )
 
     if "meta" not in data:

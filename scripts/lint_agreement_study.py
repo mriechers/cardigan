@@ -344,7 +344,9 @@ def compare_phase(phase: str, lint_result: PhaseCheckResult, llm_flags: list[str
                 }
             )
         else:
-            llm_only_deterministic.append({"text": c.text, "categories": list(c.categories), "rule_ids": list(c.rule_ids)})
+            llm_only_deterministic.append(
+                {"text": c.text, "categories": list(c.categories), "rule_ids": list(c.rule_ids)}
+            )
 
     lint_only = [v.to_dict() for v in pool]
 
@@ -410,7 +412,8 @@ def aggregate_matrices(job_matrices: list[JobMatrix]) -> dict[str, Any]:
     """Sum per-job matrices into aggregate totals, by-phase, and by-category tallies."""
     totals = {"both_caught": 0, "lint_only": 0, "llm_only_deterministic": 0, "llm_semantic": 0}
     by_phase: dict[str, dict[str, int]] = {
-        phase: {"both_caught": 0, "lint_only": 0, "llm_only_deterministic": 0, "llm_semantic": 0} for phase in CANONICAL_PHASES
+        phase: {"both_caught": 0, "lint_only": 0, "llm_only_deterministic": 0, "llm_semantic": 0}
+        for phase in CANONICAL_PHASES
     }
     by_category: dict[str, dict[str, int]] = {}
 
@@ -449,8 +452,10 @@ def select_eligible_jobs(jobs: list[dict]) -> list[int]:
     for job in jobs:
         status = job.get("status")
         outputs = job.get("outputs") or {}
-        has_all_outputs = bool(outputs.get("analysis")) and bool(outputs.get("formatted_transcript")) and bool(
-            outputs.get("seo_metadata")
+        has_all_outputs = (
+            bool(outputs.get("analysis"))
+            and bool(outputs.get("formatted_transcript"))
+            and bool(outputs.get("seo_metadata"))
         )
         if status == "completed" or has_all_outputs:
             eligible.append(job["id"])
@@ -553,7 +558,9 @@ def fetch_job_bundle(
 # ---------------------------------------------------------------------------
 
 
-def write_agreement_json(path: Path, meta: dict[str, Any], job_matrices: list[JobMatrix], aggregate: dict[str, Any]) -> None:
+def write_agreement_json(
+    path: Path, meta: dict[str, Any], job_matrices: list[JobMatrix], aggregate: dict[str, Any]
+) -> None:
     payload = {
         "meta": meta,
         "aggregate": aggregate,
@@ -563,7 +570,10 @@ def write_agreement_json(path: Path, meta: dict[str, Any], job_matrices: list[Jo
 
 
 def _category_keyword_map_markdown() -> str:
-    lines = ["| Category | Keywords (substring, case-insensitive) | Excludes | Corresponding lint rule_id |", "|---|---|---|---|"]
+    lines = [
+        "| Category | Keywords (substring, case-insensitive) | Excludes | Corresponding lint rule_id |",
+        "|---|---|---|---|",
+    ]
     for cat in DETERMINISTIC_CATEGORIES:
         kw = ", ".join(f"`{k}`" for k in cat.keywords)
         ex = ", ".join(f"`{k}`" for k in cat.exclude_keywords) or "--"
@@ -595,7 +605,9 @@ def _aggregate_table_markdown(aggregate: dict[str, Any]) -> str:
     ]
     for phase in CANONICAL_PHASES:
         p = aggregate["by_phase"][phase]
-        lines.append(f"| {phase} | {p['both_caught']} | {p['lint_only']} | {p['llm_only_deterministic']} | {p['llm_semantic']} |")
+        lines.append(
+            f"| {phase} | {p['both_caught']} | {p['lint_only']} | {p['llm_only_deterministic']} | {p['llm_semantic']} |"
+        )
     lines.append("")
     lines.append("By deterministic category:")
     lines.append("")
@@ -637,7 +649,9 @@ def _llm_only_deterministic_section_markdown(job_matrices: list[JobMatrix]) -> s
                 lines.append(f'  > "{item["text"]}"')
                 lines.append("  - _Analysis: TODO -- lint gap, LLM hallucination, or stale-limit mismatch?_")
     if not any_items:
-        lines.append("_None -- every deterministic-category LLM flag in this sample had a corresponding lint violation._")
+        lines.append(
+            "_None -- every deterministic-category LLM flag in this sample had a corresponding lint violation._"
+        )
     return "\n".join(lines)
 
 

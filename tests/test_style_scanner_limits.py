@@ -134,7 +134,9 @@ class TestScanForbiddenViolationShape:
     def test_multiple_matches_produce_multiple_violations(self):
         rules = _voice_rules()
         violations = scan_forbidden("Watch as it happens, then watch as it ends.", rules, "seo")
-        matches = [v for v in violations if v.rule_id == "voice.forbidden.viewer_directive" and "watch" in v.message.lower()]
+        matches = [
+            v for v in violations if v.rule_id == "voice.forbidden.viewer_directive" and "watch" in v.message.lower()
+        ]
         assert len(matches) == 2
 
 
@@ -287,17 +289,13 @@ class TestCheckFieldLimitsContentTypeOverride:
         full_violations = check_field_limits({"keywords": keywords}, rules, "seo")
         assert len(full_violations) == 1
         # Under "short" override {min:5,max:10}... 12 is still over max=10.
-        short_violations = check_field_limits(
-            {"keywords": keywords}, rules, "seo", content_type="short"
-        )
+        short_violations = check_field_limits({"keywords": keywords}, rules, "seo", content_type="short")
         assert len(short_violations) == 1  # now flagged as ABOVE max instead of below min
 
     def test_short_content_type_clean_within_its_own_bounds(self):
         rules = _limits_rules()
         keywords = [f"kw{i}" for i in range(7)]
-        violations = check_field_limits(
-            {"keywords": keywords}, rules, "seo", content_type="short"
-        )
+        violations = check_field_limits({"keywords": keywords}, rules, "seo", content_type="short")
         assert violations == []
 
 

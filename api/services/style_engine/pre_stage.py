@@ -65,9 +65,7 @@ def _char_budgets_from_limits(limits: Mapping[str, Any]) -> dict[str, int]:
     lives in exactly one place.
     """
     return {
-        field_name: limit["max"]
-        for field_name, limit in limits.items()
-        if isinstance(limit, dict) and "max" in limit
+        field_name: limit["max"] for field_name, limit in limits.items() if isinstance(limit, dict) and "max" in limit
     }
 
 
@@ -191,12 +189,8 @@ def _run_validator_pre_stage(context: Mapping[str, Any], rules: StyleRules) -> P
     if not style_checks:
         return PreStageResult(phase="validator", prompt_section="", data={})
 
-    summary = {
-        phase_name: _phase_flag_counts(check) for phase_name, check in style_checks.items()
-    }
-    semantic_checks = list(
-        (rules.raw.get("phases", {}) or {}).get("validator", {}).get("semantic_checks") or []
-    )
+    summary = {phase_name: _phase_flag_counts(check) for phase_name, check in style_checks.items()}
+    semantic_checks = list((rules.raw.get("phases", {}) or {}).get("validator", {}).get("semantic_checks") or [])
 
     prompt_section = _render_validator_prompt_section(summary, semantic_checks)
 
@@ -261,16 +255,13 @@ def _render_formatter_prompt_section(data: dict, review_notes_cfg: Mapping[str, 
     lines = [
         "## Style Rules (authoritative)",
         "",
-        "These values are computed and enforced by the pipeline — they override "
-        "anything else in this prompt.",
+        "These values are computed and enforced by the pipeline — they override " "anything else in this prompt.",
         "",
     ]
 
     proper_nouns = data["proper_nouns"]
     if proper_nouns:
-        lines.append(
-            f"**Proper nouns (authoritative spellings — use exactly these):** {_render_list(proper_nouns)}"
-        )
+        lines.append(f"**Proper nouns (authoritative spellings — use exactly these):** {_render_list(proper_nouns)}")
 
     speaker_label_line = _render_speaker_label_line(data["speaker_label_spec"])
     if speaker_label_line:
@@ -362,15 +353,13 @@ def _render_seo_prompt_section(data: dict, rules: StyleRules, program: str | Non
     lines = [
         "## Style Rules (authoritative)",
         "",
-        "These values are computed and enforced by the pipeline — they override "
-        "anything else in this prompt.",
+        "These values are computed and enforced by the pipeline — they override " "anything else in this prompt.",
         "",
         f"**Character limits (hard):** {_render_char_budgets(data['char_budgets'])}",
         f"**Proper nouns (authoritative spellings, use exactly):** {_render_list(data['proper_nouns'])}",
         f"**Keyword candidates verified present in the transcript:** {_render_list(data['keyword_candidates'])}",
         f"**Voice:** {_render_voice(rules)}",
-        "**Titles and descriptions use down style:** capitalize only the first "
-        "word and proper nouns.",
+        "**Titles and descriptions use down style:** capitalize only the first " "word and proper nouns.",
     ]
 
     program_block = _render_program_block(program, data["program_rules"])
@@ -433,9 +422,7 @@ def _render_voice(rules: StyleRules) -> str:
             examples.append(display)
 
     category_bits = [
-        f"{_category_label(category)} ({', '.join(examples)})"
-        for category, examples in grouped.items()
-        if examples
+        f"{_category_label(category)} ({', '.join(examples)})" for category, examples in grouped.items() if examples
     ]
     never_use = ", ".join(category_bits) if category_bits else "(none)"
 
@@ -527,14 +514,11 @@ def _run_analyst_pre_stage(context: Mapping[str, Any], rules: StyleRules) -> Pre
     return PreStageResult(phase="analyst", prompt_section=prompt_section, data=data)
 
 
-def _render_analyst_prompt_section(
-    data: dict, rules: StyleRules, keywords_count: Mapping[str, Any] | None
-) -> str:
+def _render_analyst_prompt_section(data: dict, rules: StyleRules, keywords_count: Mapping[str, Any] | None) -> str:
     lines = [
         "## Style Rules (authoritative)",
         "",
-        "These values are computed and enforced by the pipeline — they override "
-        "anything else in this prompt.",
+        "These values are computed and enforced by the pipeline — they override " "anything else in this prompt.",
         "",
     ]
 
@@ -713,14 +697,11 @@ def _subsample_candidates(candidates: list[dict], cap: int = _MAX_BOUNDARY_CANDI
     return [candidates[i] for i in indices], True
 
 
-def _render_timestamp_prompt_section(
-    data: dict, first_chapter_title: str, chapter_name_cfg: Mapping[str, Any]
-) -> str:
+def _render_timestamp_prompt_section(data: dict, first_chapter_title: str, chapter_name_cfg: Mapping[str, Any]) -> str:
     lines = [
         "## Style Rules (authoritative)",
         "",
-        "These values are computed and enforced by the pipeline — they override "
-        "anything else in this prompt.",
+        "These values are computed and enforced by the pipeline — they override " "anything else in this prompt.",
         "",
         f"**Duration:** {format_youtube(data['srt_end_ms'])} (from SRT timecodes, exact).",
         f"**Chapter limit:** produce at most {data['max_chapters']} chapters.",

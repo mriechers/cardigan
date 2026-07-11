@@ -15,9 +15,7 @@ from api.services.style_engine.rules import StyleRules
 from api.services.style_engine.types import RuleViolation
 
 
-def scan_forbidden(
-    text: str, rules: StyleRules, phase: str, field: str | None = None
-) -> list[RuleViolation]:
+def scan_forbidden(text: str, rules: StyleRules, phase: str, field: str | None = None) -> list[RuleViolation]:
     """Flag every match of a ``voice.forbidden_phrases`` entry in ``text``.
 
     Literal entries (no ``regex: true``) match case-insensitively as a
@@ -57,9 +55,7 @@ def scan_forbidden(
     return violations
 
 
-def scan_person_voice(
-    text: str, rules: StyleRules, phase: str, field: str | None = None
-) -> list[RuleViolation]:
+def scan_person_voice(text: str, rules: StyleRules, phase: str, field: str | None = None) -> list[RuleViolation]:
     """Flag first- and second-person voice markers in ``text``.
 
     ``first_person_markers`` -> ``rule_id="voice.first_person"``, severity

@@ -103,9 +103,7 @@ def test_classify_flag_char_limit_requires_violation_word():
     """Mentioning a character count without an exceed/over/too-long word is not
     a char_limit flag -- e.g. a redundancy complaint that happens to cite a
     character count in passing."""
-    result = classify_flag(
-        "Long description is 298 characters but contains redundant elements repeated twice"
-    )
+    result = classify_flag("Long description is 298 characters but contains redundant elements repeated twice")
     assert "char_limit" not in result.categories
     assert not result.is_deterministic
 
@@ -124,9 +122,7 @@ def test_classify_flag_semantic_fallback():
 
 
 def test_classify_flag_can_match_multiple_categories():
-    result = classify_flag(
-        "Review notes appear in transcript body and the transcript ends abruptly mid-sentence"
-    )
+    result = classify_flag("Review notes appear in transcript body and the transcript ends abruptly mid-sentence")
     assert "review_notes" in result.categories
     assert "truncation" in result.categories
 
@@ -228,8 +224,7 @@ def test_compare_phase_multiple_lint_violations_multiple_llm_flags_pair_up():
 
 def _lint_results(**phase_violations: list[RuleViolation]) -> dict[str, PhaseCheckResult]:
     return {
-        phase: PhaseCheckResult(phase=phase, violations=phase_violations.get(phase, []))
-        for phase in CANONICAL_PHASES
+        phase: PhaseCheckResult(phase=phase, violations=phase_violations.get(phase, [])) for phase in CANONICAL_PHASES
     }
 
 
@@ -254,7 +249,10 @@ def test_build_job_matrix_null_validation_result_is_all_lint_only():
 
 def test_build_job_matrix_missing_phase_key_in_validation_result_treated_as_no_flags():
     lint_results = _lint_results()
-    validation_result = {"phase_results": {"formatter": {"status": "fail", "flags": ["Review notes in body"]}}, "overall": "fail"}
+    validation_result = {
+        "phase_results": {"formatter": {"status": "fail", "flags": ["Review notes in body"]}},
+        "overall": "fail",
+    }
 
     jm = build_job_matrix(
         job_id=1,
@@ -289,7 +287,10 @@ def test_build_job_matrix_to_dict_roundtrips_json_shape():
 
 def test_aggregate_matrices_sums_across_jobs_and_phases():
     lint_results_1 = _lint_results(formatter=[_violation("lint.formatter.review_notes_in_body")])
-    vr_1 = {"phase_results": {"formatter": {"status": "fail", "flags": ["Review notes appear in transcript body"]}}, "overall": "fail"}
+    vr_1 = {
+        "phase_results": {"formatter": {"status": "fail", "flags": ["Review notes appear in transcript body"]}},
+        "overall": "fail",
+    }
     jm1 = build_job_matrix(1, "completed", "full", 10.0, lint_results_1, vr_1)
 
     lint_results_2 = _lint_results(seo=[_violation("lint.seo.title_over_limit")])

@@ -104,9 +104,7 @@ def _style_seo(metrics: dict) -> dict | None:
 
 
 def _style_violations_section(run_names: list[str], all_metrics: list[dict]) -> list[str]:
-    runs_with_style = [
-        (name, _style_seo(m)) for name, m in zip(run_names, all_metrics) if _style_seo(m) is not None
-    ]
+    runs_with_style = [(name, _style_seo(m)) for name, m in zip(run_names, all_metrics) if _style_seo(m) is not None]
     if not runs_with_style:
         return []
 
@@ -277,8 +275,9 @@ def build_report(run_dirs: list[Path], baseline_dir: Path | None = None) -> str:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("run_dirs", nargs="+", type=Path, help="Run directories written by eval_pipeline.py.")
-    ap.add_argument("--baseline", type=Path, default=None,
-                    help="Baseline run dir for delta comparisons. Default: first RUN_DIR.")
+    ap.add_argument(
+        "--baseline", type=Path, default=None, help="Baseline run dir for delta comparisons. Default: first RUN_DIR."
+    )
     ap.add_argument("--out", type=Path, default=None, help="Write report here instead of stdout.")
     args = ap.parse_args(argv)
 

@@ -465,9 +465,7 @@ class TestFallbackCharLimitsMatchYaml:
     whether the primary sourcing path is working.
     """
 
-    @pytest.mark.parametrize(
-        "yaml_key,writable_key", sorted(YAML_TO_WRITABLE_FIELD.items())
-    )
+    @pytest.mark.parametrize("yaml_key,writable_key", sorted(YAML_TO_WRITABLE_FIELD.items()))
     def test_fallback_matches_yaml(self, yaml_key, writable_key):
         from mcp_server.server import _FALLBACK_CHAR_LIMITS
 
@@ -511,9 +509,7 @@ class TestFallbackCharLimitsMatchYaml:
 # actually claims rather than parametrizing blindly over all three fields.
 EDITOR_INSTRUCTIONS_PATH = REPO_ROOT / "claude-desktop-project" / "EDITOR_AGENT_INSTRUCTIONS.md"
 
-_EDITOR_INSTRUCTIONS_LIMIT_RE = re.compile(
-    r"\*\*(Title Format|Short Description)\*\*:.*?\((\d{2,4})\s*chars?\s*max\)"
-)
+_EDITOR_INSTRUCTIONS_LIMIT_RE = re.compile(r"\*\*(Title Format|Short Description)\*\*:.*?\((\d{2,4})\s*chars?\s*max\)")
 _EDITOR_INSTRUCTIONS_FIELD_MAP = {
     "Title Format": "title",
     "Short Description": "short_description",
@@ -563,7 +559,6 @@ class TestEditorAgentInstructionsNumbersMatchCharLimits:
         text = EDITOR_INSTRUCTIONS_PATH.read_text()
         match = re.search(r"One description only \((\d{2,4}) chars\)", text)
         assert match, (
-            "Digital Shorts 'One description only (NN chars)' line not found in "
-            "EDITOR_AGENT_INSTRUCTIONS.md"
+            "Digital Shorts 'One description only (NN chars)' line not found in " "EDITOR_AGENT_INSTRUCTIONS.md"
         )
         assert int(match.group(1)) == expected

@@ -118,9 +118,7 @@ _GUARD_MIN_RATIO = 0.995
 _GUARD_MAX_RATIO = 1.005
 
 
-def run_post_stage(
-    phase: str, raw_output: str, context: Mapping[str, Any], rules: StyleRules
-) -> PostStageResult:
+def run_post_stage(phase: str, raw_output: str, context: Mapping[str, Any], rules: StyleRules) -> PostStageResult:
     """Normalize (enforce tier) then validate (flag tier) one phase's raw LLM output.
 
     ``context`` keys read (all optional): ``analyst_output`` (source of
@@ -218,9 +216,7 @@ def run_post_stage(
     if fields.long_description is not None:
         final_values["long_description"] = fields.long_description.value
 
-    violations = list(
-        check_field_limits(final_values, rules, phase, program=program, content_type=content_type)
-    )
+    violations = list(check_field_limits(final_values, rules, phase, program=program, content_type=content_type))
     for field_name, value in final_values.items():
         violations += scan_forbidden(value, rules, phase, field=field_name)
         violations += scan_person_voice(value, rules, phase, field=field_name)
@@ -358,9 +354,7 @@ def _analyst_headings(raw_output: str) -> list[str]:
     return [match.group(1).strip() for match in _ANALYST_HEADING_RE.finditer(raw_output)]
 
 
-def _check_analyst_required_sections(
-    raw_output: str, required_sections: list[str], phase: str
-) -> list[RuleViolation]:
+def _check_analyst_required_sections(raw_output: str, required_sections: list[str], phase: str) -> list[RuleViolation]:
     """``analyst.section_missing`` -- a required heading (data-driven, from
     ``phases.analyst.required_sections``) is absent. Matched
     case-insensitively as a SUBSTRING of an actual markdown heading, so a
@@ -504,9 +498,7 @@ def _run_timestamp_post_stage(raw_output: str, context: Mapping[str, Any], rules
     for chapter in snapped:
         cased_title = to_down_style(chapter.title, canonical)
         if cased_title != chapter.title:
-            fixes.append(
-                AppliedFix(rule_id="casing.down_style.chapter_title", before=chapter.title, after=cased_title)
-            )
+            fixes.append(AppliedFix(rule_id="casing.down_style.chapter_title", before=chapter.title, after=cased_title))
         cased_chapters.append(Chapter(title=cased_title, start_ms=chapter.start_ms))
 
     normalized_output = emit_timestamp_report(
@@ -575,7 +567,11 @@ def _run_timestamp_post_stage(raw_output: str, context: Mapping[str, Any], rules
 
         # The first chapter's boundary is always the enforced 0:00 -- it's
         # not a model choice, so it's exempt from candidate-list checking.
-        if index > 0 and candidate_ms_values is not None and not _boundary_listed(chapter.start_ms, candidate_ms_values):
+        if (
+            index > 0
+            and candidate_ms_values is not None
+            and not _boundary_listed(chapter.start_ms, candidate_ms_values)
+        ):
             violations.append(
                 RuleViolation(
                     rule_id="timestamp.boundary_unlisted",

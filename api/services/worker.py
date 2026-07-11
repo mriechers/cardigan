@@ -2636,9 +2636,7 @@ Please format this transcript section:
             # `_run_phase` persist site exactly, including the `.raw.md`
             # pre-normalization archive, which `_apply_style_post` handles
             # internally.
-            final_content, style_post = await self._apply_style_post(
-                job_id, "formatter", merged, context, project_path
-            )
+            final_content, style_post = await self._apply_style_post(job_id, "formatter", merged, context, project_path)
 
             # Save merged output
             output_file = project_path / "formatter_output.md"

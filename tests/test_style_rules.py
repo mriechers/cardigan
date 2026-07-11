@@ -346,8 +346,7 @@ class TestRuleViolation:
             message="Short description exceeds 90 characters",
         )
         assert (
-            violation.to_flag_text()
-            == "[style:limits.short_description.max] Short description exceeds 90 characters"
+            violation.to_flag_text() == "[style:limits.short_description.max] Short description exceeds 90 characters"
         )
 
     def test_to_flag_text_non_fixable(self):
@@ -368,17 +367,13 @@ class TestRuleViolation:
         assert d["model_fixable"] is True
 
     def test_to_dict_span_tuple_becomes_list(self):
-        violation = RuleViolation(
-            rule_id="x", phase="p", severity="error", message="m", field="title", span=(5, 10)
-        )
+        violation = RuleViolation(rule_id="x", phase="p", severity="error", message="m", field="title", span=(5, 10))
         d = violation.to_dict()
         assert d["span"] == [5, 10]
         assert isinstance(d["span"], list)
 
     def test_to_dict_is_json_serializable(self):
-        violation = RuleViolation(
-            rule_id="x", phase="p", severity="error", message="m", span=(0, 3)
-        )
+        violation = RuleViolation(rule_id="x", phase="p", severity="error", message="m", span=(0, 3))
         assert json.dumps(violation.to_dict())
 
 

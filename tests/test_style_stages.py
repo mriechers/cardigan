@@ -298,9 +298,7 @@ class TestPreStageGraceful:
         # in for a genuinely unregistered phase and must degrade gracefully
         # regardless of context contents.
         rules = _pre_rules()
-        result = run_pre_stage(
-            "widget", {"analyst_output": ANALYST_TABLE, "program": "Here & Now"}, rules
-        )
+        result = run_pre_stage("widget", {"analyst_output": ANALYST_TABLE, "program": "Here & Now"}, rules)
         assert result.prompt_section == ""
         assert result.data == {}
 
@@ -388,9 +386,7 @@ class TestPostStageFlagTierNeverRewrites:
 
         result = run_post_stage("seo", raw_output, {}, rules)
 
-        forbidden_violations = [
-            v for v in result.check.violations if v.rule_id == "voice.forbidden.viewer_directive"
-        ]
+        forbidden_violations = [v for v in result.check.violations if v.rule_id == "voice.forbidden.viewer_directive"]
         assert len(forbidden_violations) == 1
         assert forbidden_violations[0].field == "title"
 
@@ -607,8 +603,20 @@ _FORMATTER_SUBSTITUTIONS = [
         "tier": "enforce",
         "note": "strips markdown italics around known program names; replace is a backreference to the matched name",
     },
-    {"id": "oxford_comma", "detect": r",\s+and\b", "tier": "flag", "severity": "warning", "note": "no Oxford comma in lists"},
-    {"id": "capitol_capital", "detect": r"\bcapital\b", "tier": "flag", "severity": "warning", "note": "'Capitol' vs 'capital'"},
+    {
+        "id": "oxford_comma",
+        "detect": r",\s+and\b",
+        "tier": "flag",
+        "severity": "warning",
+        "note": "no Oxford comma in lists",
+    },
+    {
+        "id": "capitol_capital",
+        "detect": r"\bcapital\b",
+        "tier": "flag",
+        "severity": "warning",
+        "note": "'Capitol' vs 'capital'",
+    },
 ]
 
 _FORMATTER_SPEAKER_LABEL_SPEC = {
@@ -879,11 +887,7 @@ class TestPostStageFormatterEndToEndNormalize:
 class TestPostStageFormatterGuards:
     def test_fenced_code_block_and_url_untouched(self):
         rules = _formatter_rules()
-        raw_body = (
-            "**Nick Hoffman:**\n"
-            "Visit https://example.com/okay-page and see this:\n\n"
-            "```\nokay = True\n```"
-        )
+        raw_body = "**Nick Hoffman:**\n" "Visit https://example.com/okay-page and see this:\n\n" "```\nokay = True\n```"
         raw_output = _formatter_doc(raw_body)
 
         result = run_post_stage("formatter", raw_output, {}, rules)
@@ -955,14 +959,14 @@ class TestPostStageFormatterFlagTier:
 
     def test_review_notes_in_body_flagged(self):
         rules = _formatter_rules()
-        raw_body = "**Nick Hoffman:**\nStatement.\n\n<!-- REVIEW NOTES: speaker unclear -->\n\n**Angela Fitzgerald:**\nMore."
+        raw_body = (
+            "**Nick Hoffman:**\nStatement.\n\n<!-- REVIEW NOTES: speaker unclear -->\n\n**Angela Fitzgerald:**\nMore."
+        )
         raw_output = _formatter_doc(raw_body)
 
         result = run_post_stage("formatter", raw_output, {}, rules)
 
-        review_violations = [
-            v for v in result.check.violations if v.rule_id == "lint.formatter.review_notes_in_body"
-        ]
+        review_violations = [v for v in result.check.violations if v.rule_id == "lint.formatter.review_notes_in_body"]
         assert len(review_violations) == 1
         assert review_violations[0].model_fixable is False
 
@@ -977,9 +981,7 @@ class TestPostStageFormatterFlagTier:
 
         result = run_post_stage("formatter", raw_output, {}, rules)
 
-        review_violations = [
-            v for v in result.check.violations if v.rule_id == "lint.formatter.review_notes_in_body"
-        ]
+        review_violations = [v for v in result.check.violations if v.rule_id == "lint.formatter.review_notes_in_body"]
         assert review_violations == []
 
 
@@ -993,9 +995,7 @@ class TestPostStageFormatterNoVoiceScanning:
 
         result = run_post_stage("formatter", raw_output, {}, rules)
 
-        voice_violations = [
-            v for v in result.check.violations if v.rule_id.startswith("voice.")
-        ]
+        voice_violations = [v for v in result.check.violations if v.rule_id.startswith("voice.")]
         assert voice_violations == []
         assert "amazing" in result.normalized_output
         assert "We think" in result.normalized_output
@@ -1487,9 +1487,7 @@ class TestPostStageTimestampEndToEnd:
 
         result = run_post_stage("timestamp", raw_output, context, rules)
 
-        forbidden_violations = [
-            v for v in result.check.violations if v.rule_id == "voice.forbidden.viewer_directive"
-        ]
+        forbidden_violations = [v for v in result.check.violations if v.rule_id == "voice.forbidden.viewer_directive"]
         assert len(forbidden_violations) == 1
         assert forbidden_violations[0].field == "chapter_title"
         # Casing-normalized only -- the forbidden word itself is never stripped.
@@ -1774,9 +1772,7 @@ class TestPreStageAnalystData:
 
     def test_project_name_and_transcript_file_pass_through(self):
         rules = _analyst_rules()
-        result = run_pre_stage(
-            "analyst", {"project_name": "2WLI9999HD", "transcript_file": "2WLI9999HD.srt"}, rules
-        )
+        result = run_pre_stage("analyst", {"project_name": "2WLI9999HD", "transcript_file": "2WLI9999HD.srt"}, rules)
         assert result.data["project_name"] == "2WLI9999HD"
         assert result.data["transcript_file"] == "2WLI9999HD.srt"
 
@@ -1958,7 +1954,9 @@ class TestPostStageAnalystSectionMissing:
         # The real analyst.md heading is "## SEO Keywords (Preliminary)" --
         # the required_sections entry is just "SEO Keywords" (substring match).
         rules = _analyst_rules()
-        raw_output = _analyst_document(include_seo_keywords=False) + "\n\n## SEO Keywords (Preliminary)\n\nkeywords here."
+        raw_output = (
+            _analyst_document(include_seo_keywords=False) + "\n\n## SEO Keywords (Preliminary)\n\nkeywords here."
+        )
         result = run_post_stage("analyst", raw_output, {}, rules)
         assert [v for v in result.check.violations if v.rule_id == "analyst.section_missing"] == []
 

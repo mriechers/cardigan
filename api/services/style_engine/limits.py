@@ -79,10 +79,7 @@ def check_field_limits(
                         rule_id=f"limits.{field_name}.count",
                         phase=phase,
                         severity="warning",
-                        message=(
-                            f"{field_name} has {count} items "
-                            f"(expected {min_count}-{max_count})"
-                        ),
+                        message=(f"{field_name} has {count} items " f"(expected {min_count}-{max_count})"),
                         field=field_name,
                         model_fixable=True,
                     )

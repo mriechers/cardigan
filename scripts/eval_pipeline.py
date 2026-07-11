@@ -212,9 +212,15 @@ def _style_report_md_lines(style_report: dict) -> list[str]:
     return lines
 
 
-def _write_report(out_dir: Path, label: str, transcript_name: str, results: list,
-                  baseline: dict, completeness: dict | None,
-                  style_report: dict | None = None) -> Path:
+def _write_report(
+    out_dir: Path,
+    label: str,
+    transcript_name: str,
+    results: list,
+    baseline: dict,
+    completeness: dict | None,
+    style_report: dict | None = None,
+) -> Path:
     bphases = baseline.get("phases", {})
     lines = [
         f"# Local pipeline eval — {label}",
@@ -279,25 +285,36 @@ async def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--transcript", required=True)
     ap.add_argument("--backend", default="local-llm")
-    ap.add_argument("--phases", default=",".join(PHASE_ORDER),
-                    help="Comma list in dependency order.")
+    ap.add_argument("--phases", default=",".join(PHASE_ORDER), help="Comma list in dependency order.")
     ap.add_argument("--content-type", default="full", choices=["full", "short"])
     ap.add_argument("--label", default=None, help="Run label (e.g. model id).")
     ap.add_argument("--baseline-manifest", default=None)
-    ap.add_argument("--context-dir", default=None,
-                    help="Pre-load {phase}_output.md files from this dir as FIXED upstream "
-                         "context (e.g. OUTPUT/eval/baseline_20). Lets you sweep a single "
-                         "phase's model on identical inputs, decoupled from upstream quality.")
+    ap.add_argument(
+        "--context-dir",
+        default=None,
+        help="Pre-load {phase}_output.md files from this dir as FIXED upstream "
+        "context (e.g. OUTPUT/eval/baseline_20). Lets you sweep a single "
+        "phase's model on identical inputs, decoupled from upstream quality.",
+    )
     ap.add_argument("--out", default="OUTPUT/eval")
-    ap.add_argument("--style-report", action="store_true",
-                    help="Run the deterministic house-style checks (pre/post normalization) "
-                         "on the seo phase's output and record them under metrics.json's "
-                         "'style' key + a '## Style report' section in report.md.")
-    ap.add_argument("--rules", default="config/house_style.yaml",
-                    help="House-style rules YAML path for --style-report/--emit-normalized.")
-    ap.add_argument("--emit-normalized", action="store_true",
-                    help="Implies --style-report; also writes seo_output.normalized.md with "
-                         "the normalized title spliced back into the full seo report.")
+    ap.add_argument(
+        "--style-report",
+        action="store_true",
+        help="Run the deterministic house-style checks (pre/post normalization) "
+        "on the seo phase's output and record them under metrics.json's "
+        "'style' key + a '## Style report' section in report.md.",
+    )
+    ap.add_argument(
+        "--rules",
+        default="config/house_style.yaml",
+        help="House-style rules YAML path for --style-report/--emit-normalized.",
+    )
+    ap.add_argument(
+        "--emit-normalized",
+        action="store_true",
+        help="Implies --style-report; also writes seo_output.normalized.md with "
+        "the normalized title spliced back into the full seo report.",
+    )
     args = ap.parse_args()
 
     tpath = Path(args.transcript)
@@ -345,8 +362,9 @@ async def main() -> int:
             if r["ok"]:
                 (out_dir / f"{phase}_output.md").write_text(r["content"])
                 context[f"{phase}_output"] = r["content"]
-                print(f"     ok  in={r['input_tokens']} out={r['output_tokens']} "
-                      f"{r['wall_s']}s ({r['words']} words)")
+                print(
+                    f"     ok  in={r['input_tokens']} out={r['output_tokens']} " f"{r['wall_s']}s ({r['words']} words)"
+                )
             else:
                 print(f"     FAILED {r['wall_s']}s: {r['error']}")
                 if phase in ("analyst", "formatter"):
@@ -365,16 +383,12 @@ async def main() -> int:
     if args.style_report or args.emit_normalized:
         seo_run = next((r for r in results if r["phase"] == "seo" and r.get("ok")), None)
         if seo_run is None:
-            style_report = {
-                "seo": {"skipped": True, "reason": "seo phase not present or failed in this run"}
-            }
+            style_report = {"seo": {"skipped": True, "reason": "seo phase not present or failed in this run"}}
         else:
             try:
                 style_rules = load_rules(args.rules)
             except StyleRulesError as e:
-                style_report = {
-                    "seo": {"skipped": True, "reason": f"could not load rules ({args.rules}): {e}"}
-                }
+                style_report = {"seo": {"skipped": True, "reason": f"could not load rules ({args.rules}): {e}"}}
             else:
                 # "context analyst output" -- context["analyst_output"] already
                 # reflects this run's real analyst phase if it ran, or the
@@ -387,9 +401,7 @@ async def main() -> int:
             seo_fields = extract_seo_fields(seo_run["content"])
             title_normalized = None if seo_style.get("skipped") else seo_style.get("title_normalized")
             if seo_fields.title is not None and title_normalized is not None:
-                normalized_doc = splice_seo_fields(
-                    seo_run["content"], seo_fields, {"title": title_normalized}
-                )
+                normalized_doc = splice_seo_fields(seo_run["content"], seo_fields, {"title": title_normalized})
             else:
                 # Nothing to splice (unparseable, or normalization was a no-op) --
                 # still write the file, byte-identical, so downstream diffing

@@ -113,9 +113,7 @@ class TestLongestTermFirst:
 
     def test_shorter_standalone_term_still_restored_elsewhere(self):
         canonical = build_canonical(_rules(), extra_nouns=["Wisconsin Supreme Court"])
-        result = to_down_style(
-            "wisconsin supreme court ruled, and wisconsin lawmakers reacted", canonical
-        )
+        result = to_down_style("wisconsin supreme court ruled, and wisconsin lawmakers reacted", canonical)
         assert result == "Wisconsin Supreme Court ruled, and Wisconsin lawmakers reacted"
 
 
@@ -154,9 +152,7 @@ class TestIdempotence:
     def test_idempotent_on_already_correct_text(self):
         canonical = build_canonical(_rules())
         text = "The Governor signs a Wisconsin budget bill"
-        assert to_down_style(text, canonical) == to_down_style(
-            to_down_style(text, canonical), canonical
-        )
+        assert to_down_style(text, canonical) == to_down_style(to_down_style(text, canonical), canonical)
 
 
 # ---------------------------------------------------------------------------
@@ -202,9 +198,7 @@ class TestCasingVariantPeriodNotDoubled:
         assert from_punctuated == "Wisconsin Gov. Tony Evers signs bill"
 
         fragment_bare = from_bare[from_bare.index("Gov.") :][: len("Gov. Tony Evers")]
-        fragment_punctuated = from_punctuated[from_punctuated.index("Gov.") :][
-            : len("Gov. Tony Evers")
-        ]
+        fragment_punctuated = from_punctuated[from_punctuated.index("Gov.") :][: len("Gov. Tony Evers")]
         assert fragment_bare == fragment_punctuated == "Gov. Tony Evers"
 
     def test_idempotent_with_period_bearing_variant(self):
@@ -314,22 +308,15 @@ class TestConvergence:
         rules = _rules()
         canonical = build_canonical(rules, extra_nouns=["Tony Evers"])
 
-        over_capitalized = (
-            "Campaign Attacks Heat Up In Wisconsin Governor Race Involving Tony Evers"
-        )
-        over_lowercased = (
-            "campaign attacks heat up in wisconsin governor race involving tony evers"
-        )
+        over_capitalized = "Campaign Attacks Heat Up In Wisconsin Governor Race Involving Tony Evers"
+        over_lowercased = "campaign attacks heat up in wisconsin governor race involving tony evers"
 
         result_from_caps = to_down_style(over_capitalized, canonical)
         result_from_lower = to_down_style(over_lowercased, canonical)
 
         # The load-bearing assertion: byte-identical regardless of source casing.
         assert result_from_caps == result_from_lower
-        assert (
-            result_from_caps
-            == "Campaign attacks heat up in Wisconsin Governor race involving Tony Evers"
-        )
+        assert result_from_caps == "Campaign attacks heat up in Wisconsin Governor race involving Tony Evers"
 
     def test_convergence_with_mixed_case_third_variant(self):
         """A third, chaotically-mixed-case variant also converges to the same output."""
