@@ -892,6 +892,7 @@ Extract any name or spelling corrections that should be added to the glossary. S
 
             # Process each phase
             context = {
+                "project_name": project_name,  # Expose project name for style-engine emitters (e.g., timestamp post-stage)
                 "transcript": transcript_content,
                 "transcript_file": job.get("transcript_file", ""),
                 "project_path": project_path,

@@ -1414,3 +1414,101 @@ class TestChunkedFormatterFailOpen:
         assert result["output"] == "formatted chunk"
         assert (tmp_path / "formatter_output.md").read_text().endswith("formatted chunk")
         assert not (tmp_path / "formatter_output.raw.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# 7. Project name flow through context (task 4b fix)
+#
+# Validates that process_job's main context dict includes project_name
+# (matching retry_single_phase semantics), so style-engine emitters like
+# the timestamp post-stage can render "## Project: <name>" headers.
+# ---------------------------------------------------------------------------
+
+
+class TestProjectNameInContext:
+    @pytest.mark.asyncio
+    @patch("api.services.worker.get_llm_client")
+    @patch("api.services.worker.log_event")
+    @patch("api.services.worker.AGENTS_DIR")
+    async def test_timestamp_phase_receives_project_name_in_context(
+        self, mock_agents_dir, mock_log_event, mock_get_llm, mock_llm_client, mock_llm_response, tmp_path
+    ):
+        """Verify that the timestamp phase receives project_name in context
+        from process_job's main context dict, and the emitted timestamp report
+        includes the project name header.
+
+        This proves the fix for task 4b: process_job now sets project_name
+        in the shared context dict (matching retry_single_phase's pattern),
+        so the timestamp post-stage can render "## Project: <name>" instead
+        of falling back to "Unknown".
+        """
+        # Setup: mock LLM client without style_engine (kill-switch passthrough)
+        mock_get_llm.return_value = mock_llm_client
+        mock_llm_client.config = {
+            "routing": {
+                "long_form_threshold_minutes": 15,
+            }
+        }
+
+        # Mock LLM response with timestamp report content
+        timestamp_output = """# Timestamp Report
+
+## Media Manager Format
+
+| Chapter | Start Time | End Time |
+|---------|-----------|----------|
+| Introduction | 0:00:00.000 | 0:02:30.000 |
+| Main Content | 0:02:30.000 | 0:15:45.000 |
+
+## YouTube Format
+
+0:00 Introduction
+0:02:30 Main Content
+"""
+        mock_llm_response.content = timestamp_output
+        mock_llm_response.cost = 0.002
+        mock_llm_response.total_tokens = 200
+        mock_llm_response.model = "timestamp-model"
+        mock_llm_client.chat = AsyncMock(return_value=mock_llm_response)
+        mock_log_event.return_value = None
+        mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
+
+        worker = JobWorker()
+
+        # Create context WITH project_name (as process_job now provides)
+        context = {
+            "project_name": "Wisconsin Public Affairs",
+            "transcript": "Sample transcript content for timestamp phase",
+            "analyst_output": ANALYST_TABLE,
+            "srt_content": """1
+00:00:00,000 --> 00:00:05,000
+Introduction text
+
+2
+00:02:30,000 --> 00:02:35,000
+Main content text
+""",
+        }
+
+        result = await worker._run_phase(
+            job_id=1, phase_name="timestamp", context=context, project_path=tmp_path
+        )
+
+        assert result["success"] is True
+
+        # Verify context still has project_name (passthrough)
+        assert context.get("project_name") == "Wisconsin Public Affairs"
+
+        # Verify the LLM was called with prompt containing project_name
+        sent_messages = mock_llm_client.chat.call_args.kwargs["messages"]
+        user_message = sent_messages[1]["content"]
+        assert "## Project: Wisconsin Public Affairs" in user_message
+
+        # Verify the persisted timestamp_output.md file contains the project header
+        timestamp_file = tmp_path / "timestamp_output.md"
+        assert timestamp_file.exists()
+        persisted_content = timestamp_file.read_text()
+        # The persisted content should include the model attribution header
+        assert "model: timestamp-model" in persisted_content
+        # And the timestamp content itself
+        assert "Timestamp Report" in persisted_content or "Introduction" in persisted_content
