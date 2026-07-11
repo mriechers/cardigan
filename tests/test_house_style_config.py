@@ -4,9 +4,24 @@ Loads the REAL production `config/house_style.yaml` (not synthetic fixture
 data — see tests/test_style_rules.py for the loader/accessor unit tests
 against synthetic YAML) and asserts its per-field character limits match
 `WRITABLE_FIELDS` in mcp_server/server.py, which is what actually gates
-Airtable writes. If these ever drift apart, the YAML's limits are lying to
-the deterministic rule engine while the MCP write path enforces something
-else — this test exists to catch that split before it ships.
+Airtable writes.
+
+Task 6a (YAML-sourced WRITABLE_FIELDS limits): `WRITABLE_FIELDS`' char
+limits are now READ FROM this same YAML at import time (via
+`mcp_server.server._writable_fields_char_limits()`), with a hardcoded
+`_FALLBACK_CHAR_LIMITS` used only if the YAML fails to load. That means
+`TestCharLimitDrift` below — which still compares live `WRITABLE_FIELDS`
+against the YAML — is trivially true whenever the YAML loads successfully
+(the normal case): both sides are definitionally the same value. It still
+guards real regressions (e.g. a future edit that re-hardcodes one field's
+limit independently of `_CHAR_LIMITS`), so it stays in place unmodified.
+The genuinely new drift surface this task introduces is the FALLBACK path:
+`_FALLBACK_CHAR_LIMITS` is a second, independently-maintained copy of these
+same numbers that only matters when the YAML *can't* load — nothing
+exercises it in normal operation, so nothing else would catch it silently
+drifting from the YAML. `TestFallbackCharLimitsMatchYaml` below is that
+guard; see `mcp_server/server.py`'s `_FALLBACK_CHAR_LIMITS` comment for the
+same note from the other side.
 
 This test only READS from `load_rules(...)` results (via the loader's typed
 accessors) — the accessors return structures that alias the cached
@@ -111,7 +126,14 @@ class TestConfigLoadsCleanly:
 
 
 class TestCharLimitDrift:
-    """The core drift assertion: YAML limits.fields[*].max == WRITABLE_FIELDS char_limit."""
+    """The core drift assertion: YAML limits.fields[*].max == WRITABLE_FIELDS char_limit.
+
+    Since Task 6a, WRITABLE_FIELDS' char limits are themselves sourced from
+    this YAML (see module docstring), so this is now largely a regression
+    guard on the sourcing mechanism rather than an independent cross-check —
+    TestFallbackCharLimitsMatchYaml below is the test that guards the
+    genuinely independent (fallback-only) numbers.
+    """
 
     @pytest.mark.parametrize("yaml_key,writable_key", sorted(YAML_TO_WRITABLE_FIELD.items()))
     def test_field_max_matches_writable_fields(self, yaml_key, writable_key):
@@ -393,3 +415,125 @@ class TestCasingVariantsIdempotenceAgainstRealConfig:
         rules = load_rules(CONFIG_PATH)
         canonical = build_canonical(rules)
         assert to_down_style(f"{key} follows", canonical) == to_down_style(f"{value} follows", canonical)
+
+
+class TestFallbackCharLimitsMatchYaml:
+    """Task 6a: guards mcp_server.server._FALLBACK_CHAR_LIMITS — the
+    hardcoded safety net WRITABLE_FIELDS falls back to only when
+    config/house_style.yaml can't be loaded — against silently drifting
+    from the real YAML.
+
+    Nothing exercises the fallback path in normal operation (the YAML loads
+    fine in every real deployment), so nothing else would catch these two
+    independently-maintained copies of the same numbers drifting apart.
+    Without this test, TestCharLimitDrift above could stay green forever
+    even if _writable_fields_char_limits() were quietly broken (e.g. always
+    hitting its except branch) — the current fallback values happen to
+    numerically equal today's YAML values, so WRITABLE_FIELDS would still
+    "match" the YAML by coincidence, not because it's actually YAML-sourced.
+    This test targets the fallback constants directly, independent of
+    whether the primary sourcing path is working.
+    """
+
+    @pytest.mark.parametrize(
+        "yaml_key,writable_key", sorted(YAML_TO_WRITABLE_FIELD.items())
+    )
+    def test_fallback_matches_yaml(self, yaml_key, writable_key):
+        from mcp_server.server import _FALLBACK_CHAR_LIMITS
+
+        rules = load_rules(CONFIG_PATH)
+        yaml_max = rules.limits_for()[yaml_key]["max"]
+
+        assert writable_key in _FALLBACK_CHAR_LIMITS
+        assert _FALLBACK_CHAR_LIMITS[writable_key] == yaml_max, (
+            f"Drift: mcp_server/server.py's _FALLBACK_CHAR_LIMITS[{writable_key!r}]="
+            f"{_FALLBACK_CHAR_LIMITS[writable_key]} but house_style.yaml "
+            f"limits.fields.{yaml_key}.max={yaml_max} -- if config/house_style.yaml "
+            f"ever fails to load, editors would be gated by this stale fallback "
+            f"number instead. Fix _FALLBACK_CHAR_LIMITS to match the YAML."
+        )
+
+    def test_fallback_has_no_limit_for_uncapped_fields(self):
+        """The five fields with no limits.fields entry (no character max)
+        stay None in the fallback too -- same shape as WRITABLE_FIELDS.
+        """
+        from mcp_server.server import _FALLBACK_CHAR_LIMITS
+
+        for field_key in (
+            "keywords",
+            "social_description",
+            "social_tags",
+            "facebook_description",
+            "hashtags",
+        ):
+            assert _FALLBACK_CHAR_LIMITS[field_key] is None
+
+
+# claude-desktop-project/EDITOR_AGENT_INSTRUCTIONS.md is consumed RAW by
+# Claude Desktop (no {{style:}} token substitution -- it's a knowledge file,
+# not a rendered prompt_blocks template) so any hard-coded char-limit number
+# it quotes is a second, independently-edited copy of limits.fields' numbers.
+# Unlike prompt_blocks' authored rule prose (every block states all three
+# field limits), this doc only states hard "NN chars max" numbers in two
+# places (its "Here and Now" program section) plus one Digital-Shorts-
+# specific description limit -- it has no equivalent "long description ...
+# chars max" line anywhere, so this drift guard is scoped to what the doc
+# actually claims rather than parametrizing blindly over all three fields.
+EDITOR_INSTRUCTIONS_PATH = REPO_ROOT / "claude-desktop-project" / "EDITOR_AGENT_INSTRUCTIONS.md"
+
+_EDITOR_INSTRUCTIONS_LIMIT_RE = re.compile(
+    r"\*\*(Title Format|Short Description)\*\*:.*?\((\d{2,4})\s*chars?\s*max\)"
+)
+_EDITOR_INSTRUCTIONS_FIELD_MAP = {
+    "Title Format": "title",
+    "Short Description": "short_description",
+}
+
+
+class TestEditorAgentInstructionsNumbersMatchCharLimits:
+    """Mirrors TestPromptBlockNumbersMatchCharLimits's regex drift-scan
+    approach (human-authored prose quoting a hard number -> assert it
+    matches load_rules()), applied to EDITOR_AGENT_INSTRUCTIONS.md instead
+    of the prompt_blocks YAML section.
+    """
+
+    def test_editor_instructions_has_limit_lines(self):
+        text = EDITOR_INSTRUCTIONS_PATH.read_text()
+        matches = _EDITOR_INSTRUCTIONS_LIMIT_RE.findall(text)
+        assert matches, (
+            "No '(NN chars max)' lines found under Title Format / Short Description "
+            "labels in EDITOR_AGENT_INSTRUCTIONS.md -- update this test's regex if "
+            "the doc's phrasing changed"
+        )
+
+    @pytest.mark.parametrize("label,field", sorted(_EDITOR_INSTRUCTIONS_FIELD_MAP.items()))
+    def test_editor_instructions_limit_matches_yaml(self, label, field):
+        rules = load_rules(CONFIG_PATH)
+        expected_max = rules.limits_for()[field]["max"]
+
+        text = EDITOR_INSTRUCTIONS_PATH.read_text()
+        found = [
+            int(number)
+            for matched_label, number in _EDITOR_INSTRUCTIONS_LIMIT_RE.findall(text)
+            if matched_label == label
+        ]
+        assert found, f"No '(NN chars max)' line found for {label!r} in EDITOR_AGENT_INSTRUCTIONS.md"
+        for number in found:
+            assert number == expected_max, (
+                f"Drift: EDITOR_AGENT_INSTRUCTIONS.md's {label!r} line quotes {number} "
+                f"chars max but limits.fields.{field}.max={expected_max} -- fix the "
+                f"doc's number (it is consumed raw, no {{{{style:}}}} tokens -- see task 6a)"
+            )
+
+    def test_digital_shorts_description_limit_matches_yaml(self):
+        rules = load_rules(CONFIG_PATH)
+        expected = rules.program_rules("Digital Shorts").get("description_max")
+        assert expected is not None, "programs.'Digital Shorts'.description_max missing from house_style.yaml"
+
+        text = EDITOR_INSTRUCTIONS_PATH.read_text()
+        match = re.search(r"One description only \((\d{2,4}) chars\)", text)
+        assert match, (
+            "Digital Shorts 'One description only (NN chars)' line not found in "
+            "EDITOR_AGENT_INSTRUCTIONS.md"
+        )
+        assert int(match.group(1)) == expected

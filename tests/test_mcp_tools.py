@@ -739,3 +739,339 @@ async def test_commit_sst_edits_patch_failure(project_with_manifest, monkeypatch
     # Staged edits should still be preserved for retry
     manifest = json.loads((project_path / "manifest.json").read_text())
     assert "title" in manifest.get("proposed_edits", {})
+
+
+# =============================================================================
+# Task 6a: YAML-sourced WRITABLE_FIELDS limits
+# =============================================================================
+
+
+def test_writable_fields_char_limits_sources_from_yaml(monkeypatch):
+    """_writable_fields_char_limits() should read title/short/long maxes from
+    load_rules() -- proven by feeding it fake rule data distinguishable from
+    both the real YAML and _FALLBACK_CHAR_LIMITS, not just by re-checking
+    against the real config (which the fallback would also coincidentally
+    match today).
+    """
+    import mcp_server.server as mcp_server_module
+
+    class _FakeRules:
+        def limits_for(self):
+            return {
+                "title": {"max": 42},
+                "short_description": {"max": 43},
+                "long_description": {"max": 44},
+            }
+
+    monkeypatch.setattr(mcp_server_module, "load_rules", lambda: _FakeRules())
+
+    limits = mcp_server_module._writable_fields_char_limits()
+    assert limits["title"] == 42
+    assert limits["short_description"] == 43
+    assert limits["long_description"] == 44
+    # Fields with no limits.fields max entry keep their fallback (None).
+    assert limits["keywords"] is None
+    assert limits["hashtags"] is None
+
+
+def test_writable_fields_char_limits_falls_back_on_yaml_failure(monkeypatch):
+    """A load_rules() failure (missing/bad YAML) must fall back to the exact
+    hardcoded _FALLBACK_CHAR_LIMITS, not raise -- the SST write path must
+    never break because a config file is bad.
+    """
+    import mcp_server.server as mcp_server_module
+
+    def _raise():
+        raise RuntimeError("YAML exploded")
+
+    monkeypatch.setattr(mcp_server_module, "load_rules", _raise)
+
+    limits = mcp_server_module._writable_fields_char_limits()
+    assert limits == mcp_server_module._FALLBACK_CHAR_LIMITS
+    assert limits is not mcp_server_module._FALLBACK_CHAR_LIMITS  # a copy, not the shared dict
+
+
+# =============================================================================
+# Task 6a: review_proposed_edits inline style check (informational, fail-open)
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_review_proposed_edits_shows_clean_style_check(project_with_manifest, monkeypatch):
+    """A proposed value with no violations should show 'clean'."""
+    from mcp_server.server import handle_propose_sst_edit, handle_review_proposed_edits
+
+    async def mock_search(media_id):
+        return {"record_id": "recTEST123", "short_description": "Old short"}
+
+    monkeypatch.setattr("mcp_server.server.search_sst_by_media_id", mock_search)
+
+    project_name, _ = project_with_manifest
+    await handle_propose_sst_edit(
+        {
+            "media_id": project_name,
+            "field": "short_description",
+            "proposed_value": "A perfectly ordinary short description.",
+            "reason": "Clarity",
+        }
+    )
+
+    result = await handle_review_proposed_edits({"media_id": project_name})
+    text = result[0].text
+    assert "**Style check:** clean" in text
+
+
+@pytest.mark.asyncio
+async def test_review_proposed_edits_flags_forbidden_phrase(project_with_manifest, monkeypatch):
+    """A proposed value containing a forbidden viewer-directive phrase
+    ("discover") should surface its rule id in the Style check line.
+    """
+    from mcp_server.server import handle_propose_sst_edit, handle_review_proposed_edits
+
+    async def mock_search(media_id):
+        return {"record_id": "recTEST123", "short_description": "Old short"}
+
+    monkeypatch.setattr("mcp_server.server.search_sst_by_media_id", mock_search)
+
+    project_name, _ = project_with_manifest
+    await handle_propose_sst_edit(
+        {
+            "media_id": project_name,
+            "field": "short_description",
+            "proposed_value": "Discover the Wisconsin River with local paddlers.",
+            "reason": "Engagement",
+        }
+    )
+
+    result = await handle_review_proposed_edits({"media_id": project_name})
+    text = result[0].text
+    assert "Style check:" in text
+    assert "voice.forbidden.viewer_directive" in text
+
+
+@pytest.mark.asyncio
+async def test_review_proposed_edits_suggests_title_casing(project_with_manifest, monkeypatch):
+    """An all-caps title should get a 'suggested casing' note comparing
+    against the down-styled/canonical form.
+    """
+    from mcp_server.server import handle_propose_sst_edit, handle_review_proposed_edits
+
+    async def mock_search(media_id):
+        return {"record_id": "recTEST123", "title": "Old Title"}
+
+    monkeypatch.setattr("mcp_server.server.search_sst_by_media_id", mock_search)
+
+    project_name, _ = project_with_manifest
+    await handle_propose_sst_edit(
+        {
+            "media_id": project_name,
+            "field": "title",
+            "proposed_value": "WISCONSIN LIFE UPDATE",
+            "reason": "Testing casing",
+        }
+    )
+
+    result = await handle_review_proposed_edits({"media_id": project_name})
+    text = result[0].text
+    assert "suggested casing:" in text
+    assert "Wisconsin Life update" in text
+
+
+@pytest.mark.asyncio
+async def test_review_proposed_edits_style_check_fails_open(project_with_manifest, monkeypatch):
+    """If the style engine blows up (bad/missing YAML), the preview must
+    still render exactly as it did before this feature, plus one
+    explanatory note -- never blocking or altering propose/review/commit.
+    """
+    from mcp_server.server import handle_propose_sst_edit, handle_review_proposed_edits
+
+    async def mock_search(media_id):
+        return {"record_id": "recTEST123", "title": "Old Title"}
+
+    monkeypatch.setattr("mcp_server.server.search_sst_by_media_id", mock_search)
+
+    project_name, _ = project_with_manifest
+    await handle_propose_sst_edit(
+        {
+            "media_id": project_name,
+            "field": "title",
+            "proposed_value": "New Title",
+            "reason": "SEO",
+        }
+    )
+
+    def _raise(*args, **kwargs):
+        raise RuntimeError("style engine exploded")
+
+    monkeypatch.setattr("mcp_server.server._build_style_notes", _raise)
+
+    result = await handle_review_proposed_edits({"media_id": project_name})
+    text = result[0].text
+
+    # Preview still renders the diff normally.
+    assert "Old Title" in text
+    assert "New Title" in text
+    # No per-edit style section, but the fail-open note is present.
+    assert "**Style check:**" not in text
+    assert "Style check unavailable" in text
+
+
+# =============================================================================
+# Task 6a: commit_sst_edits editor_correction capture (fail-open)
+# =============================================================================
+
+
+def _make_editor_correction_project(output_dir, project_name: str):
+    """Build a minimal project folder for the editor_correction tests below.
+
+    Uses a project name UNIQUE to each test (rather than the shared
+    `project_with_manifest` fixture's fixed "2WLITestProjectSM") because
+    these tests query the session-scoped shared test DB (see
+    tests/conftest.py's `_init_test_db`) for editor_correction rows by
+    media_id -- reusing a fixed name across tests in the same pytest
+    session would make earlier tests' committed rows indistinguishable from
+    the row under test.
+    """
+    project_path = output_dir / project_name
+    project_path.mkdir()
+    manifest = {
+        "project_name": project_name,
+        "phases": [
+            {"name": "analyst", "status": "completed"},
+            {"name": "formatter", "status": "completed"},
+            {"name": "seo", "status": "completed"},
+        ],
+        "outputs": {
+            "analysis": "analyst_output.md",
+            "formatted_transcript": "formatter_output.md",
+            "seo_metadata": "seo_output.md",
+        },
+        "revisions": [],
+        "keyword_reports": [],
+    }
+    (project_path / "manifest.json").write_text(json.dumps(manifest, indent=2))
+    (project_path / "seo_output.md").write_text("# SEO\nTest SEO content.")
+    return project_path
+
+
+async def _commit_with_mocks(monkeypatch, project_name, *, sst_snapshot, patch_result=None):
+    """Shared plumbing for the editor_correction tests below: stages a
+    title edit and mocks the Airtable round-trip so commit succeeds.
+    """
+    from mcp_server.server import handle_commit_sst_edits, handle_propose_sst_edit
+
+    async def mock_search(media_id):
+        return {"record_id": "recTEST123", **sst_snapshot}
+
+    monkeypatch.setattr("mcp_server.server.search_sst_by_media_id", mock_search)
+
+    await handle_propose_sst_edit(
+        {
+            "media_id": project_name,
+            "field": "title",
+            "proposed_value": "New Title",
+            "reason": "SEO",
+        }
+    )
+
+    async def mock_fetch(record_id):
+        return {"record_id": "recTEST123", **sst_snapshot}
+
+    monkeypatch.setattr("mcp_server.server.fetch_sst_context", mock_fetch)
+
+    async def mock_patch(record_id, fields):
+        return patch_result or (True, {"id": record_id, "fields": fields})
+
+    monkeypatch.setattr("mcp_server.server.patch_sst_record", mock_patch)
+
+    async def mock_comment(record_id, text):
+        return True
+
+    monkeypatch.setattr("mcp_server.server.post_sst_comment", mock_comment)
+
+    return await handle_commit_sst_edits({"media_id": project_name})
+
+
+@pytest.mark.asyncio
+async def test_commit_sst_edits_logs_editor_correction_event(output_dir, monkeypatch):
+    """A successful commit should log one editor_correction event per
+    committed field, with committed_value + original_value populated.
+    Direct DB access -- see mcp_server.server._log_editor_corrections'
+    docstring for why this reuses api.services.database directly.
+    """
+    from sqlalchemy import select
+
+    from api.services.database import get_session, session_stats_table
+
+    project_name = "2WLIEditorCorrectionBasic"
+    _make_editor_correction_project(output_dir, project_name)
+    result = await _commit_with_mocks(monkeypatch, project_name, sst_snapshot={"title": "Old Title"})
+    assert "✅" in result[0].text
+
+    async with get_session() as session:
+        rows = (
+            await session.execute(
+                select(session_stats_table).where(session_stats_table.c.event_type == "editor_correction")
+            )
+        ).fetchall()
+
+    matching = [json.loads(row.data) for row in rows if json.loads(row.data)["extra"].get("media_id") == project_name]
+    assert len(matching) == 1
+    extra = matching[0]["extra"]
+    assert extra["field"] == "title"
+    assert extra["committed_value"] == "New Title"
+    assert extra["original_value"] == "Old Title"
+    # The fixture's seo_output.md has no structured "### Title" section, so
+    # pipeline_value is not cleanly recoverable here -- documented v1 gap.
+    assert extra["pipeline_value"] is None
+
+
+@pytest.mark.asyncio
+async def test_commit_sst_edits_recovers_pipeline_value_from_seo_output(output_dir, monkeypatch):
+    """When seo_output.md HAS a structured '### Title' / '**Recommended:**'
+    section, pipeline_value should be recovered from it.
+    """
+    from sqlalchemy import select
+
+    from api.services.database import get_session, session_stats_table
+
+    project_name = "2WLIEditorCorrectionSeo"
+    project_path = _make_editor_correction_project(output_dir, project_name)
+    (project_path / "seo_output.md").write_text(
+        "### Title\n**Recommended:**\nWisconsin Life | Pipeline Recommended Title\n"
+    )
+
+    result = await _commit_with_mocks(monkeypatch, project_name, sst_snapshot={"title": "Old Title"})
+    assert "✅" in result[0].text
+
+    async with get_session() as session:
+        rows = (
+            await session.execute(
+                select(session_stats_table).where(session_stats_table.c.event_type == "editor_correction")
+            )
+        ).fetchall()
+
+    matching = [json.loads(row.data) for row in rows if json.loads(row.data)["extra"].get("media_id") == project_name]
+    assert len(matching) == 1
+    assert matching[0]["extra"]["pipeline_value"] == "Wisconsin Life | Pipeline Recommended Title"
+
+
+@pytest.mark.asyncio
+async def test_commit_sst_edits_succeeds_when_event_logging_fails(output_dir, monkeypatch):
+    """Event-logging failure must never fail (or even blemish) the commit --
+    the Airtable write has already happened by the time this runs.
+    """
+    project_name = "2WLIEditorCorrectionFailOpen"
+    _make_editor_correction_project(output_dir, project_name)
+
+    async def _raise_init_db():
+        raise RuntimeError("DB unreachable")
+
+    monkeypatch.setattr("api.services.database.init_db", _raise_init_db)
+
+    result = await _commit_with_mocks(monkeypatch, project_name, sst_snapshot={"title": "Old Title"})
+    text = result[0].text
+
+    assert "✅" in text
+    assert "New Title" in text
+    assert "Error" not in text
