@@ -434,6 +434,7 @@ def test_formatter_prompt_slim_profile_renders_condensed_block() -> None:
 
     # Flag-tier / judgment-guidance items survive in slim.
     assert '"Capitol" not "capital"' in rendered
+    assert '"Legislature" capitalized, committees lowercase' in rendered
     assert "No oxford commas" in rendered
     assert "Em dashes" in rendered
     assert "Numbers in scores/tallies" in rendered

@@ -357,6 +357,7 @@ prompt_blocks:
       Apply these editorial conventions where judgment is required (mechanical substitutions are handled deterministically — see below):
 
       - **"Capitol" not "capital"** — In local/state news context, use "Capitol" (the building/district). Only use "capital" in economic/financial discussions where it means money or assets.
+      - **"Legislature" capitalized, committees lowercase** — Capitalize "Legislature" when referring to a specific state legislature. Committee names within it stay lowercase ("Legislature's budget committee," not "Legislature's Budget Committee"). Context-dependent — no automated fix.
       - **No oxford commas** — Omit the serial comma in lists (e.g., "red, white and blue"). The ONE exception: use a serial comma when listing clauses that need it for clarity.
       - **Em dashes** — Use sparingly and consistently. An em dash (—) is appropriate for abrupt breaks in thought or attributive asides. Do not over-apply them as substitutes for commas, colons, or parentheses.
       - **Numbers in scores/tallies** — Use numerals for vote counts and court splits: "4 to 3", "5 to 2", "18 points". Spell out numbers only at the start of a sentence.
