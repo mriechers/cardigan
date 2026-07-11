@@ -2469,6 +2469,16 @@ Please format this transcript section:
 {chunk.content}
 ---"""
 
+                # Append the style-engine pre-generation prompt section (if the
+                # kill-switched hook in `_run_phase` produced one before the
+                # chunking branch ran). Every chunk is an independent LLM call,
+                # so each one needs the rules -- mirrors `_build_phase_prompt`'s
+                # append for the unchunked path.
+                style_pre = context.get("style_pre") or {}
+                style_section = style_pre.get("prompt_section")
+                if style_section:
+                    user_message = f"{user_message}\n\n{style_section}"
+
                 messages = [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message},
@@ -2597,6 +2607,16 @@ Please format this transcript section:
             # Merge text outputs
             merged = merge_formatter_chunks([r["content"] for r in chunk_results])
 
+            # Style-engine post-generation hook, run ONCE on the merged output
+            # (not per-chunk -- see `_apply_style_post` for shadow/enforce/
+            # fail-open semantics; kill-switched by default). Mirrors the
+            # `_run_phase` persist site exactly, including the `.raw.md`
+            # pre-normalization archive, which `_apply_style_post` handles
+            # internally.
+            final_content, style_post = await self._apply_style_post(
+                job_id, "formatter", merged, context, project_path
+            )
+
             # Save merged output
             output_file = project_path / "formatter_output.md"
             if output_file.exists():
@@ -2610,7 +2630,13 @@ Please format this transcript section:
                 f"backend: {backend} | "
                 f"cost: ${total_cost:.4f} | tokens: {total_tokens} -->\n"
             )
-            output_file.write_text(provenance_header + merged)
+            style_line = ""
+            if style_post is not None:
+                style_line = (
+                    f"<!-- style-engine: fixes: {len(style_post.check.fixes)} | "
+                    f"flags: {len(style_post.check.violations)} -->\n"
+                )
+            output_file.write_text(provenance_header + style_line + final_content)
 
             await log_event(
                 EventCreate(
@@ -2630,7 +2656,7 @@ Please format this transcript section:
 
             return {
                 "success": True,
-                "output": merged,
+                "output": final_content,
                 "cost": total_cost,
                 "tokens": total_tokens,
                 "input_tokens": total_input_tokens,
