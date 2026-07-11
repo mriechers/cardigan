@@ -87,13 +87,27 @@ def _is_sentence_initial(text: str, pos: int) -> bool:
     Walks backward over spaces/tabs; ``True`` at start-of-text, immediately
     after a newline (a new dialogue/paragraph line), or immediately after
     sentence-terminal punctuation (optionally followed by a closing quote).
+
+    Note: A quote/apostrophe character only counts as sentence-terminal when it
+    immediately follows a real terminal punctuation character (.!?), not when
+    appearing bare (e.g., possessive 's' in "workers'" is not sentence-terminal).
     """
     i = pos
     while i > 0 and text[i - 1] in " \t":
         i -= 1
     if i == 0:
         return True
-    return text[i - 1] == "\n" or text[i - 1] in _SENTENCE_TERMINAL_CHARS
+    if text[i - 1] == "\n":
+        return True
+    # Check for real terminal punctuation (.!?) directly preceding
+    if text[i - 1] in ".!?":
+        return True
+    # Check for quote/apostrophe following terminal punctuation
+    # (e.g., closing quote after "Stop!" should count as sentence-terminal)
+    # Quotes only count as sentence-terminal when they follow .!?
+    if text[i - 1] in _SENTENCE_TERMINAL_CHARS[3:] and i >= 2 and text[i - 2] in ".!?":
+        return True
+    return False
 
 
 def _is_rewrite_entry(sub: Mapping[str, Any]) -> bool:

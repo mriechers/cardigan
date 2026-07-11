@@ -152,6 +152,21 @@ class TestApplySubstitutionsGuards:
         text = "Senator Smith spoke first."
         assert apply_substitutions(text, [SENATOR_SUB]) == "Sen. Smith spoke first."
 
+    def test_possessive_apostrophe_not_treated_as_sentence_terminal(self):
+        # Bare apostrophes (possessives like "workers'") should NOT count as
+        # sentence-terminal. Only apostrophes/quotes that immediately follow
+        # real terminal punctuation (.!?) should count.
+        text = "Reporters said the workers' Liberals rally drew a crowd."
+        result = apply_substitutions(text, [LIBERALS_SUB])
+        assert result == "Reporters said the workers' liberals rally drew a crowd."
+
+    def test_quote_after_terminal_punctuation_is_sentence_terminal(self):
+        # A closing quote after terminal punctuation (.!?) IS sentence-terminal,
+        # so the word following should not be downcased.
+        text = 'He said "Stop!" Liberals cheered.'
+        result = apply_substitutions(text, [LIBERALS_SUB])
+        assert result == 'He said "Stop!" Liberals cheered.'
+
 
 class TestApplySubstitutionsIdempotence:
     def test_double_application_is_a_no_op(self):
@@ -346,3 +361,21 @@ class TestNormalizeSpeakerTurnsGraceful:
         spec["some_future_field"] = "whatever"
         result = normalize_speaker_turns(text, spec)
         assert result.startswith("**Nick Hoffman:**  \n")
+
+
+class TestNormalizeSpeakerTurnsSpecialCharacters:
+    def test_speaker_label_with_apostrophe_preserved(self):
+        # Names with apostrophes (O'Brien) should be preserved exactly,
+        # whitespace normalization applied without touching the name itself.
+        text = "**Sean O'Brien:**\nStatement here.\n"
+        result = normalize_speaker_turns(text, SPEC)
+        assert result.startswith("**Sean O'Brien:**  \n")
+        assert "**Sean O'Brien:**" in result
+
+    def test_speaker_label_with_hyphen_preserved(self):
+        # Names with hyphens (Jean-Paul) should be preserved exactly,
+        # whitespace normalization applied without touching the name itself.
+        text = "**Jean-Paul Smith:**\nStatement here.\n"
+        result = normalize_speaker_turns(text, SPEC)
+        assert result.startswith("**Jean-Paul Smith:**  \n")
+        assert "**Jean-Paul Smith:**" in result
