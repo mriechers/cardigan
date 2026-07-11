@@ -33,9 +33,24 @@ shared review-notes-placement check) never scans for voice/forbidden-phrase
 violations -- dialogue is not metadata copy; people may legitimately say
 "amazing" or "we" on camera.
 
-``seo`` and ``formatter`` phases have behavior today; every other phase name
-degrades gracefully to a ``skipped=True`` passthrough. This module never
-raises on malformed model output (a bad ``raw_output`` yields
+For ``timestamp``, the model's raw output is not free-text metadata copy --
+it is a ```chapters fenced block (see ``phase_io.parse_chapter_list``) that
+this stage parses, deterministically cleans up
+(:func:`api.services.style_engine.timecodes.snap_chapters`), casing-
+normalizes (title-only, same ``to_down_style`` engine as ``seo``), and
+re-renders wholesale into the full ``timestamp_output.md`` body
+(:func:`api.services.style_engine.phase_io.emit_timestamp_report`) -- so
+``normalized_output`` is a different document shape than ``raw_output``, not
+a spliced subset of it. Flag tier covers chapter-count-over-cap, chapter
+naming length, forbidden/person-voice phrases in titles, and boundaries the
+model chose outside the pre-stage's candidate list; every deterministic
+``snap_chapters`` adjustment is also individually surfaced as an
+informational (non-model-fixable) violation so the audit trail shows exactly
+what the engine changed.
+
+``seo``, ``formatter``, and ``timestamp`` phases have behavior today; every
+other phase name degrades gracefully to a ``skipped=True`` passthrough. This
+module never raises on malformed model output (a bad ``raw_output`` yields
 ``parse_ok=False``, not an exception) -- it may only propagate genuine
 programming errors, which is by design the worker's fail-open catch's job,
 not this module's.
@@ -51,17 +66,24 @@ from api.services.completeness import count_content_words
 from api.services.style_engine.casing import build_canonical, to_down_style
 from api.services.style_engine.entities import extract_proper_nouns
 from api.services.style_engine.limits import check_field_limits
-from api.services.style_engine.phase_io import extract_seo_fields, splice_seo_fields
+from api.services.style_engine.phase_io import (
+    emit_timestamp_report,
+    extract_seo_fields,
+    parse_chapter_list,
+    splice_seo_fields,
+)
 from api.services.style_engine.review_notes import check_review_notes_placement
 from api.services.style_engine.rules import StyleRules
 from api.services.style_engine.scanner import scan_forbidden, scan_person_voice
 from api.services.style_engine.substitutions import apply_substitutions_with_fixes, normalize_speaker_turns
+from api.services.style_engine.timecodes import Chapter, format_youtube, snap_chapters
 from api.services.style_engine.types import (
     AppliedFix,
     PhaseCheckResult,
     PostStageResult,
     RuleViolation,
 )
+from api.services.utils import get_srt_duration, parse_srt
 
 # Word-count guard band (task 3a's "the enforcer must never eat content"
 # acceptance gate). Every real formatter substitution pair is word-count
@@ -89,11 +111,23 @@ def run_post_stage(
     flag-tier detection (substitution ``detect`` entries + review-notes
     placement) over the normalized text.
 
+    For ``phase == "timestamp"``: parses the model's ```chapters fenced
+    block (``None`` -> passthrough with a ``phase_io.timestamp.unparseable``
+    warning), snaps it (``timecodes.snap_chapters``, using
+    ``context["style_pre"]["srt_end_ms"]`` when the pre-stage ran, else
+    re-parsing ``context["transcript"]``; ``max_chapters`` is always
+    recomputed from ``rules`` -- never trusted from a possibly-stale
+    ``style_pre`` cache), casing-normalizes each title, then rebuilds the
+    entire ``timestamp_output.md`` body via ``phase_io.emit_timestamp_report``.
+
     For any other phase (v1): passthrough, ``changed=False``,
     ``PhaseCheckResult(phase=phase, skipped=True)``.
     """
     if phase == "formatter":
         return _run_formatter_post_stage(raw_output, rules)
+
+    if phase == "timestamp":
+        return _run_timestamp_post_stage(raw_output, context, rules)
 
     if phase != "seo":
         return PostStageResult(
@@ -257,3 +291,178 @@ def _check_flag_tier_substitutions(text: str, flag_substitutions: list[dict], ph
             )
         )
     return violations
+
+
+# ---------------------------------------------------------------------------
+# timestamp phase
+# ---------------------------------------------------------------------------
+
+# "Only nudge by ~1 second if the nearest speaker transition doesn't have an
+# exact timecode match" (prompts/timestamp.md) -- the boundary-unlisted flag
+# check tolerates the same window rather than demanding byte-exact ms
+# equality against a candidate the model may have legitimately nudged.
+_BOUNDARY_TOLERANCE_MS = 1000
+
+
+def _run_timestamp_post_stage(raw_output: str, context: Mapping[str, Any], rules: StyleRules) -> PostStageResult:
+    phase = "timestamp"
+
+    chapters = parse_chapter_list(raw_output)
+    if chapters is None:
+        return PostStageResult(
+            phase=phase,
+            normalized_output=raw_output,
+            changed=False,
+            check=PhaseCheckResult(
+                phase=phase,
+                parse_ok=False,
+                violations=[
+                    RuleViolation(
+                        rule_id="phase_io.timestamp.unparseable",
+                        phase=phase,
+                        severity="warning",
+                        message="Could not extract a ```chapters fenced block from timestamp phase output",
+                        model_fixable=True,
+                    )
+                ],
+            ),
+        )
+
+    timestamp_cfg = (rules.raw.get("phases", {}) or {}).get("timestamp", {}) or {}
+    first_chapter_title = (timestamp_cfg.get("first_chapter") or {}).get("title", "Episode intro")
+    words_cfg = (timestamp_cfg.get("chapter_name") or {}).get("words") or {}
+    min_words = words_cfg.get("min")
+    max_words = words_cfg.get("max")
+
+    style_pre = context.get("style_pre") or {}
+    srt_end_ms = style_pre.get("srt_end_ms")
+    if srt_end_ms is None:
+        srt_end_ms = _resolve_srt_end_ms(context, chapters)
+
+    # max_chapters is always recomputed from rules -- never trusted from a
+    # possibly-stale style_pre cache (a prior phase's context could carry it
+    # forward from a different duration in a pathological caller).
+    max_chapters = rules.chapter_max(srt_end_ms / 60000 if srt_end_ms else 0)
+
+    pre_snap_count = len(chapters)
+    snapped, notes = snap_chapters(
+        chapters,
+        srt_end_ms=srt_end_ms,
+        max_chapters=max_chapters,
+        first_chapter_title=first_chapter_title,
+    )
+
+    analyst_output = context.get("analyst_output") or ""
+    canonical = build_canonical(rules, extract_proper_nouns(analyst_output, rules.surname_stoplist()))
+
+    cased_chapters: list[Chapter] = []
+    fixes: list[AppliedFix] = []
+    for chapter in snapped:
+        cased_title = to_down_style(chapter.title, canonical)
+        if cased_title != chapter.title:
+            fixes.append(
+                AppliedFix(rule_id="casing.down_style.chapter_title", before=chapter.title, after=cased_title)
+            )
+        cased_chapters.append(Chapter(title=cased_title, start_ms=chapter.start_ms))
+
+    normalized_output = emit_timestamp_report(cased_chapters, srt_end_ms=srt_end_ms, rules=rules)
+    fixes.append(AppliedFix(rule_id="timestamp.emit", before=raw_output, after=normalized_output, count=1))
+
+    violations: list[RuleViolation] = []
+    if pre_snap_count > max_chapters:
+        violations.append(
+            RuleViolation(
+                rule_id="timestamp.chapter_count",
+                phase=phase,
+                severity="warning",
+                message=(
+                    f"Model produced {pre_snap_count} chapters, exceeding the max of {max_chapters} "
+                    "for this duration -- truncated automatically"
+                ),
+                model_fixable=True,
+            )
+        )
+
+    candidate_ms_values = _candidate_ms_values(style_pre.get("boundary_candidates"))
+
+    for index, chapter in enumerate(cased_chapters):
+        word_count = len(chapter.title.split())
+        if min_words is not None and max_words is not None and not (min_words <= word_count <= max_words):
+            violations.append(
+                RuleViolation(
+                    rule_id="timestamp.chapter_name_length",
+                    phase=phase,
+                    severity="warning",
+                    field="chapter_title",
+                    message=(
+                        f'Chapter title "{chapter.title}" has {word_count} word(s) '
+                        f"(expected {min_words}-{max_words})"
+                    ),
+                    model_fixable=True,
+                )
+            )
+
+        violations += scan_forbidden(chapter.title, rules, phase, field="chapter_title")
+        violations += scan_person_voice(chapter.title, rules, phase, field="chapter_title")
+
+        # The first chapter's boundary is always the enforced 0:00 -- it's
+        # not a model choice, so it's exempt from candidate-list checking.
+        if index > 0 and candidate_ms_values is not None and not _boundary_listed(chapter.start_ms, candidate_ms_values):
+            violations.append(
+                RuleViolation(
+                    rule_id="timestamp.boundary_unlisted",
+                    phase=phase,
+                    severity="warning",
+                    field="chapter_title",
+                    message=(
+                        f'Chapter "{chapter.title}" boundary {format_youtube(chapter.start_ms)} '
+                        "is not in the candidate list"
+                    ),
+                    model_fixable=True,
+                )
+            )
+
+    for note in notes:
+        violations.append(
+            RuleViolation(
+                rule_id="timestamp.snapped",
+                phase=phase,
+                severity="warning",
+                message=note,
+                model_fixable=False,
+            )
+        )
+
+    changed = normalized_output != raw_output
+
+    check = PhaseCheckResult(phase=phase, violations=violations, fixes=fixes, parse_ok=True)
+    return PostStageResult(phase=phase, normalized_output=normalized_output, changed=changed, check=check)
+
+
+def _resolve_srt_end_ms(context: Mapping[str, Any], chapters: list[Chapter]) -> int:
+    """Best-effort srt_end_ms when the pre-stage never ran (or ran on a
+    different context): re-parse ``context["transcript"]`` when it looks
+    like an SRT, else fall back to the latest chapter start the model gave
+    us so ``snap_chapters`` always has a usable (if approximate) end."""
+    transcript_file = context.get("transcript_file") or ""
+    transcript = context.get("transcript") or ""
+    if transcript_file.lower().endswith(".srt") and transcript:
+        captions = parse_srt(transcript)
+        if captions:
+            return get_srt_duration(captions)
+    return max((chapter.start_ms for chapter in chapters), default=0)
+
+
+def _candidate_ms_values(boundary_candidates: Any) -> set[int] | None:
+    if not boundary_candidates:
+        return None
+    values: set[int] = set()
+    for candidate in boundary_candidates:
+        time_ms = candidate.get("time_ms") if isinstance(candidate, Mapping) else None
+        if time_ms is not None:
+            values.add(int(time_ms))
+    return values or None
+
+
+def _boundary_listed(start_ms: int, candidate_ms_values: set[int]) -> bool:
+    return any(abs(start_ms - candidate_ms) <= _BOUNDARY_TOLERANCE_MS for candidate_ms in candidate_ms_values)

@@ -1,5 +1,5 @@
 """Tests for the style_engine pure pipeline-stage modules (seo, validator,
-formatter phases).
+formatter, timestamp phases).
 
 Covers api.services.style_engine.pre_stage.run_pre_stage and
 api.services.style_engine.post_stage.run_post_stage. All rule data and
@@ -8,9 +8,14 @@ analyst speaker table, and inline seo_output.md-shaped report strings --
 never depends on config/house_style.yaml. Mirrors the fixture/helper style
 of tests/test_style_casing_entities.py and tests/test_style_scanner_limits.py.
 
-seo, validator, and formatter phases have behavior; every other phase
-(e.g. "timestamp") must degrade gracefully to an empty/skipped passthrough
-until a later task registers it behind the same interface.
+seo, validator, formatter, and timestamp phases have behavior; any other
+phase name (e.g. "widget", used below as a stand-in for a genuinely
+unregistered phase) must degrade gracefully to an empty/skipped passthrough.
+Unit-level coverage of the timestamp phase's pure timecode math and chapter
+parse/emit machinery (timecodes.py, phase_io.py's chapter functions) lives
+in tests/test_style_timecodes_io.py -- this file only covers pre_stage.py /
+post_stage.py's timestamp integration (SRT-driven candidate extraction, the
+parse -> snap -> case-normalize -> emit pipeline, and violation surfacing).
 """
 
 from __future__ import annotations
@@ -19,6 +24,7 @@ from api.services.style_engine.phase_io import extract_seo_fields
 from api.services.style_engine.post_stage import run_post_stage
 from api.services.style_engine.pre_stage import run_pre_stage
 from api.services.style_engine.rules import StyleRules
+from api.services.style_engine.timecodes import format_media_manager, format_youtube
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -282,18 +288,18 @@ class TestPreStageGraceful:
 
     def test_unknown_phase_returns_empty_result(self):
         rules = _pre_rules()
-        result = run_pre_stage("timestamp", {}, rules)
-        assert result.phase == "timestamp"
+        result = run_pre_stage("widget", {}, rules)
+        assert result.phase == "widget"
         assert result.prompt_section == ""
         assert result.data == {}
 
     def test_unknown_phase_ignores_context(self):
-        # "formatter" now has real behavior (task 3a) -- "timestamp" is
-        # still unregistered and must degrade gracefully regardless of
-        # context contents.
+        # "formatter"/"timestamp" now have real behavior -- "widget" stands
+        # in for a genuinely unregistered phase and must degrade gracefully
+        # regardless of context contents.
         rules = _pre_rules()
         result = run_pre_stage(
-            "timestamp", {"analyst_output": ANALYST_TABLE, "program": "Here & Now"}, rules
+            "widget", {"analyst_output": ANALYST_TABLE, "program": "Here & Now"}, rules
         )
         assert result.prompt_section == ""
         assert result.data == {}
@@ -447,7 +453,7 @@ class TestPostStageUnknownPhase:
         rules = _post_rules()
         raw_output = "irrelevant content for a phase with no registered behavior"
 
-        result = run_post_stage("timestamp", raw_output, {}, rules)
+        result = run_post_stage("widget", raw_output, {}, rules)
 
         assert result.check.skipped is True
         assert result.normalized_output == raw_output
@@ -1051,3 +1057,498 @@ class TestPostStageFormatterIdempotence:
 
         assert once.normalized_output == twice.normalized_output
         assert twice.changed is False
+
+
+# ---------------------------------------------------------------------------
+# run_pre_stage / run_post_stage -- timestamp phase (task 4a)
+# ---------------------------------------------------------------------------
+
+_TIMESTAMP_CHAPTER_MAX = [
+    {"lt": 5, "max": 3},
+    {"lt": 15, "max": 5},
+    {"lt": 30, "max": 7},
+    {"lt": 60, "max": 8},
+    {"lt": None, "max": 10},
+]
+
+
+def _timestamp_rules(
+    first_chapter_title: str = "Episode intro",
+    chapter_name: dict | None = None,
+    chapter_max_by_duration: list | None = None,
+    constraints: dict | None = None,
+    forbidden_phrases: list | None = None,
+) -> StyleRules:
+    raw = {
+        "meta": {"version": 1},
+        "voice": {
+            "forbidden_phrases": (
+                [{"match": "discover", "category": "viewer_directive", "severity": "error"}]
+                if forbidden_phrases is None
+                else forbidden_phrases
+            ),
+            "first_person_markers": [r"\bwe\b"],
+            "second_person_markers": [r"\byou\b"],
+        },
+        "casing": {
+            "style": "down",
+            "proper_nouns": ["Wisconsin", "Nick Hoffman", "Angela Fitzgerald"],
+            "acronyms": [],
+            "casing_variants": {},
+            "surname_stoplist": [],
+        },
+        "phases": {
+            "timestamp": {
+                "chapter_max_by_duration": (
+                    _TIMESTAMP_CHAPTER_MAX if chapter_max_by_duration is None else chapter_max_by_duration
+                ),
+                "first_chapter": {"time": "0:00", "title": first_chapter_title, "tier": "enforce"},
+                "chapter_name": (
+                    {"case": "sentence", "words": {"min": 2, "max": 6}, "tier": "flag"}
+                    if chapter_name is None
+                    else chapter_name
+                ),
+                "formats": {
+                    "media_manager": {"start": "H:MM:SS.000", "end": "H:MM:SS.999", "tier": "enforce"},
+                    "youtube": {"style": "M:SS", "tier": "enforce"},
+                },
+                "constraints": (
+                    {"no_gaps": True, "chronological": True, "final_end_equals_srt_end": True}
+                    if constraints is None
+                    else constraints
+                ),
+            }
+        },
+    }
+    return StyleRules(raw=raw)
+
+
+def _srt_timecode(ms: int) -> str:
+    hours, remainder = divmod(ms, 3600000)
+    minutes, remainder = divmod(remainder, 60000)
+    seconds, millis = divmod(remainder, 1000)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
+
+
+def _build_srt(captions: list[tuple[int, int, str]]) -> str:
+    """``captions``: list of ``(start_ms, end_ms, text)`` tuples."""
+    blocks = [
+        f"{index}\n{_srt_timecode(start_ms)} --> {_srt_timecode(end_ms)}\n{text}\n"
+        for index, (start_ms, end_ms, text) in enumerate(captions, start=1)
+    ]
+    return "\n".join(blocks)
+
+
+# A 10-minute synthetic SRT with two speaker transitions (">>") and two
+# music cues ("[bright music]" / "♪...♪") among plain dialogue captions that
+# must NOT become candidates. srt_end_ms == 600000 (last caption's end).
+TIMESTAMP_SRT = _build_srt(
+    [
+        (0, 3000, "Welcome to the show today."),
+        (3000, 6000, "[bright music]"),
+        (6000, 30000, ">> Nick Hoffman: Let's talk about the state budget."),
+        (30000, 60000, "The budget includes new funding for schools across Wisconsin."),
+        (150000, 155000, ">> Angela Fitzgerald: Now let's shift over to the weather."),
+        (155000, 495000, "It's going to be sunny for most of the week."),
+        (495000, 498000, "♪ closing theme ♪"),
+        (498000, 600000, "Thanks for watching, we'll see you next time."),
+    ]
+)
+
+# The four candidate boundary times TIMESTAMP_SRT should yield, in order.
+TIMESTAMP_CANDIDATE_TIMES = [3000, 6000, 150000, 495000]
+
+
+def _timestamp_context(srt: str = TIMESTAMP_SRT, **overrides) -> dict:
+    context = {"transcript_file": "episode.srt", "transcript": srt}
+    context.update(overrides)
+    return context
+
+
+class TestPreStageTimestampGraceful:
+    def test_non_srt_transcript_file_returns_empty(self):
+        rules = _timestamp_rules()
+        result = run_pre_stage("timestamp", {"transcript_file": "episode.txt", "transcript": "plain text"}, rules)
+        assert result.phase == "timestamp"
+        assert result.prompt_section == ""
+        assert result.data == {}
+
+    def test_missing_transcript_file_returns_empty(self):
+        rules = _timestamp_rules()
+        result = run_pre_stage("timestamp", {}, rules)
+        assert result.prompt_section == ""
+        assert result.data == {}
+
+    def test_srt_extension_but_unparseable_content_returns_empty(self):
+        rules = _timestamp_rules()
+        result = run_pre_stage(
+            "timestamp", {"transcript_file": "episode.srt", "transcript": "not real srt content"}, rules
+        )
+        assert result.prompt_section == ""
+        assert result.data == {}
+
+
+class TestPreStageTimestampData:
+    def test_srt_end_ms_and_duration_ms_from_last_caption(self):
+        rules = _timestamp_rules()
+        result = run_pre_stage("timestamp", _timestamp_context(), rules)
+        assert result.data["srt_end_ms"] == 600000
+        assert result.data["duration_ms"] == 600000
+
+    def test_max_chapters_from_rules_duration_table(self):
+        rules = _timestamp_rules()
+        result = run_pre_stage("timestamp", _timestamp_context(), rules)
+        # 10 minutes falls in the "lt: 15" bucket -> max 5.
+        assert result.data["max_chapters"] == 5
+
+    def test_max_chapters_reflects_odd_duration_table(self):
+        # Proves max_chapters is read from rules, not hardcoded: an
+        # off-spec table collapses everything to 2.
+        rules = _timestamp_rules(chapter_max_by_duration=[{"lt": None, "max": 2}])
+        result = run_pre_stage("timestamp", _timestamp_context(), rules)
+        assert result.data["max_chapters"] == 2
+
+    def test_boundary_candidates_kinds_and_order(self):
+        rules = _timestamp_rules()
+        result = run_pre_stage("timestamp", _timestamp_context(), rules)
+        candidates = result.data["boundary_candidates"]
+        assert [c["time_ms"] for c in candidates] == TIMESTAMP_CANDIDATE_TIMES
+        assert [c["kind"] for c in candidates] == [
+            "music_cue",
+            "speaker_transition",
+            "speaker_transition",
+            "music_cue",
+        ]
+
+    def test_speaker_transition_label_contains_speaker_text(self):
+        rules = _timestamp_rules()
+        result = run_pre_stage("timestamp", _timestamp_context(), rules)
+        candidate = next(c for c in result.data["boundary_candidates"] if c["time_ms"] == 6000)
+        assert "Nick Hoffman" in candidate["label"]
+        assert candidate["formatted"] == format_youtube(6000)
+
+    def test_final_end_both_formats(self):
+        rules = _timestamp_rules()
+        result = run_pre_stage("timestamp", _timestamp_context(), rules)
+        assert result.data["final_end"]["youtube"] == format_youtube(600000)
+        assert result.data["final_end"]["media_manager"] == format_media_manager(600000, end=True)
+
+
+class TestPreStageTimestampSubsampling:
+    def test_small_candidate_list_not_subsampled(self):
+        rules = _timestamp_rules()
+        result = run_pre_stage("timestamp", _timestamp_context(), rules)
+        assert result.data["boundary_candidates_subsampled"] is False
+        assert result.data["boundary_candidates_total"] == len(TIMESTAMP_CANDIDATE_TIMES)
+
+    def test_over_sixty_candidates_capped_and_flagged(self):
+        captions = [(i * 1000, i * 1000 + 500, f">> Speaker {i}: line") for i in range(100)]
+        srt = _build_srt(captions)
+        rules = _timestamp_rules()
+        result = run_pre_stage("timestamp", _timestamp_context(srt=srt), rules)
+        assert len(result.data["boundary_candidates"]) == 60
+        assert result.data["boundary_candidates_subsampled"] is True
+        assert result.data["boundary_candidates_total"] == 100
+
+    def test_subsampled_candidates_span_full_range(self):
+        captions = [(i * 1000, i * 1000 + 500, f">> Speaker {i}: line") for i in range(100)]
+        srt = _build_srt(captions)
+        rules = _timestamp_rules()
+        result = run_pre_stage("timestamp", _timestamp_context(srt=srt), rules)
+        times = [c["time_ms"] for c in result.data["boundary_candidates"]]
+        assert times[0] == 0
+        assert times == sorted(times)
+        assert times[-1] > 90000  # spread across the whole 100s range, not just the head
+
+
+class TestPreStageTimestampPromptSection:
+    def test_chapter_limit_line(self):
+        rules = _timestamp_rules()
+        result = run_pre_stage("timestamp", _timestamp_context(), rules)
+        assert "produce at most 5 chapters" in result.prompt_section
+
+    def test_candidate_list_header(self):
+        rules = _timestamp_rules()
+        result = run_pre_stage("timestamp", _timestamp_context(), rules)
+        assert "choose boundaries ONLY from this candidate list:" in result.prompt_section
+
+    def test_candidates_rendered_with_formatted_timecode_and_kind(self):
+        rules = _timestamp_rules()
+        result = run_pre_stage("timestamp", _timestamp_context(), rules)
+        assert format_youtube(6000) in result.prompt_section
+        assert "speaker_transition" in result.prompt_section
+        assert "music_cue" in result.prompt_section
+
+    def test_first_chapter_line_data_driven(self):
+        rules = _timestamp_rules(first_chapter_title="Cold open")
+        result = run_pre_stage("timestamp", _timestamp_context(), rules)
+        assert "first chapter is always 0:00 Cold open (added automatically)" in result.prompt_section
+
+    def test_final_chapter_line_present(self):
+        rules = _timestamp_rules()
+        result = run_pre_stage("timestamp", _timestamp_context(), rules)
+        assert "final chapter ends at exactly 10:00 (handled automatically)" in result.prompt_section
+
+    def test_chapter_naming_line_data_driven_odd_values(self):
+        rules = _timestamp_rules(chapter_name={"case": "title", "words": {"min": 3, "max": 5}})
+        result = run_pre_stage("timestamp", _timestamp_context(), rules)
+        assert "title case" in result.prompt_section
+        assert "3-5 words" in result.prompt_section
+
+    def test_label_excerpt_capped_at_forty_chars(self):
+        long_text = ">> Nick Hoffman: " + ("a very long line of dialogue " * 5)
+        srt = _build_srt([(0, 1000, long_text)])
+        rules = _timestamp_rules()
+        result = run_pre_stage("timestamp", _timestamp_context(srt=srt), rules)
+        candidate = result.data["boundary_candidates"][0]
+        assert len(candidate["label"]) <= 40
+
+
+# ---------------------------------------------------------------------------
+# run_post_stage -- timestamp phase (task 4a)
+# ---------------------------------------------------------------------------
+
+
+def _chapters_raw_output(lines: list[str], prose_before: str = "", prose_after: str = "") -> str:
+    fence = "```chapters\n" + "\n".join(lines) + "\n```"
+    parts = [part for part in (prose_before, fence, prose_after) if part]
+    return "\n\n".join(parts)
+
+
+def _timestamp_style_pre(rules: StyleRules, srt: str = TIMESTAMP_SRT) -> dict:
+    """Build a context["style_pre"] dict the way worker.py would after a
+    real run_pre_stage("timestamp", ...) call, so post_stage tests can
+    exercise the "boundary not in candidate list" check realistically."""
+    pre = run_pre_stage("timestamp", _timestamp_context(srt=srt), rules)
+    return {"prompt_section": pre.prompt_section, **pre.data}
+
+
+HAPPY_TIMESTAMP_LINES = [
+    "0:00 Episode intro",
+    "0:06 Budget debate begins",
+    "2:30 Weather turns sunny",
+    "8:15 Closing credits roll",
+]
+
+
+class TestPostStageTimestampUnparseable:
+    def test_no_fence_passthrough(self):
+        rules = _timestamp_rules()
+        raw_output = "I looked at the transcript but didn't find clear chapter breaks."
+
+        result = run_post_stage("timestamp", raw_output, _timestamp_context(), rules)
+
+        assert result.check.parse_ok is False
+        assert result.normalized_output == raw_output
+        assert result.changed is False
+        assert len(result.check.violations) == 1
+        violation = result.check.violations[0]
+        assert violation.rule_id == "phase_io.timestamp.unparseable"
+        assert violation.severity == "warning"
+        assert violation.model_fixable is True
+
+    def test_empty_output_does_not_raise(self):
+        rules = _timestamp_rules()
+        result = run_post_stage("timestamp", "", _timestamp_context(), rules)
+        assert result.check.parse_ok is False
+        assert result.normalized_output == ""
+
+
+class TestPostStageTimestampEndToEnd:
+    def test_happy_path_matches_emit_timestamp_report(self):
+        rules = _timestamp_rules()
+        context = _timestamp_context()
+        context["style_pre"] = _timestamp_style_pre(rules)
+        raw_output = _chapters_raw_output(HAPPY_TIMESTAMP_LINES)
+
+        result = run_post_stage("timestamp", raw_output, context, rules)
+
+        assert result.check.parse_ok is True
+        assert result.changed is True
+        assert result.normalized_output.startswith("# Timestamp Report")
+        assert "| Episode intro | 0:00:00.000 | 0:00:05.999 |" in result.normalized_output
+        assert "0:00 Episode intro" in result.normalized_output
+        assert "8:15 Closing credits roll" in result.normalized_output
+        # Final row's end is exactly the SRT end (600000ms == 10:00:00.000
+        # via honest ms math -- see timecodes.format_media_manager).
+        assert "0:10:00.000" in result.normalized_output
+
+        chapter_count_violations = [v for v in result.check.violations if v.rule_id == "timestamp.chapter_count"]
+        assert chapter_count_violations == []
+        boundary_violations = [v for v in result.check.violations if v.rule_id == "timestamp.boundary_unlisted"]
+        assert boundary_violations == []
+
+        emit_fixes = [f for f in result.check.fixes if f.rule_id == "timestamp.emit"]
+        assert len(emit_fixes) == 1
+
+    def test_srt_end_ms_reparsed_when_style_pre_absent(self):
+        rules = _timestamp_rules()
+        context = _timestamp_context()  # no "style_pre" key at all
+        raw_output = _chapters_raw_output(HAPPY_TIMESTAMP_LINES)
+
+        result = run_post_stage("timestamp", raw_output, context, rules)
+
+        assert result.check.parse_ok is True
+        assert "0:10:00.000" in result.normalized_output
+
+    def test_convergence_different_formats_and_casing_produce_byte_identical_output(self):
+        rules = _timestamp_rules()
+        context = _timestamp_context()
+        context["style_pre"] = _timestamp_style_pre(rules)
+
+        raw_a = _chapters_raw_output(
+            [
+                "0:00 episode intro",
+                "0:06 Budget Debate Begins",
+                "2:30 weather turns sunny",
+                "8:15 CLOSING CREDITS ROLL",
+            ]
+        )
+        raw_b = _chapters_raw_output(
+            [
+                "0:00:00 Episode Intro",
+                "0:00:06 budget debate begins",
+                "0:02:30 Weather Turns Sunny",
+                "0:08:15 closing credits roll",
+            ]
+        )
+
+        result_a = run_post_stage("timestamp", raw_a, context, rules)
+        result_b = run_post_stage("timestamp", raw_b, context, rules)
+
+        assert result_a.normalized_output == result_b.normalized_output
+
+    def test_forbidden_word_in_title_flagged_but_kept(self):
+        rules = _timestamp_rules()
+        context = _timestamp_context()
+        context["style_pre"] = _timestamp_style_pre(rules)
+        raw_output = _chapters_raw_output(
+            [
+                "0:00 Episode intro",
+                "0:06 Discover the budget debate",
+            ]
+        )
+
+        result = run_post_stage("timestamp", raw_output, context, rules)
+
+        forbidden_violations = [
+            v for v in result.check.violations if v.rule_id == "voice.forbidden.viewer_directive"
+        ]
+        assert len(forbidden_violations) == 1
+        assert forbidden_violations[0].field == "chapter_title"
+        # Casing-normalized only -- the forbidden word itself is never stripped.
+        assert "discover" in result.normalized_output.lower()
+
+    def test_chapter_count_violation_when_model_exceeds_max(self):
+        rules = _timestamp_rules()  # 10-minute duration -> max 5
+        context = _timestamp_context()
+        context["style_pre"] = _timestamp_style_pre(rules)
+        lines = ["0:00 Episode intro"] + [f"{i}:00 Extra segment {i}" for i in range(1, 8)]
+        raw_output = _chapters_raw_output(lines)
+
+        result = run_post_stage("timestamp", raw_output, context, rules)
+
+        count_violations = [v for v in result.check.violations if v.rule_id == "timestamp.chapter_count"]
+        assert len(count_violations) == 1
+        assert count_violations[0].severity == "warning"
+        # The emitter already truncated to max_chapters=5: intro + the
+        # first 4 extras survive, the last 3 are dropped from the output.
+        assert "Extra segment 4" in result.normalized_output
+        assert "Extra segment 5" not in result.normalized_output
+        assert "Extra segment 6" not in result.normalized_output
+        assert "Extra segment 7" not in result.normalized_output
+
+    def test_boundary_unlisted_violation_for_off_candidate_chapter(self):
+        rules = _timestamp_rules()
+        context = _timestamp_context()
+        context["style_pre"] = _timestamp_style_pre(rules)
+        # 3:20 (200000ms) is nowhere near any of TIMESTAMP_CANDIDATE_TIMES.
+        raw_output = _chapters_raw_output(["0:00 Episode intro", "3:20 An unlisted boundary"])
+
+        result = run_post_stage("timestamp", raw_output, context, rules)
+
+        unlisted = [v for v in result.check.violations if v.rule_id == "timestamp.boundary_unlisted"]
+        assert len(unlisted) == 1
+        assert unlisted[0].model_fixable is True
+
+    def test_first_chapter_exempt_from_boundary_unlisted_check(self):
+        rules = _timestamp_rules()
+        context = _timestamp_context()
+        context["style_pre"] = _timestamp_style_pre(rules)
+        # First chapter is forced to 0:00 regardless of the model's choice
+        # and is never itself flagged as an unlisted boundary.
+        raw_output = _chapters_raw_output(["0:00 Episode intro", "0:06 Budget debate begins"])
+
+        result = run_post_stage("timestamp", raw_output, context, rules)
+
+        unlisted = [v for v in result.check.violations if v.rule_id == "timestamp.boundary_unlisted"]
+        assert unlisted == []
+
+    def test_no_boundary_check_when_no_style_pre_candidates(self):
+        rules = _timestamp_rules()
+        context = _timestamp_context()  # no style_pre at all
+        raw_output = _chapters_raw_output(["0:00 Episode intro", "3:20 Anything goes"])
+
+        result = run_post_stage("timestamp", raw_output, context, rules)
+
+        unlisted = [v for v in result.check.violations if v.rule_id == "timestamp.boundary_unlisted"]
+        assert unlisted == []
+
+    def test_chapter_name_length_violation_for_odd_config(self):
+        rules = _timestamp_rules(chapter_name={"case": "sentence", "words": {"min": 4, "max": 6}})
+        context = _timestamp_context()
+        context["style_pre"] = _timestamp_style_pre(rules)
+        # "Budget debate" is 2 words -- under the odd 4-6 word minimum. Note
+        # the auto-generated "Episode intro" first chapter is 2 words too,
+        # so it also trips this deliberately-odd 4-6 minimum -- the check
+        # applies uniformly to every chapter title, not just model choices.
+        raw_output = _chapters_raw_output(["0:00 Episode intro", "0:06 Budget debate"])
+
+        result = run_post_stage("timestamp", raw_output, context, rules)
+
+        length_violations = [v for v in result.check.violations if v.rule_id == "timestamp.chapter_name_length"]
+        assert len(length_violations) == 2
+        assert all("4-6" in v.message for v in length_violations)
+        assert any("Budget debate" in v.message for v in length_violations)
+
+    def test_snap_notes_surface_as_timestamp_snapped_violations(self):
+        rules = _timestamp_rules(first_chapter_title="Cold open")
+        context = _timestamp_context()
+        context["style_pre"] = _timestamp_style_pre(rules)
+        # Model's first chapter isn't "Cold open" -> snap_chapters produces
+        # exactly one note (a forced-title override).
+        raw_output = _chapters_raw_output(["0:00 Episode intro", "0:06 Budget debate begins"])
+
+        result = run_post_stage("timestamp", raw_output, context, rules)
+
+        snapped_violations = [v for v in result.check.violations if v.rule_id == "timestamp.snapped"]
+        assert len(snapped_violations) == 1
+        assert "Cold open" in snapped_violations[0].message
+        assert snapped_violations[0].model_fixable is False
+
+    def test_duplicate_start_snap_note_surfaces_as_violation(self):
+        rules = _timestamp_rules()
+        context = _timestamp_context()
+        context["style_pre"] = _timestamp_style_pre(rules)
+        raw_output = _chapters_raw_output(
+            ["0:00 Episode intro", "0:06 Budget debate begins", "0:06 Duplicate boundary"]
+        )
+
+        result = run_post_stage("timestamp", raw_output, context, rules)
+
+        snapped_violations = [v for v in result.check.violations if v.rule_id == "timestamp.snapped"]
+        assert any("duplicate" in v.message for v in snapped_violations)
+
+    def test_title_casing_normalized_via_fixes(self):
+        rules = _timestamp_rules()
+        context = _timestamp_context()
+        context["style_pre"] = _timestamp_style_pre(rules)
+        raw_output = _chapters_raw_output(["0:00 Episode intro", "0:06 THE BUDGET DEBATE BEGINS NOW TODAY"])
+
+        result = run_post_stage("timestamp", raw_output, context, rules)
+
+        title_fixes = [f for f in result.check.fixes if f.rule_id == "casing.down_style.chapter_title"]
+        assert len(title_fixes) == 1
+        assert title_fixes[0].before == "THE BUDGET DEBATE BEGINS NOW TODAY"
+        assert title_fixes[0].after != title_fixes[0].before
+        assert "the budget debate" in title_fixes[0].after.lower()

@@ -26,7 +26,9 @@ from typing import Any
 
 from api.services.style_engine.entities import extract_proper_nouns
 from api.services.style_engine.rules import StyleRules
+from api.services.style_engine.timecodes import format_media_manager, format_youtube
 from api.services.style_engine.types import PreStageResult
+from api.services.utils import get_srt_duration, parse_srt
 
 # Human-friendly labels for forbidden_phrases categories seen in
 # config/house_style.yaml. Any category not listed here falls back to a
@@ -84,6 +86,17 @@ def run_pre_stage(phase: str, context: Mapping[str, Any], rules: StyleRules) -> 
     as "write it right the first time" rules, and a review-notes placement
     line.
 
+    For ``phase == "timestamp"``, when ``context["transcript_file"]`` ends
+    with ``.srt`` and ``context["transcript"]`` parses into at least one SRT
+    caption, computes ``duration_ms``/``srt_end_ms`` (the SRT's own last
+    timestamp -- never an estimate), ``max_chapters``
+    (``rules.chapter_max()``), a capped/subsampled ``boundary_candidates``
+    list (speaker transitions + music cues walked out of the SRT captions),
+    and ``final_end`` (both formats), rendering them into a "## Style Rules
+    (authoritative)" section. Anything else (no/mismatched
+    ``transcript_file``, unparseable transcript) degrades gracefully to an
+    empty ``PreStageResult`` -- the timestamp phase only ever runs on SRTs.
+
     For any other phase (v1), returns
     ``PreStageResult(phase=phase, prompt_section="", data={})``.
     """
@@ -92,6 +105,9 @@ def run_pre_stage(phase: str, context: Mapping[str, Any], rules: StyleRules) -> 
 
     if phase == "formatter":
         return _run_formatter_pre_stage(context, rules)
+
+    if phase == "timestamp":
+        return _run_timestamp_pre_stage(context, rules)
 
     if phase != "seo":
         return PreStageResult(phase=phase, prompt_section="", data={})
@@ -439,3 +455,159 @@ def _render_program_block(program: str | None, program_rules: dict) -> str:
     if verb_bits:
         line += " — " + "; ".join(verb_bits) + "."
     return line
+
+
+# ---------------------------------------------------------------------------
+# timestamp phase
+# ---------------------------------------------------------------------------
+
+# A caption is a candidate speaker-transition boundary when it opens with a
+# live-caption ">>" marker or a bold "**First Last:**" turn label.
+_SPEAKER_TRANSITION_RE = re.compile(r"^(?:>>\s*|\*\*[A-Za-z][\w.'\s-]*:\*\*)")
+# A caption is a candidate music-cue boundary when it carries a music note
+# glyph or a "[...music...]" bracketed cue (case-insensitive).
+_MUSIC_CUE_RE = re.compile(r"♪|\[[^\]]*music[^\]]*\]", re.IGNORECASE)
+
+# "Cap the candidate list at 60 entries" -- brief-specified ceiling so the
+# prompt section never grows unbounded on a long, chatty transcript.
+_MAX_BOUNDARY_CANDIDATES = 60
+# "short label excerpt ≤40 chars"
+_CANDIDATE_LABEL_LEN = 40
+
+
+def _run_timestamp_pre_stage(context: Mapping[str, Any], rules: StyleRules) -> PreStageResult:
+    transcript_file = context.get("transcript_file") or ""
+    if not transcript_file.lower().endswith(".srt"):
+        return PreStageResult(phase="timestamp", prompt_section="", data={})
+
+    transcript = context.get("transcript") or ""
+    captions = parse_srt(transcript)
+    if not captions:
+        return PreStageResult(phase="timestamp", prompt_section="", data={})
+
+    srt_end_ms = get_srt_duration(captions)
+
+    timestamp_cfg = (rules.raw.get("phases", {}) or {}).get("timestamp", {}) or {}
+    first_chapter_title = (timestamp_cfg.get("first_chapter") or {}).get("title", "Episode intro")
+    chapter_name_cfg = timestamp_cfg.get("chapter_name") or {}
+
+    max_chapters = rules.chapter_max(srt_end_ms / 60000)
+
+    all_candidates = _extract_boundary_candidates(captions)
+    candidates, subsampled = _subsample_candidates(all_candidates)
+
+    final_end = {
+        "media_manager": format_media_manager(srt_end_ms, end=True),
+        "youtube": format_youtube(srt_end_ms),
+    }
+
+    data = {
+        "duration_ms": srt_end_ms,
+        "srt_end_ms": srt_end_ms,
+        "max_chapters": max_chapters,
+        "boundary_candidates": candidates,
+        "boundary_candidates_total": len(all_candidates),
+        "boundary_candidates_subsampled": subsampled,
+        "final_end": final_end,
+    }
+
+    prompt_section = _render_timestamp_prompt_section(data, first_chapter_title, chapter_name_cfg)
+
+    return PreStageResult(phase="timestamp", prompt_section=prompt_section, data=data)
+
+
+def _excerpt(text: str, limit: int = _CANDIDATE_LABEL_LEN) -> str:
+    collapsed = " ".join(text.split())
+    if len(collapsed) <= limit:
+        return collapsed
+    return collapsed[: limit - 1].rstrip() + "…"
+
+
+def _extract_boundary_candidates(captions: list) -> list[dict]:
+    """Walk SRT captions (same simple linear pass ``seam_coverage`` uses) for
+    speaker-transition and music-cue boundary candidates."""
+    candidates: list[dict] = []
+    for caption in captions:
+        text = caption.text or ""
+        stripped = text.strip()
+        if _SPEAKER_TRANSITION_RE.match(stripped):
+            kind = "speaker_transition"
+        elif _MUSIC_CUE_RE.search(text):
+            kind = "music_cue"
+        else:
+            continue
+        candidates.append(
+            {
+                "time_ms": caption.start_ms,
+                "formatted": format_youtube(caption.start_ms),
+                "kind": kind,
+                "label": _excerpt(text),
+            }
+        )
+    return candidates
+
+
+def _subsample_candidates(candidates: list[dict], cap: int = _MAX_BOUNDARY_CANDIDATES) -> tuple[list[dict], bool]:
+    """Evenly subsample down to ``cap`` entries when over the ceiling.
+
+    Picks ``cap`` indices spread across the full range (``int(i * n / cap)``
+    for ``i`` in ``range(cap)``) rather than simply truncating, so a
+    subsampled candidate list still spans the whole episode instead of only
+    its first few minutes.
+    """
+    total = len(candidates)
+    if total <= cap:
+        return list(candidates), False
+    step = total / cap
+    indices = [int(i * step) for i in range(cap)]
+    return [candidates[i] for i in indices], True
+
+
+def _render_timestamp_prompt_section(
+    data: dict, first_chapter_title: str, chapter_name_cfg: Mapping[str, Any]
+) -> str:
+    lines = [
+        "## Style Rules (authoritative)",
+        "",
+        "These values are computed and enforced by the pipeline — they override "
+        "anything else in this prompt.",
+        "",
+        f"**Duration:** {format_youtube(data['srt_end_ms'])} (from SRT timecodes, exact).",
+        f"**Chapter limit:** produce at most {data['max_chapters']} chapters.",
+        "**Boundary candidates:** choose boundaries ONLY from this candidate list:",
+    ]
+
+    candidates = data["boundary_candidates"]
+    if candidates:
+        for candidate in candidates:
+            lines.append(f"- {candidate['formatted']} — {candidate['label']} ({candidate['kind']})")
+    else:
+        lines.append("- (none detected -- only the automatic first chapter applies)")
+
+    lines.append(f"**First chapter:** first chapter is always 0:00 {first_chapter_title} (added automatically).")
+    lines.append(
+        f"**Final chapter:** final chapter ends at exactly {data['final_end']['youtube']} (handled automatically)."
+    )
+
+    naming_line = _render_chapter_naming_line(chapter_name_cfg)
+    if naming_line:
+        lines.append(naming_line)
+
+    return "\n".join(lines) + "\n"
+
+
+def _render_chapter_naming_line(chapter_name_cfg: Mapping[str, Any]) -> str:
+    case = chapter_name_cfg.get("case")
+    words = chapter_name_cfg.get("words") or {}
+    min_words = words.get("min")
+    max_words = words.get("max")
+
+    bits = []
+    if case:
+        bits.append(f"{case} case")
+    if min_words is not None and max_words is not None:
+        bits.append(f"{min_words}-{max_words} words")
+
+    if not bits:
+        return ""
+    return f"**Chapter naming:** {', '.join(bits)}."
