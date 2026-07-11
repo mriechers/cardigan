@@ -107,6 +107,37 @@ casing:
     - Garden Wanderings
     - Marquette Poll
     - PBS Wisconsin
+    # Tribal nations & cultural terms (stage-0 baseline evidence: normalization
+    # lowercased these in Wisconsin Life / Look Back titles — 2026-07-10)
+    - Ojibwe
+    - Ho-Chunk
+    - Ho-Chunk Nation
+    - Menominee
+    - Oneida
+    - Potawatomi
+    - Stockbridge-Munsee
+    - Anishinaabe
+    # Months & days (proper nouns in English; absent from seed → down-styled
+    # titles lowercased "August" in stage-0 baselines)
+    - January
+    - February
+    - March
+    - April
+    - May
+    - June
+    - July
+    - August
+    - September
+    - October
+    - November
+    - December
+    - Monday
+    - Tuesday
+    - Wednesday
+    - Thursday
+    - Friday
+    - Saturday
+    - Sunday
   acronyms:
     - SCOTUS
     - PBS
