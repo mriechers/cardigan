@@ -25,13 +25,15 @@ from api.services.style_engine.prompt_blocks import (
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
-# seo.md and validator.md are excluded here -- task 1c gave seo.md
-# {{style:...}} tokens and task 2d gave validator.md its own. Each gets its
-# own no-op-broken assertions + real-render tests below instead.
-TOKEN_FREE_PROMPT_PHASES = ["analyst", "formatter", "timestamp", "copy_editor"]
+# seo.md, validator.md, and formatter.md are excluded here -- task 1c gave
+# seo.md {{style:...}} tokens, task 2d gave validator.md its own, and task 3c
+# gave formatter.md its own. Each gets its own no-op-broken assertions +
+# real-render tests below instead.
+TOKEN_FREE_PROMPT_PHASES = ["analyst", "timestamp", "copy_editor"]
 
 SEO_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "seo.md"
 VALIDATOR_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "validator.md"
+FORMATTER_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "formatter.md"
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -376,6 +378,78 @@ def test_validator_prompt_slim_profile_renders_condensed_block() -> None:
     # Proves slim actually swapped in -- the full-profile-only sections must be absent.
     assert "## Validation Checklist" not in rendered
     assert "### SEO Phase" not in rendered
+    assert "{{style:" not in rendered
+
+
+# ---------------------------------------------------------------------------
+# 7d. formatter.md: task 3c gave it a token -- prove it's present and renders
+# cleanly against the REAL config/house_style.yaml for both profiles.
+# ---------------------------------------------------------------------------
+
+
+def test_formatter_prompt_contains_expected_style_token() -> None:
+    content = FORMATTER_PROMPT_PATH.read_text()
+    assert "{{style:formatter.house_rules}}" in content
+
+
+@pytest.mark.parametrize("profile", ["full", "slim"])
+def test_formatter_prompt_renders_against_real_config_for_both_profiles(profile: str) -> None:
+    content = FORMATTER_PROMPT_PATH.read_text()
+
+    # Must not raise PromptBlockError for either profile against the REAL
+    # config/house_style.yaml -- proves formatter.house_rules has both a
+    # "full" and a "slim" entry.
+    rendered = render_prompt_blocks(content, profile=profile)
+
+    assert "{{style:" not in rendered
+
+
+def test_formatter_prompt_full_profile_renders_expected_house_rules_block() -> None:
+    """Golden assertions on the token-replaced region only (not the whole
+    prompt) -- keeps this test from being a brittle whole-file snapshot.
+    """
+    content = FORMATTER_PROMPT_PATH.read_text()
+    rendered = render_prompt_blocks(content, profile="full")
+
+    assert "### PBS Wisconsin House Style" in rendered
+    assert '"Capitol" not "capital"' in rendered
+    assert '"OK" not "okay"' in rendered
+    assert "liberals" in rendered and "conservatives" in rendered
+    assert '"Legislature" capitalized, committees lowercase' in rendered
+    assert "No oxford commas" in rendered
+    assert "Abbreviate honorifics" in rendered
+    assert "Em dashes" in rendered
+    assert "Numbers in scores/tallies" in rendered
+    assert '"Marquette Poll" capitalized' in rendered
+    assert '"partisan" not "partizan"' in rendered
+    assert "Program names are NOT italicized" in rendered
+    assert "Speaker names are always bolded" in rendered
+    assert "NEVER suppress content" in rendered
+    assert "{{style:" not in rendered
+
+
+def test_formatter_prompt_slim_profile_renders_condensed_block() -> None:
+    content = FORMATTER_PROMPT_PATH.read_text()
+    rendered = render_prompt_blocks(content, profile="slim")
+
+    # Flag-tier / judgment-guidance items survive in slim.
+    assert '"Capitol" not "capital"' in rendered
+    assert "No oxford commas" in rendered
+    assert "Em dashes" in rendered
+    assert "Numbers in scores/tallies" in rendered
+    assert "NEVER suppress content" in rendered
+    assert (
+        "Lexical house-style substitutions (OK/partisan/Marquette Poll/program-name "
+        "italics/honorific abbreviations/liberals-conservatives casing) are applied "
+        "deterministically after generation — do not worry about them."
+    ) in rendered
+    # Proves slim actually swapped in -- the full-profile-only heading and the
+    # deterministically-enforced pairs must be absent.
+    assert "### PBS Wisconsin House Style" not in rendered
+    assert '"OK" not "okay"' not in rendered
+    assert '"partisan" not "partizan"' not in rendered
+    assert '"Marquette Poll" capitalized' not in rendered
+    assert "Abbreviate honorifics" not in rendered
     assert "{{style:" not in rendered
 
 

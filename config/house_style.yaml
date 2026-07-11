@@ -334,3 +334,32 @@ prompt_blocks:
       - Description accurately reflects content
 
       All mechanical checks (character limits, formatting, placeholders, truncation, speaker labels) run deterministically in the pipeline and are merged into your verdict — do NOT re-check them; judge only the semantic accuracy items above.
+  "formatter.house_rules":
+    full: |
+      ### PBS Wisconsin House Style
+
+      Apply these editorial conventions consistently:
+
+      - **"Capitol" not "capital"** — In local/state news context, use "Capitol" (the building/district). Only use "capital" in economic/financial discussions where it means money or assets.
+      - **"OK" not "okay"** — Always use the abbreviated form.
+      - **"liberals" / "conservatives" lowercase** — These are descriptive political terms in US context, not proper nouns. Always lowercase unless starting a sentence. Same for "liberal" and "conservative" as adjectives.
+      - **"Legislature" capitalized, committees lowercase** — Capitalize "Legislature" when referring to a specific state legislature. But committee names within it are lowercase: "Legislature's budget committee" not "Legislature's Budget Committee."
+      - **No oxford commas** — Omit the serial comma in lists (e.g., "red, white and blue"). The ONE exception: use a serial comma when listing clauses that need it for clarity.
+      - **Abbreviate honorifics** — Use abbreviated forms in running text: "Sen." (Senator), "Rep." (Representative), "Gov." (Governor), "Pres." (President), "Atty. Gen." (Attorney General), etc.
+      - **Em dashes** — Use sparingly and consistently. An em dash (—) is appropriate for abrupt breaks in thought or attributive asides. Do not over-apply them as substitutes for commas, colons, or parentheses.
+      - **Numbers in scores/tallies** — Use numerals for vote counts and court splits: "4 to 3", "5 to 2", "18 points". Spell out numbers only at the start of a sentence.
+      - **"Marquette Poll" capitalized** — This is a proper name (the Marquette Law School Poll). Always capitalize.
+      - **"partisan" not "partizan"** — Always use the standard English spelling "partisan" (also: "bipartisan", "nonpartisan"). Never use the archaic "partizan" spelling.
+      - **Program names are NOT italicized** — Write program names in plain text: "Inside Wisconsin Politics", "Here & Now", "Wisconsin Life". Do NOT italicize them. Be consistent — if the program name appears multiple times, format it the same way every time.
+      - **Speaker names are always bolded** — Use `**First Last:**` format with bold markdown. Add **two trailing spaces** after the colon so the dialogue renders on the next line (Markdown line break). Example: `**Shawn Johnson:**··` (where `··` represents two spaces).
+      - **NEVER suppress content** — Do NOT silently drop lines containing mild language (e.g., "damned", "hell"), short interjections, or any other spoken content. ALL dialogue must be preserved verbatim. If language seems surprising, include it anyway — it's what the speaker said. Flag in review notes if concerned, but never omit.
+    slim: |
+      Apply these editorial conventions where judgment is required (mechanical substitutions are handled deterministically — see below):
+
+      - **"Capitol" not "capital"** — In local/state news context, use "Capitol" (the building/district). Only use "capital" in economic/financial discussions where it means money or assets.
+      - **No oxford commas** — Omit the serial comma in lists (e.g., "red, white and blue"). The ONE exception: use a serial comma when listing clauses that need it for clarity.
+      - **Em dashes** — Use sparingly and consistently. An em dash (—) is appropriate for abrupt breaks in thought or attributive asides. Do not over-apply them as substitutes for commas, colons, or parentheses.
+      - **Numbers in scores/tallies** — Use numerals for vote counts and court splits: "4 to 3", "5 to 2", "18 points". Spell out numbers only at the start of a sentence.
+      - **NEVER suppress content** — Do NOT silently drop lines containing mild language (e.g., "damned", "hell"), short interjections, or any other spoken content. ALL dialogue must be preserved verbatim. If language seems surprising, include it anyway — it's what the speaker said. Flag in review notes if concerned, but never omit.
+
+      Lexical house-style substitutions (OK/partisan/Marquette Poll/program-name italics/honorific abbreviations/liberals-conservatives casing) are applied deterministically after generation — do not worry about them.
