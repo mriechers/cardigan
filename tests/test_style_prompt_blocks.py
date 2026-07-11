@@ -25,15 +25,17 @@ from api.services.style_engine.prompt_blocks import (
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
-# seo.md, validator.md, and formatter.md are excluded here -- task 1c gave
-# seo.md {{style:...}} tokens, task 2d gave validator.md its own, and task 3c
-# gave formatter.md its own. Each gets its own no-op-broken assertions +
-# real-render tests below instead.
-TOKEN_FREE_PROMPT_PHASES = ["analyst", "timestamp", "copy_editor"]
+# seo.md, validator.md, formatter.md, and timestamp.md are excluded here --
+# task 1c gave seo.md {{style:...}} tokens, task 2d gave validator.md its
+# own, task 3c gave formatter.md its own, and task 4b gave timestamp.md its
+# own. Each gets its own no-op-broken assertions + real-render tests below
+# instead.
+TOKEN_FREE_PROMPT_PHASES = ["analyst", "copy_editor"]
 
 SEO_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "seo.md"
 VALIDATOR_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "validator.md"
 FORMATTER_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "formatter.md"
+TIMESTAMP_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "timestamp.md"
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -452,6 +454,93 @@ def test_formatter_prompt_slim_profile_renders_condensed_block() -> None:
     assert '"Marquette Poll" capitalized' not in rendered
     assert "Abbreviate honorifics" not in rendered
     assert "{{style:" not in rendered
+
+
+# ---------------------------------------------------------------------------
+# 7e. timestamp.md: task 4b gave it a token -- prove it's present and renders
+# cleanly against the REAL config/house_style.yaml for both profiles.
+# ---------------------------------------------------------------------------
+
+
+def test_timestamp_prompt_contains_expected_style_token() -> None:
+    content = TIMESTAMP_PROMPT_PATH.read_text()
+    assert "{{style:timestamp.output_contract}}" in content
+
+
+@pytest.mark.parametrize("profile", ["full", "slim"])
+def test_timestamp_prompt_renders_against_real_config_for_both_profiles(profile: str) -> None:
+    content = TIMESTAMP_PROMPT_PATH.read_text()
+
+    # Must not raise PromptBlockError for either profile against the REAL
+    # config/house_style.yaml -- proves timestamp.output_contract has both a
+    # "full" and a "slim" entry.
+    rendered = render_prompt_blocks(content, profile=profile)
+
+    assert "{{style:" not in rendered
+
+
+def test_timestamp_prompt_full_profile_renders_expected_output_contract_block() -> None:
+    """Golden assertions on the token-replaced region only (not the whole
+    prompt) -- keeps this test from being a brittle whole-file snapshot.
+    Proves the full profile preserves today's free-form contract verbatim:
+    the manually-typed output template, the chapter-count table, the first-
+    chapter rule, the time-format specs, and the quality checklist.
+    """
+    content = TIMESTAMP_PROMPT_PATH.read_text()
+    rendered = render_prompt_blocks(content, profile="full")
+
+    assert "### Required Output Format" in rendered
+    assert "**Project:** {project_name}" in rendered
+    assert "**Duration:** {total_duration}" in rendered
+    assert "## Media Manager Format" in rendered
+    assert "## YouTube Format" in rendered
+    assert "### Chapter Count Targets (Maximum)" in rendered
+    assert "| Under 5 min | 3 |" in rendered
+    assert "| 60+ min | 10 |" in rendered
+    assert "### First Chapter Rule" in rendered
+    assert "The first chapter is always `0:00 Episode intro`." in rendered
+    assert "### Time Format Specifications" in rendered
+    assert "Use `H:MM:SS.000` with millisecond precision" in rendered
+    assert "Use `M:SS` for times under 1 hour" in rendered
+    assert "## Quality Checklist" in rendered
+    assert "Both format tables are complete and match" in rendered
+    assert "{{style:" not in rendered
+
+
+def test_timestamp_prompt_slim_profile_renders_structured_contract() -> None:
+    content = TIMESTAMP_PROMPT_PATH.read_text()
+    rendered = render_prompt_blocks(content, profile="slim")
+
+    assert "fenced code block labeled `chapters`" in rendered
+    assert "`<timecode> <title>`" in rendered
+    assert "Choose boundaries ONLY from the candidate list" in rendered
+    assert "Do not include the forced first chapter" in rendered
+    assert "the pipeline builds both deterministically from your chapter list" in rendered
+    assert "2-6 words, sentence case, naming the topic" in rendered
+    assert "parallel framing for political content" in rendered
+    assert "```chapters" in rendered
+    # Proves slim actually swapped in -- the full-profile-only sections must be absent.
+    assert "### Required Output Format" not in rendered
+    assert "### Chapter Count Targets (Maximum)" not in rendered
+    assert "Both format tables are complete and match" not in rendered
+    assert "{{style:" not in rendered
+
+
+def test_timestamp_prompt_naming_taste_guidance_survives_both_profiles() -> None:
+    """The naming-taste guidance (neutral tone, topic-not-format, no generic
+    names, parallel framing) stays as unconditional prose in the .md file
+    (not gated by the token) -- task 4b's documented choice -- so it applies
+    identically under both profiles. Also spot-checked as a condensed
+    restatement inside the slim block itself (see the slim test above) since
+    boundary selection + title-writing is the model's entire job once the
+    format machinery moves into the deterministic engine.
+    """
+    content = TIMESTAMP_PROMPT_PATH.read_text()
+    for profile in ("full", "slim"):
+        rendered = render_prompt_blocks(content, profile=profile)
+        assert "### Chapter Naming Guidelines" in rendered
+        assert "Parallel framing for political content" in rendered
+        assert "Avoid generic names" in rendered
 
 
 # ---------------------------------------------------------------------------

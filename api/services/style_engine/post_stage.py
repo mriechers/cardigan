@@ -46,7 +46,12 @@ naming length, forbidden/person-voice phrases in titles, and boundaries the
 model chose outside the pre-stage's candidate list; every deterministic
 ``snap_chapters`` adjustment is also individually surfaced as an
 informational (non-model-fixable) violation so the audit trail shows exactly
-what the engine changed.
+what the engine changed. The chapter-count-over-cap check fires on either of
+two signals -- the model's raw chapter count already over the cap, OR
+``snap_chapters``' final truncation step actually dropping a chapter -- since
+checking the raw count alone under-reports the case where an at-or-under-cap
+raw count is pushed over the line by the forced 0:00 first-chapter prepend
+(see ``_run_timestamp_post_stage``).
 
 ``seo``, ``formatter``, and ``timestamp`` phases have behavior today; every
 other phase name degrades gracefully to a ``skipped=True`` passthrough. This
@@ -365,20 +370,44 @@ def _run_timestamp_post_stage(raw_output: str, context: Mapping[str, Any], rules
             )
         cased_chapters.append(Chapter(title=cased_title, start_ms=chapter.start_ms))
 
-    normalized_output = emit_timestamp_report(cased_chapters, srt_end_ms=srt_end_ms, rules=rules)
+    normalized_output = emit_timestamp_report(
+        cased_chapters, srt_end_ms=srt_end_ms, rules=rules, project_name=context.get("project_name")
+    )
     fixes.append(AppliedFix(rule_id="timestamp.emit", before=raw_output, after=normalized_output, count=1))
 
     violations: list[RuleViolation] = []
-    if pre_snap_count > max_chapters:
+    # chapter_count fires on EITHER of two independent signals:
+    #   1. the model's raw (pre-snap) chapter count already exceeded the cap, or
+    #   2. snap_chapters' final truncation step actually dropped a chapter --
+    #      identified by its "beyond max_chapters" note (the only snap_chapters
+    #      note that contains that substring; dedup/out-of-range notes read
+    #      differently -- see timecodes.snap_chapters's docstring).
+    # Checking (1) alone under-reports: if the model returns exactly
+    # max_chapters chapters but none starts at 0:00, snap_chapters' forced
+    # first-chapter prepend pushes the count to max_chapters + 1 *after*
+    # pre_snap_count was already measured, so the resulting truncation (which
+    # silently drops one of the model's real chapters) would go unflagged.
+    truncation_note = next((note for note in notes if "beyond max_chapters" in note), None)
+    model_over_cap = pre_snap_count > max_chapters
+    if model_over_cap or truncation_note is not None:
+        if truncation_note is not None:
+            message = (
+                f"Model produced {pre_snap_count} chapters; after deterministic cleanup "
+                "(deduping, dropping out-of-range boundaries, and the pipeline's forced "
+                f"0:00 first chapter) the list exceeded the max of {max_chapters} for this "
+                f"duration and snap_chapters truncated it -- {truncation_note}"
+            )
+        else:
+            message = (
+                f"Model produced {pre_snap_count} chapters, exceeding the max of {max_chapters} "
+                "for this duration -- truncated automatically"
+            )
         violations.append(
             RuleViolation(
                 rule_id="timestamp.chapter_count",
                 phase=phase,
                 severity="warning",
-                message=(
-                    f"Model produced {pre_snap_count} chapters, exceeding the max of {max_chapters} "
-                    "for this duration -- truncated automatically"
-                ),
+                message=message,
                 model_fixable=True,
             )
         )

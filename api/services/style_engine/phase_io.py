@@ -238,7 +238,13 @@ _TIMESTAMP_CONSTRAINT_NOTES: dict[str, str] = {
 }
 
 
-def emit_timestamp_report(chapters: list[Chapter], *, srt_end_ms: int, rules: StyleRules) -> str:
+def emit_timestamp_report(
+    chapters: list[Chapter],
+    *,
+    srt_end_ms: int,
+    rules: StyleRules,
+    project_name: str | None = None,
+) -> str:
     """Render the full ``timestamp_output.md`` body from a snapped chapter list.
 
     Built entirely from ``timecodes.emit_media_manager_table`` /
@@ -248,6 +254,15 @@ def emit_timestamp_report(chapters: list[Chapter], *, srt_end_ms: int, rules: St
     ``false`` in ``rules`` is simply not mentioned, proving the section is
     rules-driven rather than a fixed string). Headings mirror
     ``prompts/timestamp.md``'s current output template.
+
+    ``project_name`` -- when truthy -- renders a ``**Project:** {project_name}``
+    line directly above ``**Duration:**``, matching
+    ``prompts/timestamp.md``'s output template. Omitted entirely (not even a
+    blank ``**Project:**`` line) when ``None`` or empty, which keeps every
+    caller that doesn't pass it byte-identical to this function's
+    pre-task-4b output -- callers are expected to pass
+    ``context.get("project_name")`` from the worker's phase context (see
+    ``post_stage._run_timestamp_post_stage``).
     """
     media_manager_table = emit_media_manager_table(chapters, srt_end_ms)
     youtube_list = emit_youtube_list(chapters)
@@ -263,8 +278,11 @@ def emit_timestamp_report(chapters: list[Chapter], *, srt_end_ms: int, rules: St
     if not note_lines:
         note_lines = ["- Timestamps derived from SRT timecodes."]
 
+    project_line = f"**Project:** {project_name}\n" if project_name else ""
+
     return (
         "# Timestamp Report\n\n"
+        f"{project_line}"
         f"**Duration:** {duration}\n\n"
         "---\n\n"
         "## Media Manager Format\n\n"

@@ -1381,6 +1381,62 @@ class TestPostStageTimestampEndToEnd:
         emit_fixes = [f for f in result.check.fixes if f.rule_id == "timestamp.emit"]
         assert len(emit_fixes) == 1
 
+    def test_slim_contract_synthetic_output_byte_exact_with_project_line(self):
+        """A slim-profile-shaped model response -- nothing but the ```chapters
+        fence (exactly what timestamp.output_contract's slim profile
+        instructs the model to produce; no manually-typed tables, no prose)
+        -- round-trips through run_post_stage into a byte-exact final
+        report, including the **Project:** line sourced from
+        context["project_name"] (task 4b's two engine fixes combined)."""
+        rules = _timestamp_rules()
+        context = _timestamp_context()
+        context["project_name"] = "Budget Debate 2026"
+        context["style_pre"] = _timestamp_style_pre(rules)
+        # Bare slim-contract output: only the fenced chapters block.
+        raw_output = "```chapters\n" + "\n".join(HAPPY_TIMESTAMP_LINES) + "\n```"
+
+        result = run_post_stage("timestamp", raw_output, context, rules)
+
+        expected = (
+            "# Timestamp Report\n\n"
+            "**Project:** Budget Debate 2026\n"
+            "**Duration:** 10:00\n\n"
+            "---\n\n"
+            "## Media Manager Format\n\n"
+            "Copy-paste this table into PBS Media Manager chapter fields:\n\n"
+            "| Title | Start Time | End Time |\n"
+            "|-------|------------|----------|\n"
+            "| Episode intro | 0:00:00.000 | 0:00:05.999 |\n"
+            "| Budget debate begins | 0:00:06.000 | 0:02:29.999 |\n"
+            "| Weather turns sunny | 0:02:30.000 | 0:08:14.999 |\n"
+            "| Closing credits roll | 0:08:15.000 | 0:10:00.000 |\n\n"
+            "---\n\n"
+            "## YouTube Format\n\n"
+            "Copy-paste these timestamps directly into your YouTube description:\n\n"
+            "0:00 Episode intro\n"
+            "0:06 Budget debate begins\n"
+            "2:30 Weather turns sunny\n"
+            "8:15 Closing credits roll\n\n"
+            "---\n\n"
+            "## Notes\n\n"
+            "- No gaps between chapters -- each ends exactly where the next begins.\n"
+            "- Chapters are listed in chronological order.\n"
+            "- Final chapter end time matches the last SRT timestamp.\n"
+        )
+        assert result.check.parse_ok is True
+        assert result.normalized_output == expected
+
+    def test_no_project_line_when_project_name_absent_from_context(self):
+        rules = _timestamp_rules()
+        context = _timestamp_context()  # no "project_name" key at all
+        context["style_pre"] = _timestamp_style_pre(rules)
+        raw_output = _chapters_raw_output(HAPPY_TIMESTAMP_LINES)
+
+        result = run_post_stage("timestamp", raw_output, context, rules)
+
+        assert "**Project:**" not in result.normalized_output
+        assert result.normalized_output.startswith("# Timestamp Report\n\n**Duration:**")
+
     def test_srt_end_ms_reparsed_when_style_pre_absent(self):
         rules = _timestamp_rules()
         context = _timestamp_context()  # no "style_pre" key at all
@@ -1457,6 +1513,38 @@ class TestPostStageTimestampEndToEnd:
         assert "Extra segment 5" not in result.normalized_output
         assert "Extra segment 6" not in result.normalized_output
         assert "Extra segment 7" not in result.normalized_output
+
+    def test_chapter_count_violation_from_forced_first_chapter_truncation(self):
+        """The exact under-reporting scenario task 4b's fix closes: the
+        model returns exactly max_chapters chapters (5, for this 10-minute
+        fixture), and NONE of them starts at 0:00. The raw model count
+        (5) does NOT exceed max_chapters (5) -- the old `pre_snap_count >
+        max_chapters` check alone would miss this entirely. But
+        snap_chapters' forced-first-chapter prepend adds a 6th chapter
+        (0:00 Episode intro), pushing the snapped list to 6, which then gets
+        truncated back down to 5 -- silently dropping one of the model's
+        real proposed chapters. The fix must catch this via the truncation
+        note and name the dropped chapter in the violation message.
+        """
+        rules = _timestamp_rules()  # 10-minute duration -> max 5
+        context = _timestamp_context()  # no style_pre -- keeps this focused on chapter_count
+        lines = [f"{i}:00 Segment {i}" for i in range(1, 6)]  # exactly 5, none at 0:00
+        raw_output = _chapters_raw_output(lines)
+
+        result = run_post_stage("timestamp", raw_output, context, rules)
+
+        count_violations = [v for v in result.check.violations if v.rule_id == "timestamp.chapter_count"]
+        assert len(count_violations) == 1
+        assert count_violations[0].severity == "warning"
+        assert count_violations[0].model_fixable is True
+        # Names the specific chapter the forced-prepend-triggered truncation dropped.
+        assert "Segment 5" in count_violations[0].message
+        assert "Segment 5" not in result.normalized_output
+        # The other 4 model-proposed chapters plus the forced "Episode intro"
+        # survive (5 total, at the cap).
+        for kept in ("Segment 1", "Segment 2", "Segment 3", "Segment 4"):
+            assert kept in result.normalized_output
+        assert "Episode intro" in result.normalized_output
 
     def test_boundary_unlisted_violation_for_off_candidate_chapter(self):
         rules = _timestamp_rules()

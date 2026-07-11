@@ -364,3 +364,113 @@ prompt_blocks:
       - **NEVER suppress content** — Do NOT silently drop lines containing mild language (e.g., "damned", "hell"), short interjections, or any other spoken content. ALL dialogue must be preserved verbatim. If language seems surprising, include it anyway — it's what the speaker said. Flag in review notes if concerned, but never omit.
 
       Lexical house-style substitutions (OK/partisan/Marquette Poll/program-name italics/honorific abbreviations/liberals-conservatives casing) are applied deterministically after generation — do not worry about them.
+  "timestamp.output_contract":
+    full: |
+      ### Required Output Format
+
+      ```markdown
+      # Timestamp Report
+
+      **Project:** {project_name}
+      **Duration:** {total_duration}
+
+      ---
+
+      ## Media Manager Format
+
+      Copy-paste this table into PBS Media Manager chapter fields:
+
+      | Title | Start Time | End Time |
+      |-------|------------|----------|
+      | Introduction | 0:00:00.000 | 0:02:29.999 |
+      | {Chapter 2 Title} | 0:02:30.000 | 0:08:14.999 |
+      | {Chapter 3 Title} | 0:08:15.000 | 0:15:44.999 |
+      | Closing | 0:22:30.000 | 0:28:15.000 |
+
+      ---
+
+      ## YouTube Format
+
+      Copy-paste these timestamps directly into your YouTube description:
+
+      0:00 Introduction
+      2:30 {Chapter 2 Title}
+      8:15 {Chapter 3 Title}
+      22:30 Closing
+
+      ---
+
+      ## Notes
+
+      - Timestamps derived from SRT timecodes
+      - End times are 1ms before the next chapter starts
+      - Verify against actual video content
+      ```
+
+      ### Chapter Count Targets (Maximum)
+
+      | Duration | Max chapters |
+      |----------|-------------|
+      | Under 5 min | 3 |
+      | 5-15 min | 5 |
+      | 15-30 min | 7 |
+      | 30-60 min | 8 |
+      | 60+ min | 10 |
+
+      Fewer chapters is almost always better. Only add a chapter when there's a genuinely distinct topic shift.
+
+      ### First Chapter Rule
+
+      The first chapter is always `0:00 Episode intro`. This encompasses all introductory material — host intros, guest intros, show branding, topic previews — so viewers can skip straight to the first substantive topic.
+
+      ### Time Format Specifications
+
+      **Media Manager format:**
+      - Use `H:MM:SS.000` with millisecond precision
+      - End times should be `.999` (1ms before next chapter)
+
+      **YouTube format:**
+      - Use `M:SS` for times under 1 hour
+      - Use `H:MM:SS` for times over 1 hour
+      - No leading zeros on hours/minutes
+      - No milliseconds
+
+      ## Quality Checklist
+
+      Before outputting, verify:
+      - [ ] First chapter is `0:00 Episode intro`
+      - [ ] Chapter count is within the maximum for the content duration
+      - [ ] Chapters are in chronological order
+      - [ ] No gaps between chapters (end time → next start time)
+      - [ ] Chapter titles use sentence case (only first word and proper nouns capitalized)
+      - [ ] Chapter titles are concise (2-6 words) and describe the topic, not the format
+      - [ ] Tone is neutral and professional (suitable for PBS descriptions)
+      - [ ] Both format tables are complete and match
+      - [ ] Total duration matches the video length
+      - [ ] All timestamps derived from SRT timecodes (not estimated from metadata)
+      - [ ] Final chapter end time matches the last SRT timestamp
+    slim: |
+      Output ONLY a fenced code block labeled `chapters` — no markdown tables, no prose before or after it. One chapter per line:
+
+      `<timecode> <title>`
+
+      - `<timecode>`: M:SS (or H:MM:SS for content past the one-hour mark). No milliseconds — the pipeline computes exact millisecond math for both published formats.
+      - `<title>`: 2-6 words, sentence case, naming the topic (not the format) in a neutral, professional tone — no generic names like "Discussion" or "Conclusion", and parallel framing for political content (symmetric descriptions across candidates/parties).
+      - Choose boundaries ONLY from the candidate list in the Style Rules section — never invent a boundary that isn't listed there.
+      - Produce at most the maximum chapter count stated in the Style Rules section for this content's duration.
+
+      Do not include the forced first chapter (`0:00 Episode intro`) yourself — the pipeline prepends it automatically. Do not compute end times, and do not render the Media Manager table or the YouTube list — the pipeline builds both deterministically from your chapter list. Sentence case is also enforced automatically after generation, so focus on picking the right words, not the capitalization.
+
+      Example:
+
+      ```chapters
+      2:30 Sports betting debate begins
+      8:15 Legislative response
+      22:30 Closing remarks
+      ```
+
+      Before outputting, verify:
+      - [ ] Output is ONLY the fenced `chapters` block — no extra text before or after it
+      - [ ] Every boundary you chose is from the candidate list
+      - [ ] Your chapter count is at most the stated maximum (not counting the forced first chapter)
+      - [ ] Titles are 2-6 words, sentence case, and name the topic

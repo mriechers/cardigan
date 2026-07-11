@@ -385,6 +385,9 @@ def _timestamp_rules(
 
 class TestRoundTripGoldenString:
     def test_parse_snap_emit_matches_golden_string_with_odd_config(self):
+        # No project_name passed -- proves task 4b's new keyword-only
+        # parameter is opt-in and this golden string (predating task 4b) is
+        # unaffected when the caller doesn't supply it.
         raw_output = HAPPY_CHAPTERS_BLOCK
         rules = _timestamp_rules(first_chapter_title="Cold open")
 
@@ -424,6 +427,81 @@ class TestRoundTripGoldenString:
         # to the odd configured title, so exactly one note is produced.
         assert len(notes) == 1
         assert "Cold open" in notes[0]
+
+    def test_parse_snap_emit_matches_golden_string_with_project_name(self):
+        """Same fixture as above, but with project_name supplied -- proves
+        the **Project:** line lands exactly where prompts/timestamp.md's
+        template puts it: directly above **Duration:**, no blank line
+        between them (task 4b)."""
+        raw_output = HAPPY_CHAPTERS_BLOCK
+        rules = _timestamp_rules(first_chapter_title="Cold open")
+
+        chapters = parse_chapter_list(raw_output)
+        assert chapters is not None
+        srt_end_ms = 600000
+        snapped, _ = snap_chapters(
+            chapters, srt_end_ms=srt_end_ms, max_chapters=rules.chapter_max(srt_end_ms / 60000), first_chapter_title="Cold open"
+        )
+        report = emit_timestamp_report(
+            snapped, srt_end_ms=srt_end_ms, rules=rules, project_name="Sports Betting Debate"
+        )
+
+        expected = (
+            "# Timestamp Report\n\n"
+            "**Project:** Sports Betting Debate\n"
+            "**Duration:** 10:00\n\n"
+            "---\n\n"
+            "## Media Manager Format\n\n"
+            "Copy-paste this table into PBS Media Manager chapter fields:\n\n"
+            "| Title | Start Time | End Time |\n"
+            "|-------|------------|----------|\n"
+            "| Cold open | 0:00:00.000 | 0:02:29.999 |\n"
+            "| Sports betting debate begins | 0:02:30.000 | 0:08:14.999 |\n"
+            "| Legislative response | 0:08:15.000 | 0:10:00.000 |\n\n"
+            "---\n\n"
+            "## YouTube Format\n\n"
+            "Copy-paste these timestamps directly into your YouTube description:\n\n"
+            "0:00 Cold open\n"
+            "2:30 Sports betting debate begins\n"
+            "8:15 Legislative response\n\n"
+            "---\n\n"
+            "## Notes\n\n"
+            "- No gaps between chapters -- each ends exactly where the next begins.\n"
+            "- Chapters are listed in chronological order.\n"
+            "- Final chapter end time matches the last SRT timestamp.\n"
+        )
+        assert report == expected
+
+
+class TestEmitTimestampReportProjectLine:
+    """Focused unit coverage for the project_name keyword-only parameter
+    added in task 4b, independent of the round-trip golden strings above."""
+
+    def test_project_line_included_when_provided(self):
+        chapters = [Chapter(title="Cold open", start_ms=0)]
+        rules = _timestamp_rules()
+        report = emit_timestamp_report(chapters, srt_end_ms=60000, rules=rules, project_name="Here & Now")
+        assert "**Project:** Here & Now\n**Duration:**" in report
+
+    def test_project_line_omitted_when_none(self):
+        chapters = [Chapter(title="Cold open", start_ms=0)]
+        rules = _timestamp_rules()
+        report = emit_timestamp_report(chapters, srt_end_ms=60000, rules=rules, project_name=None)
+        assert "**Project:**" not in report
+        assert report.startswith("# Timestamp Report\n\n**Duration:**")
+
+    def test_project_line_omitted_when_empty_string(self):
+        chapters = [Chapter(title="Cold open", start_ms=0)]
+        rules = _timestamp_rules()
+        report = emit_timestamp_report(chapters, srt_end_ms=60000, rules=rules, project_name="")
+        assert "**Project:**" not in report
+
+    def test_project_name_default_matches_call_without_the_kwarg_at_all(self):
+        chapters = [Chapter(title="Cold open", start_ms=0)]
+        rules = _timestamp_rules()
+        with_default = emit_timestamp_report(chapters, srt_end_ms=60000, rules=rules)
+        with_explicit_none = emit_timestamp_report(chapters, srt_end_ms=60000, rules=rules, project_name=None)
+        assert with_default == with_explicit_none
 
     def test_notes_section_omits_disabled_constraints(self):
         # Proves the Notes section is rendered from rules.constraints, not a
