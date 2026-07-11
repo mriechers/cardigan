@@ -156,6 +156,19 @@ limits:
 # Per-phase deterministic rules.
 # ------------------------------------------------------------------
 phases:
+  analyst:
+    # Required output-section headings, transcribed from prompts/analyst.md's
+    # "Brainstorming Document Structure" schema. Matched case-insensitively
+    # as a SUBSTRING of an actual markdown heading by post_stage's
+    # analyst.section_missing check -- "SEO Keywords" matches the doc's
+    # real "## SEO Keywords (Preliminary)" heading without needing the
+    # parenthetical spelled out here.
+    required_sections:
+      - Summary
+      - Key Themes
+      - Speakers & Roles
+      - Structural Breakdown
+      - SEO Keywords
   formatter:
     # Enforce-tier: deterministic find/replace, word-boundary regexes,
     # from prompts/formatter.md's "PBS Wisconsin House Style" section
@@ -260,6 +273,25 @@ programs:
 # check in tests/test_house_style_config.py that keeps them honest.
 # ------------------------------------------------------------------
 prompt_blocks:
+  "analyst.draft_guidance":
+    full: |
+      ## Metadata Suggestions
+
+      Draft placeholder metadata for the SEO agent to refine later. Use the exact limits
+      below — they are hard limits, not targets — and never fabricate a character count.
+
+      **Suggested Title (draft):**
+      [title ≤ 80 characters incorporating the primary keyword]
+
+      **Suggested Short Description (draft):**
+      [short description ≤ 90 characters summarizing content with a factual hook]
+
+      **Suggested Long Description (draft):**
+      [long description ≤ 350 characters with more detail, context, and keywords]
+
+      Aim for 15-20 total keywords across the SEO Keywords section above.
+    slim: |
+      Draft metadata guidance arrives in the Style Rules section — the pipeline verifies limits deterministically.
   "seo.copy_rules":
     full: |
       ## Copy style (REQUIRED)

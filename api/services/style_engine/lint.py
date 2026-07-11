@@ -436,7 +436,17 @@ def _check_truncation_suspect(
     return violations
 
 
-def _check_truncation_punctuation(raw_output: str, phase: str) -> list[RuleViolation]:
+def find_truncation_excerpt(raw_output: str) -> str | None:
+    """Shared last-prose-line truncation check, used by both this module's
+    formatter path and ``post_stage``'s ``analyst.truncation_suspect`` check.
+
+    Strips HTML comments, then walks non-blank lines skipping the
+    "**Status:**" footer and horizontal-rule lines to find the last visible
+    prose line. Returns ``None`` when that line ends in terminal punctuation
+    (or there is no prose at all -- nothing to flag), else a <=60-char
+    excerpt (tail-truncated with a leading "..." when longer) suitable for a
+    violation message.
+    """
     text = _HTML_COMMENT_RE.sub("", raw_output)
 
     last_prose: str | None = None
@@ -451,9 +461,16 @@ def _check_truncation_punctuation(raw_output: str, phase: str) -> list[RuleViola
         last_prose = stripped
 
     if last_prose is None or last_prose[-1] in _TERMINAL_PUNCT:
+        return None
+
+    return last_prose if len(last_prose) <= 60 else f"...{last_prose[-60:]}"
+
+
+def _check_truncation_punctuation(raw_output: str, phase: str) -> list[RuleViolation]:
+    excerpt = find_truncation_excerpt(raw_output)
+    if excerpt is None:
         return []
 
-    excerpt = last_prose if len(last_prose) <= 60 else f"...{last_prose[-60:]}"
     return [
         RuleViolation(
             rule_id="lint.formatter.truncation_suspect",

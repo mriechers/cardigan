@@ -12,10 +12,10 @@ computed from ``context``) at call time -- nothing here hard-codes a limit
 number or a forbidden-phrase list, so the section always reflects whatever
 ``config/house_style.yaml`` (or a caller's synthetic ``StyleRules``) says.
 
-The ``seo``, ``validator``, and ``formatter`` phases have behavior today;
-every other phase name degrades gracefully to an empty result so later tasks
-can register timestamp/etc. behind the same interface without touching this
-module's call sites.
+The ``seo``, ``validator``, ``formatter``, ``timestamp``, and ``analyst``
+phases have behavior today; every other phase name degrades gracefully to an
+empty result so later tasks can register more phases behind the same
+interface without touching this module's call sites.
 """
 
 from __future__ import annotations
@@ -53,6 +53,22 @@ _ROLE_LABELS: dict[str, str] = {
 }
 
 _MAX_EXAMPLES_PER_CATEGORY = 3
+
+
+def _char_budgets_from_limits(limits: Mapping[str, Any]) -> dict[str, int]:
+    """String-field character maxes from a ``rules.limits_for(...)`` result.
+
+    Filters to entries shaped like ``{"max": N}`` (title/short_description/
+    long_description) -- count-shaped entries like ``keywords`` (``{"count":
+    {"min": ..., "max": ...}}``) have no single ``"max"`` and are excluded.
+    Shared by the ``seo`` and ``analyst`` pre-stages so the filter logic
+    lives in exactly one place.
+    """
+    return {
+        field_name: limit["max"]
+        for field_name, limit in limits.items()
+        if isinstance(limit, dict) and "max" in limit
+    }
 
 
 def run_pre_stage(phase: str, context: Mapping[str, Any], rules: StyleRules) -> PreStageResult:
@@ -97,6 +113,20 @@ def run_pre_stage(phase: str, context: Mapping[str, Any], rules: StyleRules) -> 
     ``transcript_file``, unparseable transcript) degrades gracefully to an
     empty ``PreStageResult`` -- the timestamp phase only ever runs on SRTs.
 
+    For ``phase == "analyst"``, computes ``duration_minutes`` (exact, from
+    ``context["transcript_file"]``/``context["transcript"]`` via
+    ``utils.parse_srt``/``get_srt_duration`` when the file is an ``.srt``,
+    else ``context["duration_minutes"]`` when present), ``word_count`` (a
+    plain whitespace split of ``context["transcript"]``), ``project_name``
+    and ``transcript_file`` (passed through from ``context`` verbatim), and
+    ``char_budgets`` (the same string-field-max filtering ``seo`` uses, from
+    ``rules.limits_for(program, content_type)``). Renders a "## Style Rules
+    (authoritative)" section: a "Verified facts" line naming only the facts
+    actually available (never fabricates a missing one), a data-driven draft
+    metadata guidance line (title/short/long char maxes + the keyword count
+    range), and the same voice do-not list ``seo`` renders (reusing
+    ``_render_voice`` -- never duplicated).
+
     For any other phase (v1), returns
     ``PreStageResult(phase=phase, prompt_section="", data={})``.
     """
@@ -109,6 +139,9 @@ def run_pre_stage(phase: str, context: Mapping[str, Any], rules: StyleRules) -> 
     if phase == "timestamp":
         return _run_timestamp_pre_stage(context, rules)
 
+    if phase == "analyst":
+        return _run_analyst_pre_stage(context, rules)
+
     if phase != "seo":
         return PreStageResult(phase=phase, prompt_section="", data={})
 
@@ -120,11 +153,7 @@ def run_pre_stage(phase: str, context: Mapping[str, Any], rules: StyleRules) -> 
     proper_nouns = extract_proper_nouns(analyst_output, rules.surname_stoplist())
 
     limits = rules.limits_for(program, content_type)
-    char_budgets = {
-        field_name: limit["max"]
-        for field_name, limit in limits.items()
-        if isinstance(limit, dict) and "max" in limit
-    }
+    char_budgets = _char_budgets_from_limits(limits)
 
     transcript_lower = transcript.lower()
     keyword_candidates = [noun for noun in proper_nouns if noun.lower() in transcript_lower]
@@ -455,6 +484,127 @@ def _render_program_block(program: str | None, program_rules: dict) -> str:
     if verb_bits:
         line += " — " + "; ".join(verb_bits) + "."
     return line
+
+
+# ---------------------------------------------------------------------------
+# analyst phase
+# ---------------------------------------------------------------------------
+
+
+def _run_analyst_pre_stage(context: Mapping[str, Any], rules: StyleRules) -> PreStageResult:
+    transcript_file = context.get("transcript_file")
+    transcript = context.get("transcript") or ""
+
+    duration_minutes: float | None = None
+    if (transcript_file or "").lower().endswith(".srt") and transcript:
+        captions = parse_srt(transcript)
+        if captions:
+            duration_minutes = get_srt_duration(captions) / 60000
+    if duration_minutes is None:
+        context_duration = context.get("duration_minutes")
+        if context_duration is not None:
+            duration_minutes = context_duration
+
+    word_count = len(transcript.split())
+
+    program = context.get("program")
+    content_type = context.get("content_type") or "full"
+    limits = rules.limits_for(program, content_type)
+    char_budgets = _char_budgets_from_limits(limits)
+    keywords_limit = limits.get("keywords")
+    keywords_count = keywords_limit.get("count") if isinstance(keywords_limit, dict) else None
+
+    data = {
+        "duration_minutes": duration_minutes,
+        "word_count": word_count,
+        "project_name": context.get("project_name"),
+        "transcript_file": transcript_file,
+        "char_budgets": char_budgets,
+    }
+
+    prompt_section = _render_analyst_prompt_section(data, rules, keywords_count)
+
+    return PreStageResult(phase="analyst", prompt_section=prompt_section, data=data)
+
+
+def _render_analyst_prompt_section(
+    data: dict, rules: StyleRules, keywords_count: Mapping[str, Any] | None
+) -> str:
+    lines = [
+        "## Style Rules (authoritative)",
+        "",
+        "These values are computed and enforced by the pipeline — they override "
+        "anything else in this prompt.",
+        "",
+    ]
+
+    facts_line = _render_verified_facts(data)
+    if facts_line:
+        lines.append(facts_line)
+
+    guidance_line = _render_draft_metadata_guidance(data["char_budgets"], keywords_count)
+    if guidance_line:
+        lines.append(guidance_line)
+
+    lines.append(f"**Voice:** {_render_voice(rules)}")
+
+    return "\n".join(lines) + "\n"
+
+
+def _render_verified_facts(data: dict) -> str:
+    """Renders only the facts actually available -- never fabricates a
+    missing one. A zero word_count (empty/no transcript) is treated as
+    "not available" rather than a meaningful fact worth stating."""
+    parts = []
+
+    duration_minutes = data.get("duration_minutes")
+    if duration_minutes is not None:
+        parts.append(f"duration {duration_minutes:.1f} minutes")
+
+    word_count = data.get("word_count")
+    if word_count:
+        parts.append(f"transcript ~{word_count} words")
+
+    project_name = data.get("project_name")
+    if project_name:
+        parts.append(f"project {project_name}")
+
+    transcript_file = data.get("transcript_file")
+    if transcript_file:
+        parts.append(f"source file {transcript_file}")
+
+    if not parts:
+        return ""
+
+    return f"**Verified facts (computed from the source — never estimate these):** {'; '.join(parts)}."
+
+
+def _render_draft_metadata_guidance(char_budgets: dict, keywords_count: Mapping[str, Any] | None) -> str:
+    bits = []
+
+    title_max = char_budgets.get("title")
+    if title_max is not None:
+        bits.append(f"draft title ≤ {title_max} chars")
+
+    short_max = char_budgets.get("short_description")
+    if short_max is not None:
+        bits.append(f"draft short description ≤ {short_max}")
+
+    long_max = char_budgets.get("long_description")
+    if long_max is not None:
+        bits.append(f"draft long description ≤ {long_max}")
+
+    if keywords_count:
+        kw_min = keywords_count.get("min")
+        kw_max = keywords_count.get("max")
+        if kw_min is not None and kw_max is not None:
+            bits.append(f"{kw_min}-{kw_max} keywords")
+
+    if not bits:
+        return ""
+
+    bits[0] = bits[0][0].upper() + bits[0][1:]
+    return f"**Draft metadata guidance:** {'; '.join(bits)}."
 
 
 # ---------------------------------------------------------------------------

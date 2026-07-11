@@ -25,17 +25,18 @@ from api.services.style_engine.prompt_blocks import (
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
-# seo.md, validator.md, formatter.md, and timestamp.md are excluded here --
-# task 1c gave seo.md {{style:...}} tokens, task 2d gave validator.md its
-# own, task 3c gave formatter.md its own, and task 4b gave timestamp.md its
-# own. Each gets its own no-op-broken assertions + real-render tests below
-# instead.
-TOKEN_FREE_PROMPT_PHASES = ["analyst", "copy_editor"]
+# seo.md, validator.md, formatter.md, timestamp.md, and analyst.md are
+# excluded here -- task 1c gave seo.md {{style:...}} tokens, task 2d gave
+# validator.md its own, task 3c gave formatter.md its own, task 4b gave
+# timestamp.md its own, and task 5 gave analyst.md its own. Each gets its own
+# no-op-broken assertions + real-render tests below instead.
+TOKEN_FREE_PROMPT_PHASES = ["copy_editor"]
 
 SEO_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "seo.md"
 VALIDATOR_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "validator.md"
 FORMATTER_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "formatter.md"
 TIMESTAMP_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "timestamp.md"
+ANALYST_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "analyst.md"
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -541,6 +542,88 @@ def test_timestamp_prompt_naming_taste_guidance_survives_both_profiles() -> None
         assert "### Chapter Naming Guidelines" in rendered
         assert "Parallel framing for political content" in rendered
         assert "Avoid generic names" in rendered
+
+
+# ---------------------------------------------------------------------------
+# 7f. analyst.md: task 5 gave it a token -- prove it's present and renders
+# cleanly against the REAL config/house_style.yaml for both profiles.
+# ---------------------------------------------------------------------------
+
+
+def test_analyst_prompt_contains_expected_style_token() -> None:
+    content = ANALYST_PROMPT_PATH.read_text()
+    assert "{{style:analyst.draft_guidance}}" in content
+
+
+@pytest.mark.parametrize("profile", ["full", "slim"])
+def test_analyst_prompt_renders_against_real_config_for_both_profiles(profile: str) -> None:
+    content = ANALYST_PROMPT_PATH.read_text()
+
+    # Must not raise PromptBlockError for either profile against the REAL
+    # config/house_style.yaml -- proves analyst.draft_guidance has both a
+    # "full" and a "slim" entry.
+    rendered = render_prompt_blocks(content, profile=profile)
+
+    assert "{{style:" not in rendered
+
+
+def test_analyst_prompt_full_profile_renders_expected_draft_guidance_block() -> None:
+    """Golden assertions on the token-replaced region only (not the whole
+    prompt) -- keeps this test from being a brittle whole-file snapshot.
+    """
+    content = ANALYST_PROMPT_PATH.read_text()
+    rendered = render_prompt_blocks(content, profile="full")
+
+    assert "## Metadata Suggestions" in rendered
+    assert "**Suggested Title (draft):**" in rendered
+    assert "title ≤ 80 characters" in rendered
+    assert "short description ≤ 90 characters" in rendered
+    assert "long description ≤ 350 characters" in rendered
+    assert "15-20 total keywords" in rendered
+    assert "{{style:" not in rendered
+
+
+def test_analyst_prompt_slim_profile_renders_condensed_block() -> None:
+    content = ANALYST_PROMPT_PATH.read_text()
+    rendered = render_prompt_blocks(content, profile="slim")
+
+    assert (
+        "Draft metadata guidance arrives in the Style Rules section — the pipeline verifies "
+        "limits deterministically."
+    ) in rendered
+    # Proves slim actually swapped in -- the full-profile-only heading and
+    # bracketed placeholders must be absent.
+    assert "## Metadata Suggestions" not in rendered
+    assert "**Suggested Title (draft):**" not in rendered
+    assert "{{style:" not in rendered
+
+
+def test_analyst_prompt_no_stray_old_draft_ranges() -> None:
+    """The pre-transcription draft-metadata guidance quoted stale
+    60-70/100-150/250-300 char ranges and a 15-25 keyword range -- proves the
+    DECIDED single-limit correction (80/90/350, 15-20) landed and none of the
+    stale numbers survive anywhere in the rendered prompt, in either profile.
+    """
+    content = ANALYST_PROMPT_PATH.read_text()
+
+    for profile in ("full", "slim"):
+        rendered = render_prompt_blocks(content, profile=profile)
+        assert "60-70" not in rendered
+        assert "100-150" not in rendered
+        assert "250-300" not in rendered
+        assert "15-25" not in rendered
+
+
+def test_analyst_prompt_never_fabricate_names_rule_survives_both_profiles() -> None:
+    """task 5's brief: the never-fabricate-names rule (semantic, about live
+    captioning speaker attribution) is untouched by the placeholder-warning
+    boilerplate trim -- must survive under both profiles since it lives
+    outside the tokenized region entirely.
+    """
+    content = ANALYST_PROMPT_PATH.read_text()
+    for profile in ("full", "slim"):
+        rendered = render_prompt_blocks(content, profile=profile)
+        assert "NEVER fabricate proper names from garbled caption text" in rendered
 
 
 # ---------------------------------------------------------------------------

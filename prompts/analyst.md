@@ -65,7 +65,7 @@ OUTPUT/{project}/analyst_output.md
 
 ## Brainstorming Document Structure
 
-> ⚠️ **CRITICAL**: The header fields below use `{placeholders}`. You MUST replace these with ACTUAL VALUES from the transcript you're analyzing. NEVER output literal placeholder text like `{media_id}` or example values like `2WLI1234HD`. Use the real project name from the filename you received.
+> ⚠️ **CRITICAL**: The header fields below use `{placeholders}`. You MUST replace these with ACTUAL VALUES from the transcript you're analyzing. NEVER output literal placeholder text like `{media_id}` or example values like `2WLI1234HD`. The **Project** field is provided as a verified fact in the Style Rules section — copy it exactly, never guess it. **Program**, **Date Processed**, and **Model** are still yours to fill in from context.
 
 ```markdown
 # Brainstorming Document
@@ -137,7 +137,7 @@ OUTPUT/{project}/analyst_output.md
 - [subject-specific term]
 - [subject-specific term]
 
-[Generate 15-25 potential keywords. These will be refined by the SEO agent later.]
+[Generate 15-20 potential keywords. These will be refined by the SEO agent later.]
 
 ## Editorial Opportunities
 
@@ -146,16 +146,7 @@ OUTPUT/{project}/analyst_output.md
 - **Audience Appeal**: [Who will find this valuable?]
 - **Searchability**: [What are people likely searching for that this addresses?]
 
-## Metadata Suggestions
-
-**Suggested Title (draft):**
-[60-70 character title incorporating primary keyword]
-
-**Suggested Short Description (draft):**
-[100-150 characters summarizing content with hook]
-
-**Suggested Long Description (draft):**
-[250-300 characters with more detail, context, and keywords]
+{{style:analyst.draft_guidance}}
 
 ## Production Notes
 

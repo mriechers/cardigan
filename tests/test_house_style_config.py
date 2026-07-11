@@ -228,6 +228,44 @@ class TestPromptBlockNumbersMatchCharLimits:
         for number in matches:
             assert number == expected_max
 
+    @pytest.mark.parametrize("field", ["title", "short_description", "long_description"])
+    def test_analyst_draft_guidance_block_is_scanned_for_field(self, field):
+        """Explicit coverage guard for task 5's analyst.draft_guidance block --
+        mirrors test_validator_checklist_block_is_scanned_for_field so a
+        future edit that strips the numbers out of
+        analyst.draft_guidance.full fails loudly instead of the generic
+        parametrized test above just quietly finding fewer hits.
+        """
+        rules = load_rules(CONFIG_PATH)
+        prompt_blocks = rules.raw.get("prompt_blocks", {}) or {}
+        analyst_block = prompt_blocks.get("analyst.draft_guidance")
+        assert analyst_block is not None, "prompt_blocks.'analyst.draft_guidance' is missing from house_style.yaml"
+
+        full_text = analyst_block.get("full", "")
+        pattern = _PROMPT_BLOCK_FIELD_LIMIT_RE[field]
+        matches = [int(m.group(1)) for m in pattern.finditer(full_text)]
+
+        assert matches, f"analyst.draft_guidance.full does not quote a {field} character limit"
+        expected_max = rules.limits_for()[field]["max"]
+        for number in matches:
+            assert number == expected_max
+
+    def test_analyst_draft_guidance_keyword_count_matches_limits(self):
+        """The 15-20 keyword range quoted in analyst.draft_guidance.full must
+        match limits.fields.keywords.count -- the same DECIDED-value guard
+        as test_keyword_count_is_15_to_20_not_15_to_25, applied to this
+        block's prose specifically.
+        """
+        rules = load_rules(CONFIG_PATH)
+        prompt_blocks = rules.raw.get("prompt_blocks", {}) or {}
+        full_text = prompt_blocks.get("analyst.draft_guidance", {}).get("full", "")
+
+        expected = rules.limits_for()["keywords"]["count"]
+        expected_range = f"{expected['min']}-{expected['max']}"
+
+        assert f"{expected_range} total keywords" in full_text
+        assert "15-25" not in full_text
+
 
 class TestSmokeLevelCompleteness:
     """Non-empty smoke checks — the loader's accessors must return real
@@ -297,6 +335,25 @@ class TestSmokeLevelCompleteness:
         rules = load_rules(CONFIG_PATH)
         here_and_now = rules.program_rules("Here & Now")
         assert here_and_now["short_description_formula"] == "{role} {verb} {subject}."
+
+    def test_analyst_required_sections_loadable_and_non_empty(self):
+        """task 5: phases.analyst.required_sections backs
+        post_stage's analyst.section_missing check -- must be loadable from
+        the real config and match the headings actually named in
+        prompts/analyst.md's output schema.
+        """
+        rules = load_rules(CONFIG_PATH)
+        analyst_cfg = rules.raw.get("phases", {}).get("analyst", {})
+        required_sections = analyst_cfg.get("required_sections")
+
+        assert required_sections, "phases.analyst.required_sections is missing or empty"
+        assert required_sections == [
+            "Summary",
+            "Key Themes",
+            "Speakers & Roles",
+            "Structural Breakdown",
+            "SEO Keywords",
+        ]
 
 
 def _real_casing_variants() -> dict[str, str]:

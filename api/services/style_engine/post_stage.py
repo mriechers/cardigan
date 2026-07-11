@@ -53,12 +53,28 @@ checking the raw count alone under-reports the case where an at-or-under-cap
 raw count is pushed over the line by the forced 0:00 first-chapter prepend
 (see ``_run_timestamp_post_stage``).
 
-``seo``, ``formatter``, and ``timestamp`` phases have behavior today; every
-other phase name degrades gracefully to a ``skipped=True`` passthrough. This
-module never raises on malformed model output (a bad ``raw_output`` yields
-``parse_ok=False``, not an exception) -- it may only propagate genuine
-programming errors, which is by design the worker's fail-open catch's job,
-not this module's.
+For ``analyst``, there is no enforce tier at all -- ``normalized_output`` is
+always byte-identical to ``raw_output`` and ``changed`` is always ``False``.
+The analyst's brainstorming document is free-form prose (not a structured
+metadata/transcript contract like ``seo``/``formatter``/``timestamp``), so
+this phase is flag-only: ``analyst.section_missing`` (a required output
+heading, from ``phases.analyst.required_sections``, is absent -- matched
+case-insensitively as a substring of an actual markdown heading, so "SEO
+Keywords" matches the real "## SEO Keywords (Preliminary)" heading),
+``analyst.speaker_table_unparseable`` (:func:`entities.extract_proper_nouns`
+found no names in a substantial (>50-word) output -- the formatter and seo
+pre-stages both depend on that table), and ``analyst.truncation_suspect``
+(the last prose line lacks terminal punctuation, reusing
+:func:`lint.find_truncation_excerpt` -- the exact same detection the
+formatter phase's ``lint.formatter.truncation_suspect`` check uses, never
+duplicated).
+
+``seo``, ``formatter``, ``timestamp``, and ``analyst`` phases have behavior
+today; every other phase name degrades gracefully to a ``skipped=True``
+passthrough. This module never raises on malformed model output (a bad
+``raw_output`` yields ``parse_ok=False``, not an exception) -- it may only
+propagate genuine programming errors, which is by design the worker's
+fail-open catch's job, not this module's.
 """
 
 from __future__ import annotations
@@ -71,6 +87,7 @@ from api.services.completeness import count_content_words
 from api.services.style_engine.casing import build_canonical, to_down_style
 from api.services.style_engine.entities import extract_proper_nouns
 from api.services.style_engine.limits import check_field_limits
+from api.services.style_engine.lint import find_truncation_excerpt
 from api.services.style_engine.phase_io import (
     emit_timestamp_report,
     extract_seo_fields,
@@ -125,6 +142,12 @@ def run_post_stage(
     ``style_pre`` cache), casing-normalizes each title, then rebuilds the
     entire ``timestamp_output.md`` body via ``phase_io.emit_timestamp_report``.
 
+    For ``phase == "analyst"``: flag-only, never rewrites. Runs the three
+    checks described in the module docstring (section_missing,
+    speaker_table_unparseable, truncation_suspect) over ``raw_output``
+    verbatim. ``normalized_output`` is always ``raw_output`` and ``changed``
+    is always ``False``.
+
     For any other phase (v1): passthrough, ``changed=False``,
     ``PhaseCheckResult(phase=phase, skipped=True)``.
     """
@@ -133,6 +156,9 @@ def run_post_stage(
 
     if phase == "timestamp":
         return _run_timestamp_post_stage(raw_output, context, rules)
+
+    if phase == "analyst":
+        return _run_analyst_post_stage(raw_output, rules)
 
     if phase != "seo":
         return PostStageResult(
@@ -296,6 +322,119 @@ def _check_flag_tier_substitutions(text: str, flag_substitutions: list[dict], ph
             )
         )
     return violations
+
+
+# ---------------------------------------------------------------------------
+# analyst phase
+# ---------------------------------------------------------------------------
+
+# ">50 words" -- below this the output is too thin for a missing speaker
+# table to mean anything (lint.py's lint.output_missing already catches
+# genuinely empty/near-empty phase output at a 50-*character* floor; this is
+# a separate, word-count-based floor scoped to this one check).
+_ANALYST_SPEAKER_CHECK_MIN_WORDS = 50
+
+_ANALYST_HEADING_RE = re.compile(r"^#{1,6}[ \t]+(.+?)[ \t]*$", re.MULTILINE)
+
+
+def _run_analyst_post_stage(raw_output: str, rules: StyleRules) -> PostStageResult:
+    """Flag-only: never rewrites ``raw_output`` (``changed`` is always
+    ``False``). See the module docstring for the three checks."""
+    phase = "analyst"
+
+    analyst_cfg = (rules.raw.get("phases", {}) or {}).get("analyst", {}) or {}
+    required_sections = list(analyst_cfg.get("required_sections") or [])
+
+    violations: list[RuleViolation] = []
+    violations += _check_analyst_required_sections(raw_output, required_sections, phase)
+    violations += _check_analyst_speaker_table(raw_output, rules, phase)
+    violations += _check_analyst_truncation(raw_output, phase)
+
+    check = PhaseCheckResult(phase=phase, violations=violations, fixes=[], parse_ok=True)
+    return PostStageResult(phase=phase, normalized_output=raw_output, changed=False, check=check)
+
+
+def _analyst_headings(raw_output: str) -> list[str]:
+    return [match.group(1).strip() for match in _ANALYST_HEADING_RE.finditer(raw_output)]
+
+
+def _check_analyst_required_sections(
+    raw_output: str, required_sections: list[str], phase: str
+) -> list[RuleViolation]:
+    """``analyst.section_missing`` -- a required heading (data-driven, from
+    ``phases.analyst.required_sections``) is absent. Matched
+    case-insensitively as a SUBSTRING of an actual markdown heading, so a
+    required name of "SEO Keywords" matches the real analyst output heading
+    "## SEO Keywords (Preliminary)" without the parenthetical needing to be
+    spelled out in the rule data."""
+    if not required_sections:
+        return []
+
+    headings_lower = [heading.lower() for heading in _analyst_headings(raw_output)]
+
+    violations: list[RuleViolation] = []
+    for section in required_sections:
+        section_lower = section.lower()
+        if any(section_lower in heading for heading in headings_lower):
+            continue
+        violations.append(
+            RuleViolation(
+                rule_id="analyst.section_missing",
+                phase=phase,
+                severity="warning",
+                message=f'Required section heading "{section}" not found in analyst output',
+                model_fixable=True,
+            )
+        )
+    return violations
+
+
+def _check_analyst_speaker_table(raw_output: str, rules: StyleRules, phase: str) -> list[RuleViolation]:
+    """``analyst.speaker_table_unparseable`` -- :func:`extract_proper_nouns`
+    found no names even though the output is substantial (>50 words). The
+    formatter and seo pre-stages both source their authoritative proper-noun
+    list from this same extraction, so an unparseable table here silently
+    degrades two downstream phases."""
+    if len(raw_output.split()) <= _ANALYST_SPEAKER_CHECK_MIN_WORDS:
+        return []
+
+    if extract_proper_nouns(raw_output, rules.surname_stoplist()):
+        return []
+
+    return [
+        RuleViolation(
+            rule_id="analyst.speaker_table_unparseable",
+            phase=phase,
+            severity="warning",
+            message=(
+                "Could not extract any proper nouns from a Speakers & Roles table in analyst "
+                "output, even though the output is substantial -- the formatter and seo "
+                "pre-stages depend on this table for authoritative name casing"
+            ),
+            model_fixable=True,
+        )
+    ]
+
+
+def _check_analyst_truncation(raw_output: str, phase: str) -> list[RuleViolation]:
+    """``analyst.truncation_suspect`` -- not model-fixable (same rationale as
+    ``lint.formatter.truncation_suspect``: a mid-sentence cutoff needs a
+    fresh generation, not a targeted textual fix). Reuses
+    :func:`lint.find_truncation_excerpt` rather than duplicating the
+    last-prose-line detection."""
+    excerpt = find_truncation_excerpt(raw_output)
+    if excerpt is None:
+        return []
+
+    return [
+        RuleViolation(
+            rule_id="analyst.truncation_suspect",
+            phase=phase,
+            severity="warning",
+            message=f'Last line lacks terminal punctuation, possible mid-sentence cutoff: "{excerpt}"',
+            model_fixable=False,
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------

@@ -1640,3 +1640,424 @@ class TestPostStageTimestampEndToEnd:
         assert title_fixes[0].before == "THE BUDGET DEBATE BEGINS NOW TODAY"
         assert title_fixes[0].after != title_fixes[0].before
         assert "the budget debate" in title_fixes[0].after.lower()
+
+
+# ---------------------------------------------------------------------------
+# run_pre_stage / run_post_stage -- analyst phase (task 5, the last per-phase
+# stage). Pre-stage computes verified source facts (never estimated) + a
+# data-driven draft-metadata-guidance line + the shared voice do-not list.
+# Post-stage is flag-only -- no enforce tier at all, normalized_output is
+# always byte-identical to raw_output and changed is always False.
+# ---------------------------------------------------------------------------
+
+_DEFAULT_ANALYST_REQUIRED_SECTIONS = [
+    "Summary",
+    "Key Themes",
+    "Speakers & Roles",
+    "Structural Breakdown",
+    "SEO Keywords",
+]
+
+
+def _analyst_rules(
+    title_max: int = 80,
+    short_max: int = 90,
+    long_max: int = 350,
+    keywords_count: dict | None = None,
+    required_sections: list[str] | None = None,
+    content_type_overrides: dict | None = None,
+) -> StyleRules:
+    raw = {
+        "meta": {"version": 1},
+        "voice": {
+            "forbidden_phrases": [
+                {"match": "watch as", "category": "viewer_directive", "severity": "error"},
+                {"match": "amazing", "category": "superlative", "severity": "error"},
+                {"match": "join us", "category": "cta", "severity": "error"},
+            ],
+            "first_person_markers": [r"\bwe\b", r"\bour\b"],
+            "second_person_markers": [r"\byou\b"],
+        },
+        "casing": {
+            "style": "down",
+            "proper_nouns": ["Wisconsin"],
+            "acronyms": ["PBS"],
+            "casing_variants": {},
+            "surname_stoplist": ["van", "der", "de", "la", "the"],
+        },
+        "limits": {
+            "fields": {
+                "title": {"max": title_max},
+                "short_description": {"max": short_max},
+                "long_description": {"max": long_max},
+                "keywords": {"count": keywords_count or {"min": 15, "max": 20}},
+            },
+            "content_type_overrides": content_type_overrides or {},
+        },
+        "phases": {
+            "analyst": {
+                "required_sections": (
+                    _DEFAULT_ANALYST_REQUIRED_SECTIONS if required_sections is None else required_sections
+                )
+            }
+        },
+        "programs": {},
+    }
+    return StyleRules(raw=raw)
+
+
+ANALYST_SPEAKER_SRT = _build_srt(
+    [
+        (0, 3000, "Welcome to the show today."),
+        (6000, 30000, ">> Nick Hoffman: Let's talk about the state budget."),
+        (498000, 600000, "Thanks for watching, we'll see you next time."),
+    ]
+)
+
+
+def _analyst_context(**overrides) -> dict:
+    context = {
+        "transcript_file": "2WLI1234HD.srt",
+        "transcript": ANALYST_SPEAKER_SRT,
+        "project_name": "2WLI1234HD",
+    }
+    context.update(overrides)
+    return context
+
+
+def _analyst_document(
+    *,
+    include_summary: bool = True,
+    include_themes: bool = True,
+    include_speakers: bool = True,
+    include_structure: bool = True,
+    include_seo_keywords: bool = True,
+    trailing: str = "This document ends cleanly.",
+) -> str:
+    parts = []
+    if include_summary:
+        parts.append("## Summary\n\nAn overview of the episode content and its main narrative arc.")
+    if include_themes:
+        parts.append("## Key Themes\n\n1. **Budget**: discussion of the state budget.")
+    if include_speakers:
+        parts.append(
+            "## Speakers & Roles\n\n"
+            "| Speaker | Role/Title | Context | First Appearance |\n"
+            "|---|---|---|---|\n"
+            "| Nick Hoffman | Host | Budget debate | 1:20 |"
+        )
+    if include_structure:
+        parts.append("## Structural Breakdown\n\n### Act 1: Introduction (0:00 - 1:00)\n- Intro material.")
+    if include_seo_keywords:
+        parts.append("## SEO Keywords (Preliminary)\n\n**Primary:** budget")
+    if trailing:
+        parts.append(trailing)
+    return "\n\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# run_pre_stage -- analyst phase: data
+# ---------------------------------------------------------------------------
+
+
+class TestPreStageAnalystData:
+    def test_duration_minutes_exact_from_srt(self):
+        rules = _analyst_rules()
+        result = run_pre_stage("analyst", _analyst_context(), rules)
+        assert result.phase == "analyst"
+        assert result.data["duration_minutes"] == 600000 / 60000
+
+    def test_word_count_whitespace_split_of_transcript(self):
+        rules = _analyst_rules()
+        result = run_pre_stage("analyst", {"transcript": "one two three four five"}, rules)
+        assert result.data["word_count"] == 5
+
+    def test_project_name_and_transcript_file_pass_through(self):
+        rules = _analyst_rules()
+        result = run_pre_stage(
+            "analyst", {"project_name": "2WLI9999HD", "transcript_file": "2WLI9999HD.srt"}, rules
+        )
+        assert result.data["project_name"] == "2WLI9999HD"
+        assert result.data["transcript_file"] == "2WLI9999HD.srt"
+
+    def test_char_budgets_from_rules_limits(self):
+        rules = _analyst_rules(title_max=42, short_max=17, long_max=99)
+        result = run_pre_stage("analyst", {}, rules)
+        assert result.data["char_budgets"] == {"title": 42, "short_description": 17, "long_description": 99}
+
+    def test_char_budgets_excludes_keyword_count(self):
+        # keywords is count-shaped (min/max), not max-shaped -- must never
+        # leak into char_budgets (which is string-field maxes only).
+        rules = _analyst_rules()
+        result = run_pre_stage("analyst", {}, rules)
+        assert "keywords" not in result.data["char_budgets"]
+
+    def test_char_budgets_reflect_content_type_override(self):
+        # Proves char_budgets is computed from rules.limits_for(program,
+        # content_type), not hardcoded -- an odd override collapses title to 5.
+        rules = _analyst_rules(content_type_overrides={"short": {"title": {"max": 5}}})
+        result = run_pre_stage("analyst", {"content_type": "short"}, rules)
+        assert result.data["char_budgets"]["title"] == 5
+
+
+# ---------------------------------------------------------------------------
+# run_pre_stage -- analyst phase: graceful degradation
+# ---------------------------------------------------------------------------
+
+
+class TestPreStageAnalystGraceful:
+    def test_empty_context_does_not_raise(self):
+        rules = _analyst_rules()
+        result = run_pre_stage("analyst", {}, rules)
+        assert result.phase == "analyst"
+        assert result.data["duration_minutes"] is None
+        assert result.data["word_count"] == 0
+        assert result.data["project_name"] is None
+        assert result.data["transcript_file"] is None
+        assert result.prompt_section  # still renders (Voice line always present)
+
+    def test_non_srt_transcript_file_falls_back_to_context_duration(self):
+        rules = _analyst_rules()
+        result = run_pre_stage(
+            "analyst",
+            {"transcript_file": "episode.txt", "transcript": "plain text", "duration_minutes": 12.5},
+            rules,
+        )
+        assert result.data["duration_minutes"] == 12.5
+
+    def test_srt_file_unparseable_content_falls_back_to_context_duration(self):
+        rules = _analyst_rules()
+        result = run_pre_stage(
+            "analyst",
+            {"transcript_file": "episode.srt", "transcript": "not real srt content", "duration_minutes": 9.0},
+            rules,
+        )
+        assert result.data["duration_minutes"] == 9.0
+
+    def test_no_duration_source_at_all_is_none(self):
+        rules = _analyst_rules()
+        result = run_pre_stage("analyst", {"transcript_file": "episode.txt", "transcript": "plain text"}, rules)
+        assert result.data["duration_minutes"] is None
+
+    def test_no_limits_in_rules_yields_empty_char_budgets_and_still_renders(self):
+        rules = StyleRules(raw={"meta": {"version": 1}})
+        result = run_pre_stage("analyst", {}, rules)
+        assert result.data["char_budgets"] == {}
+        assert result.prompt_section  # Voice line still renders ("(none)")
+
+
+# ---------------------------------------------------------------------------
+# run_pre_stage -- analyst phase: prompt section rendering
+# ---------------------------------------------------------------------------
+
+
+class TestPreStageAnalystPromptSection:
+    def test_section_header_present(self):
+        rules = _analyst_rules()
+        result = run_pre_stage("analyst", {}, rules)
+        assert "## Style Rules (authoritative)" in result.prompt_section
+
+    def test_verified_facts_line_includes_all_available_facts(self):
+        rules = _analyst_rules()
+        result = run_pre_stage("analyst", _analyst_context(), rules)
+        assert "Verified facts" in result.prompt_section
+        assert "never estimate these" in result.prompt_section
+        assert "duration 10.0 minutes" in result.prompt_section
+        assert "transcript ~" in result.prompt_section
+        assert "project 2WLI1234HD" in result.prompt_section
+        assert "source file 2WLI1234HD.srt" in result.prompt_section
+
+    def test_verified_facts_omits_missing_duration_gracefully(self):
+        rules = _analyst_rules()
+        result = run_pre_stage("analyst", {"project_name": "2WLI0001HD"}, rules)
+        facts_line = next(line for line in result.prompt_section.splitlines() if "Verified facts" in line)
+        assert "duration" not in facts_line
+        assert "project 2WLI0001HD" in facts_line
+
+    def test_verified_facts_line_absent_when_nothing_available(self):
+        rules = _analyst_rules()
+        result = run_pre_stage("analyst", {}, rules)
+        assert "Verified facts" not in result.prompt_section
+
+    def test_zero_word_transcript_omits_word_count_fact(self):
+        rules = _analyst_rules()
+        result = run_pre_stage("analyst", {"project_name": "X"}, rules)
+        facts_line = next(line for line in result.prompt_section.splitlines() if "Verified facts" in line)
+        assert "words" not in facts_line
+
+    def test_draft_metadata_guidance_data_driven_not_hardcoded(self):
+        # Odd values must show up verbatim, proving the numbers are read
+        # from rules, never hardcoded prose (mirrors the formatter pattern).
+        rules = _analyst_rules(title_max=42, short_max=17, long_max=99, keywords_count={"min": 3, "max": 7})
+        result = run_pre_stage("analyst", {}, rules)
+        assert "Draft title ≤ 42 chars" in result.prompt_section
+        assert "draft short description ≤ 17" in result.prompt_section
+        assert "draft long description ≤ 99" in result.prompt_section
+        assert "3-7 keywords" in result.prompt_section
+
+    def test_draft_metadata_guidance_real_config_values(self):
+        rules = _analyst_rules()
+        result = run_pre_stage("analyst", {}, rules)
+        assert "Draft metadata guidance" in result.prompt_section
+        assert "Draft title ≤ 80 chars" in result.prompt_section
+        assert "draft short description ≤ 90" in result.prompt_section
+        assert "draft long description ≤ 350" in result.prompt_section
+        assert "15-20 keywords" in result.prompt_section
+
+    def test_voice_do_not_list_present_and_reuses_seo_rendering(self):
+        rules = _analyst_rules()
+        result = run_pre_stage("analyst", {}, rules)
+        seo_result = run_pre_stage("seo", {}, rules)
+        assert "**Voice:**" in result.prompt_section
+        # Same rendering helper -- the "Never use: ..." clause is identical
+        # text in both phases' rendered sections.
+        analyst_voice_line = next(line for line in result.prompt_section.splitlines() if line.startswith("**Voice:**"))
+        seo_voice_line = next(line for line in seo_result.prompt_section.splitlines() if line.startswith("**Voice:**"))
+        assert analyst_voice_line == seo_voice_line
+
+
+# ---------------------------------------------------------------------------
+# run_post_stage -- analyst phase: analyst.section_missing
+# ---------------------------------------------------------------------------
+
+
+class TestPostStageAnalystSectionMissing:
+    def test_all_required_sections_present_no_violation(self):
+        rules = _analyst_rules()
+        raw_output = _analyst_document()
+        result = run_post_stage("analyst", raw_output, {}, rules)
+        assert [v for v in result.check.violations if v.rule_id == "analyst.section_missing"] == []
+
+    def test_missing_section_flagged(self):
+        rules = _analyst_rules()
+        raw_output = _analyst_document(include_themes=False)
+        result = run_post_stage("analyst", raw_output, {}, rules)
+        missing = [v for v in result.check.violations if v.rule_id == "analyst.section_missing"]
+        assert len(missing) == 1
+        assert "Key Themes" in missing[0].message
+        assert missing[0].severity == "warning"
+        assert missing[0].model_fixable is True
+
+    def test_multiple_missing_sections_each_flagged(self):
+        rules = _analyst_rules()
+        raw_output = _analyst_document(include_themes=False, include_structure=False)
+        result = run_post_stage("analyst", raw_output, {}, rules)
+        missing_ids = {v.rule_id for v in result.check.violations if v.rule_id == "analyst.section_missing"}
+        assert missing_ids == {"analyst.section_missing"}
+        messages = [v.message for v in result.check.violations if v.rule_id == "analyst.section_missing"]
+        assert any("Key Themes" in m for m in messages)
+        assert any("Structural Breakdown" in m for m in messages)
+
+    def test_heading_match_is_case_insensitive(self):
+        rules = _analyst_rules()
+        raw_output = _analyst_document(include_themes=False) + "\n\n## key THEMES\n\nlowercase heading variant."
+        result = run_post_stage("analyst", raw_output, {}, rules)
+        assert [v for v in result.check.violations if v.rule_id == "analyst.section_missing"] == []
+
+    def test_seo_keywords_heading_matches_real_parenthetical_variant(self):
+        # The real analyst.md heading is "## SEO Keywords (Preliminary)" --
+        # the required_sections entry is just "SEO Keywords" (substring match).
+        rules = _analyst_rules()
+        raw_output = _analyst_document(include_seo_keywords=False) + "\n\n## SEO Keywords (Preliminary)\n\nkeywords here."
+        result = run_post_stage("analyst", raw_output, {}, rules)
+        assert [v for v in result.check.violations if v.rule_id == "analyst.section_missing"] == []
+
+    def test_no_required_sections_configured_skips_check(self):
+        rules = _analyst_rules(required_sections=[])
+        raw_output = "## Only One Heading\n\nnot much else."
+        result = run_post_stage("analyst", raw_output, {}, rules)
+        assert [v for v in result.check.violations if v.rule_id == "analyst.section_missing"] == []
+
+
+# ---------------------------------------------------------------------------
+# run_post_stage -- analyst phase: analyst.speaker_table_unparseable
+# ---------------------------------------------------------------------------
+
+
+class TestPostStageAnalystSpeakerTable:
+    def test_substantial_output_without_names_flagged(self):
+        rules = _analyst_rules()
+        raw_output = "## Summary\n\n" + ("word " * 60) + "no names anywhere in this document at all."
+        result = run_post_stage("analyst", raw_output, {}, rules)
+        unparseable = [v for v in result.check.violations if v.rule_id == "analyst.speaker_table_unparseable"]
+        assert len(unparseable) == 1
+        assert unparseable[0].severity == "warning"
+        assert unparseable[0].model_fixable is True
+
+    def test_substantial_output_with_names_not_flagged(self):
+        rules = _analyst_rules()
+        raw_output = _analyst_document(trailing="word " * 60 + "with a clean ending.")
+        result = run_post_stage("analyst", raw_output, {}, rules)
+        assert [v for v in result.check.violations if v.rule_id == "analyst.speaker_table_unparseable"] == []
+
+    def test_short_output_without_names_not_flagged(self):
+        # <=50 words: too thin for the missing-table signal to mean anything.
+        rules = _analyst_rules()
+        raw_output = "## Summary\n\nA short document with no speaker table."
+        assert len(raw_output.split()) <= 50
+        result = run_post_stage("analyst", raw_output, {}, rules)
+        assert [v for v in result.check.violations if v.rule_id == "analyst.speaker_table_unparseable"] == []
+
+
+# ---------------------------------------------------------------------------
+# run_post_stage -- analyst phase: analyst.truncation_suspect
+# ---------------------------------------------------------------------------
+
+
+class TestPostStageAnalystTruncation:
+    def test_missing_terminal_punctuation_flagged_not_model_fixable(self):
+        rules = _analyst_rules()
+        raw_output = _analyst_document(trailing="This line just trails off without")
+        result = run_post_stage("analyst", raw_output, {}, rules)
+        truncated = [v for v in result.check.violations if v.rule_id == "analyst.truncation_suspect"]
+        assert len(truncated) == 1
+        assert truncated[0].severity == "warning"
+        assert truncated[0].model_fixable is False
+
+    def test_clean_terminal_punctuation_not_flagged(self):
+        rules = _analyst_rules()
+        raw_output = _analyst_document(trailing="This document ends with a clean sentence.")
+        result = run_post_stage("analyst", raw_output, {}, rules)
+        assert [v for v in result.check.violations if v.rule_id == "analyst.truncation_suspect"] == []
+
+    def test_shares_detection_with_lint_formatter_truncation_check(self):
+        # Same excerpt-producing logic as lint.py's formatter path --
+        # not duplicated, just reused with a different rule_id/model_fixable.
+        from api.services.style_engine.lint import find_truncation_excerpt
+
+        raw_output = _analyst_document(trailing="This line just trails off without")
+        assert find_truncation_excerpt(raw_output) is not None
+
+
+# ---------------------------------------------------------------------------
+# run_post_stage -- analyst phase: never rewrites
+# ---------------------------------------------------------------------------
+
+
+class TestPostStageAnalystNeverRewrites:
+    def test_changed_always_false_even_with_violations(self):
+        rules = _analyst_rules()
+        raw_output = "## Summary\n\n" + ("word " * 60) + "no names and no ending punctuation"
+        result = run_post_stage("analyst", raw_output, {}, rules)
+        assert result.check.violations  # sanity: violations did fire
+        assert result.changed is False
+        assert result.normalized_output == raw_output
+
+    def test_changed_always_false_on_clean_output(self):
+        rules = _analyst_rules()
+        raw_output = _analyst_document()
+        result = run_post_stage("analyst", raw_output, {}, rules)
+        assert result.changed is False
+        assert result.normalized_output == raw_output
+
+    def test_parse_ok_always_true(self):
+        rules = _analyst_rules()
+        result = run_post_stage("analyst", "", {}, rules)
+        assert result.check.parse_ok is True
+        assert result.check.skipped is False
+
+    def test_empty_output_does_not_raise(self):
+        rules = _analyst_rules()
+        result = run_post_stage("analyst", "", {}, rules)
+        assert result.normalized_output == ""
+        assert result.changed is False
