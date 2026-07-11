@@ -21,8 +21,10 @@ violations so the merged QA verdict reflects them.
 Every numeric limit is read from ``StyleRules`` (via
 ``limits.check_field_limits``/``rules.limits_for``) at call time, never
 hard-coded, so this module tracks whatever ``config/house_style.yaml`` (or a
-caller's synthetic ``StyleRules``) says even though the character counts
-quoted in ``prompts/validator.md`` itself are stale.
+caller's synthetic ``StyleRules``) says. ``prompts/validator.md`` no longer
+quotes its own copies of these counts -- it pulls them via a
+``{{style:validator.checklist}}`` token rendered from the same YAML, so there
+is nothing left to drift.
 """
 
 from __future__ import annotations

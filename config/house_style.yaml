@@ -118,12 +118,17 @@ casing:
     - Stockbridge-Munsee
     - Anishinaabe
     # Months & days (proper nouns in English; absent from seed → down-styled
-    # titles lowercased "August" in stage-0 baselines)
+    # titles lowercased "August" in stage-0 baselines).
+    # "May" and "March" are deliberately excluded: they're ambiguous English
+    # homographs (the modal verb "may" / the common noun "a march") as well
+    # as month names, and the casing engine restores canonical case on every
+    # match with no surrounding-context awareness -- seeding them corrupts
+    # any sentence using the non-month sense (e.g. "what the ruling may mean
+    # for a march to the Capitol"). See
+    # tests/test_house_style_config.py::TestCasingSeedExcludesAmbiguousMonths.
     - January
     - February
-    - March
     - April
-    - May
     - June
     - July
     - August
@@ -165,9 +170,11 @@ casing:
 
 # ------------------------------------------------------------------
 # Field character/count limits. SINGLE numbers, sourced from
-# mcp_server/server.py:100-109 WRITABLE_FIELDS (ground truth) — NOT
-# the seo.md prompt's 150/300 or the validator.md prompt's 160, which
-# are stale and superseded by this file. See drift test.
+# mcp_server/server.py:100-109 WRITABLE_FIELDS (ground truth). The
+# seo.md and validator.md prompts no longer hardcode their own copies of
+# these numbers -- both now pull them via {{style:*}} tokens rendered
+# from this file (see prompt_blocks below), so this is the only place
+# the limits are authored. See drift test.
 # ------------------------------------------------------------------
 limits:
   fields:

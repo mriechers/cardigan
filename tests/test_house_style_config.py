@@ -417,6 +417,36 @@ class TestCasingVariantsIdempotenceAgainstRealConfig:
         assert to_down_style(f"{key} follows", canonical) == to_down_style(f"{value} follows", canonical)
 
 
+class TestCasingSeedExcludesAmbiguousMonths:
+    """Regression guard for the May/March casing-seed bug caught by the
+    final whole-branch review: seeding "May" and "March" into
+    casing.proper_nouns corrupted title casing on ordinary sentences,
+    because the down-style engine restores canonical case on every match
+    with no surrounding-context awareness -- it can't distinguish "May"
+    the month from "may" the modal verb, or "March" the month from "march"
+    the common noun (as in "a march to the Capitol"). See the comment in
+    config/house_style.yaml above the months block in casing.proper_nouns.
+    """
+
+    def test_may_and_march_are_not_in_proper_noun_seed(self):
+        rules = load_rules(CONFIG_PATH)
+        proper_nouns = set(rules.raw.get("casing", {}).get("proper_nouns", []) or [])
+        assert "May" not in proper_nouns
+        assert "March" not in proper_nouns
+
+    def test_ambiguous_sentence_down_styles_without_corrupting_may_and_march(self):
+        """Real-config repro of the reviewer-found bug: down-styling this
+        exact sentence must leave "may" and "march" lowercase (they're a
+        modal verb and a common noun here, not the month) while still
+        correctly restoring "August" and "Capitol" to canonical case.
+        """
+        rules = load_rules(CONFIG_PATH)
+        canonical = build_canonical(rules)
+        sentence = "What the ruling may mean for a march to the Capitol in august"
+        result = to_down_style(sentence, canonical)
+        assert result == "What the ruling may mean for a march to the Capitol in August"
+
+
 class TestFallbackCharLimitsMatchYaml:
     """Task 6a: guards mcp_server.server._FALLBACK_CHAR_LIMITS — the
     hardcoded safety net WRITABLE_FIELDS falls back to only when

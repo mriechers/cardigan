@@ -2731,9 +2731,11 @@ Please format this transcript section:
 
         Finally, whichever path produced the text (file or hardcoded
         fallback), it flows through a single `render_prompt_blocks` call at
-        the end of this method to substitute any `{{style:KEY}}` tokens. No
-        prompt contains tokens today, so this is a no-op short-circuit; it
-        becomes live as later tasks add tokens.
+        the end of this method to substitute any `{{style:KEY}}` tokens. All
+        five phase prompts (`prompts/{analyst,formatter,timestamp,seo,
+        validator}.md`) carry `{{style:*}}` tokens now, so this call is live
+        on every phase run -- the fallback prompts above do not carry tokens
+        and pass through render_prompt_blocks as a no-op.
         """
         prompt_file = AGENTS_DIR / f"{phase_name}.md"
 
