@@ -196,6 +196,53 @@ def _write_formatter_rules(tmp_path, substitutions=None, speaker_label=None, rev
     return path
 
 
+def _write_timestamp_rules(tmp_path, chapter_max_by_duration=None, first_chapter_title="Episode intro"):
+    """YAML house-style file covering `phases.timestamp` -- what the
+    timestamp phase's post-stage reads (chapter_max_by_duration,
+    first_chapter, chapter_name, formats, constraints). Mirrors
+    tests/test_style_stages.py's `_timestamp_rules` fixture."""
+    raw = {
+        "meta": {"version": 1},
+        "voice": {
+            "forbidden_phrases": [],
+            "first_person_markers": [],
+            "second_person_markers": [],
+        },
+        "casing": {
+            "style": "down",
+            "proper_nouns": ["Wisconsin"],
+            "acronyms": [],
+            "casing_variants": {},
+            "surname_stoplist": [],
+        },
+        "phases": {
+            "timestamp": {
+                "chapter_max_by_duration": (
+                    [
+                        {"lt": 5, "max": 3},
+                        {"lt": 15, "max": 5},
+                        {"lt": 30, "max": 7},
+                        {"lt": 60, "max": 8},
+                        {"lt": None, "max": 10},
+                    ]
+                    if chapter_max_by_duration is None
+                    else chapter_max_by_duration
+                ),
+                "first_chapter": {"time": "0:00", "title": first_chapter_title, "tier": "enforce"},
+                "chapter_name": {"case": "sentence", "words": {"min": 2, "max": 6}, "tier": "flag"},
+                "formats": {
+                    "media_manager": {"start": "H:MM:SS.000", "end": "H:MM:SS.999", "tier": "enforce"},
+                    "youtube": {"style": "M:SS", "tier": "enforce"},
+                },
+                "constraints": {"no_gaps": True, "chronological": True, "final_end_equals_srt_end": True},
+            }
+        },
+    }
+    path = tmp_path / "timestamp_house_style.yaml"
+    path.write_text(yaml.safe_dump(raw))
+    return path
+
+
 def _bare_chunked_worker(style_engine_cfg: dict | None = None) -> JobWorker:
     """A JobWorker with only `llm.config.routing.style_engine` stubbed and
     prompt loading bypassed -- enough to drive `_run_formatter_chunked`
@@ -1421,7 +1468,16 @@ class TestChunkedFormatterFailOpen:
 #
 # Validates that process_job's main context dict includes project_name
 # (matching retry_single_phase semantics), so style-engine emitters like
-# the timestamp post-stage can render "## Project: <name>" headers.
+# the timestamp post-stage can render "**Project:** <name>" headers.
+#
+# Two tests: the first exercises the kill-switch (no routing.style_engine
+# config) passthrough path -- the post-stage never runs in that mode, so it
+# only proves the *prompt* sent to the LLM carries "## Project: <name>"; it
+# does NOT prove anything about the persisted file's "**Project:**" header.
+# The second test is the real end-to-end case -- style_engine enabled with
+# timestamp {pre: false, post: "enforce"}, a slim-contract ```chapters fence
+# as the mocked LLM response, and assertions against the actual persisted
+# timestamp_output.md.
 # ---------------------------------------------------------------------------
 
 
@@ -1434,13 +1490,16 @@ class TestProjectNameInContext:
         self, mock_agents_dir, mock_log_event, mock_get_llm, mock_llm_client, mock_llm_response, tmp_path
     ):
         """Verify that the timestamp phase receives project_name in context
-        from process_job's main context dict, and the emitted timestamp report
-        includes the project name header.
+        from process_job's main context dict, and that the built user-message
+        prompt sent to the LLM includes the project name header.
 
-        This proves the fix for task 4b: process_job now sets project_name
-        in the shared context dict (matching retry_single_phase's pattern),
-        so the timestamp post-stage can render "## Project: <name>" instead
-        of falling back to "Unknown".
+        This is a kill-switch (no routing.style_engine config) passthrough
+        test -- the post-stage never runs, so this only proves the *prompt*
+        carries "## Project: <name>". It does NOT prove the persisted
+        timestamp_output.md contains a "**Project:**" header (that requires
+        the enforce-mode post-stage to actually run and render the report --
+        see test_enforce_mode_persists_project_header_and_rendered_sections
+        below for that end-to-end case).
         """
         # Setup: mock LLM client without style_engine (kill-switch passthrough)
         mock_get_llm.return_value = mock_llm_client
@@ -1504,7 +1563,10 @@ Main content text
         user_message = sent_messages[1]["content"]
         assert "## Project: Wisconsin Public Affairs" in user_message
 
-        # Verify the persisted timestamp_output.md file contains the project header
+        # Verify the persisted timestamp_output.md file exists and passed the
+        # raw LLM content through unchanged (kill switch -- no post-stage ran,
+        # so this does NOT exercise the "**Project:**" header; that's the
+        # enforce-mode test below).
         timestamp_file = tmp_path / "timestamp_output.md"
         assert timestamp_file.exists()
         persisted_content = timestamp_file.read_text()
@@ -1512,3 +1574,131 @@ Main content text
         assert "model: timestamp-model" in persisted_content
         # And the timestamp content itself
         assert "Timestamp Report" in persisted_content or "Introduction" in persisted_content
+
+    @pytest.mark.asyncio
+    @patch("api.services.worker.get_llm_client")
+    @patch("api.services.worker.log_event")
+    @patch("api.services.worker.AGENTS_DIR")
+    async def test_enforce_mode_persists_project_header_and_rendered_sections(
+        self, mock_agents_dir, mock_log_event, mock_get_llm, mock_llm_client, mock_llm_response, tmp_path
+    ):
+        """End-to-end enforce-mode case: routing.style_engine enabled with
+        timestamp {pre: false, post: "enforce"}, the LLM returning a bare
+        slim-contract ```chapters fence (no manually-typed tables/prose --
+        exactly what timestamp.output_contract's slim profile instructs),
+        and a real `_run_phase` call. Asserts against the actual PERSISTED
+        timestamp_output.md -- the file editors copy-paste from -- not just
+        the outbound prompt, proving the post-stage renders the
+        "**Project:**" header plus both the Media Manager and YouTube
+        sections from the model's minimal chapter list."""
+        rules_path = _write_timestamp_rules(tmp_path)
+        mock_llm_client.config = {
+            "routing": {
+                "style_engine": _style_engine_cfg(
+                    rules_path, phases={"timestamp": {"pre": False, "post": "enforce"}}
+                ),
+            }
+        }
+        mock_get_llm.return_value = mock_llm_client
+
+        srt_content = (
+            "1\n00:00:00,000 --> 00:00:05,000\nWelcome to the show today.\n\n"
+            "2\n00:09:58,000 --> 00:10:00,000\nThanks for watching, see you next time.\n"
+        )
+        # Bare slim-contract output: only the fenced chapters block, no
+        # manually-rendered tables or prose -- the pipeline builds both
+        # published sections deterministically from this.
+        mock_llm_response.content = "```chapters\n2:30 Budget debate begins\n8:15 Weather turns sunny\n```"
+        mock_llm_response.cost = 0.002
+        mock_llm_response.total_tokens = 200
+        mock_llm_response.model = "timestamp-model"
+        mock_llm_client.chat = AsyncMock(return_value=mock_llm_response)
+        mock_log_event.return_value = None
+        mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
+
+        worker = JobWorker()
+        context = {
+            "project_name": "Budget Debate 2026",
+            "transcript_file": "episode.srt",
+            "transcript": srt_content,
+            "srt_content": srt_content,
+            "analyst_output": ANALYST_TABLE,
+        }
+
+        result = await worker._run_phase(
+            job_id=1, phase_name="timestamp", context=context, project_path=tmp_path
+        )
+
+        assert result["success"] is True
+
+        timestamp_file = tmp_path / "timestamp_output.md"
+        assert timestamp_file.exists()
+        persisted_content = timestamp_file.read_text()
+
+        assert "**Project:** Budget Debate 2026" in persisted_content
+        assert "## Media Manager Format" in persisted_content
+        assert "## YouTube Format" in persisted_content
+        # Forced first chapter, prepended by the deterministic pipeline (not
+        # the model -- the slim contract explicitly withholds it).
+        assert "Episode intro" in persisted_content
+        # The model's chapter titles, rendered into both published formats.
+        assert "Budget debate begins" in persisted_content
+        assert "Weather turns sunny" in persisted_content
+        assert "2:30 Budget debate begins" in persisted_content
+        assert "8:15 Weather turns sunny" in persisted_content
+
+
+# ---------------------------------------------------------------------------
+# 8. Timestamp user-message prompt profile-awareness (review fix)
+#
+# `_build_phase_prompt_base`'s timestamp branch used to hardcode a "TWO
+# sections" instruction that directly contradicts the slim system-prompt
+# contract ({{style:timestamp.output_contract}}'s slim profile says "Output
+# ONLY a fenced code block labeled `chapters`") once
+# routing.style_engine.phases.timestamp.post is "enforce". Verifies the
+# user message defers to the system instructions under slim and keeps the
+# original two-section instruction under full (including "off"/absent
+# config and non-enforce "shadow" mode, both of which resolve to "full").
+# ---------------------------------------------------------------------------
+
+
+class TestTimestampUserMessagePromptProfile:
+    def _worker_with_style_cfg(self, style_engine_cfg: dict | None) -> JobWorker:
+        worker = JobWorker.__new__(JobWorker)
+        worker.llm = MagicMock()
+        worker.llm.config = {"routing": {"style_engine": style_engine_cfg or {}}}
+        return worker
+
+    def _base_context(self) -> dict:
+        return {
+            "project_name": "Test Project",
+            "srt_content": "1\n00:00:00,000 --> 00:00:05,000\nHello.\n",
+            "analyst_output": ANALYST_TABLE,
+            "transcript_metrics": {},
+        }
+
+    def test_full_profile_includes_two_sections_instruction(self):
+        # No routing.style_engine block -- kill-switch default resolves to "full".
+        worker = self._worker_with_style_cfg(None)
+        prompt = worker._build_phase_prompt_base("timestamp", self._base_context())
+        assert "Output a timestamp report with TWO sections:" in prompt
+        assert "Media Manager Format" in prompt
+        assert "YouTube Format" in prompt
+        assert "Select chapter boundaries and titles per the output contract" not in prompt
+
+    def test_slim_profile_omits_two_sections_instruction(self):
+        style_cfg = {"enabled": True, "phases": {"timestamp": {"post": "enforce"}}}
+        worker = self._worker_with_style_cfg(style_cfg)
+        prompt = worker._build_phase_prompt_base("timestamp", self._base_context())
+        assert "TWO sections" not in prompt
+        assert "Media Manager Format" not in prompt
+        assert "YouTube Format" not in prompt
+        assert "Select chapter boundaries and titles per the output contract in your instructions." in prompt
+
+    def test_shadow_mode_still_uses_full_profile(self):
+        # resolve_prompt_profile only returns "slim" for mode == "enforce" --
+        # shadow mode (record-only) must keep the full two-section instruction.
+        style_cfg = {"enabled": True, "phases": {"timestamp": {"post": "shadow"}}}
+        worker = self._worker_with_style_cfg(style_cfg)
+        prompt = worker._build_phase_prompt_base("timestamp", self._base_context())
+        assert "Output a timestamp report with TWO sections:" in prompt

@@ -739,7 +739,7 @@ Extract any name or spelling corrections that should be added to the glossary. S
         # Pick up any model/config changes made via the Settings API since
         # this worker process started (api and worker are separate containers).
         self.llm.reload_config()
-        project_name = job.get("project_name", "Unknown")
+        project_name = job.get("project_name") or "Unknown"
 
         logger.info("Processing job", extra={"job_id": job_id, "project_name": project_name})
 
@@ -3114,7 +3114,16 @@ The editor reviewed the copy-edited transcript and requests these changes:
 
 Identify 3-8 logical chapter breaks based on topic transitions, speaker changes, and segment markers in the content above.
 
-Output a timestamp report with TWO sections:
+"""
+            if self._style_prompt_profile("timestamp") == "slim":
+                # Slim profile: the system prompt's {{style:timestamp.output_contract}}
+                # token already spells out the fenced ```chapters contract (and the
+                # deterministic post-stage renders the Media Manager/YouTube sections
+                # from it) -- a "TWO sections" instruction here would contradict that
+                # contract, so keep this minimal and defer to the system instructions.
+                prompt += "Select chapter boundaries and titles per the output contract in your instructions."
+            else:
+                prompt += """Output a timestamp report with TWO sections:
 1. **Media Manager Format** - Table with Title, Start Time (H:MM:SS.000), End Time (H:MM:SS.999)
 2. **YouTube Format** - Simple list like "0:00 Introduction" for video descriptions
 
