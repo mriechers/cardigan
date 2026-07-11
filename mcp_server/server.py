@@ -2270,11 +2270,20 @@ async def _log_editor_corrections(media_id: str, manifest: dict | None, proposed
     through ``api.services.database.log_event`` — so this reuses that same,
     already-proven DB session machinery rather than inventing a second
     logging channel. ``api.services.database`` is imported lazily (inside
-    this function) rather than at module scope, matching this module's
-    existing convention of zero ``api.*`` imports at import time for
-    anything beyond the pure, I/O-free style_engine package — a DB/engine
-    import failure here degrades to "no editor_correction event this
-    session" rather than risking the MCP server's startup.
+    this function) rather than at module scope — NOT because doing so would
+    add some new ``api.*`` import this module otherwise avoids. It
+    wouldn't: the module-scope ``from api.services.style_engine import
+    ...`` above already runs ``api/services/__init__.py``'s package-init
+    imports (``api.services.airtable``, ``api.services.ingest_config``),
+    which pull in ``api.services.database`` transitively the moment this
+    module is imported — so "zero api.services.database in the import
+    graph" is not actually true here, and this docstring used to overstate
+    it. The real reason for the lazy import: deferring the *use* of the DB
+    module (``init_db()`` + a live session, not just the import) to call
+    time keeps DB engine/connection-pool bring-up cost and any of its
+    failure modes out of the MCP server's startup path — a DB hiccup at
+    call time degrades to "no editor_correction event this session" here,
+    rather than a server that won't boot.
     """
     job_id = manifest.get("job_id") if manifest else None
 

@@ -581,6 +581,56 @@ class TestPostHookEnforce:
     @patch("api.services.worker.get_llm_client")
     @patch("api.services.worker.log_event")
     @patch("api.services.worker.AGENTS_DIR")
+    async def test_enforce_logs_fixed_event_per_applied_fix(
+        self, mock_agents_dir, mock_log_event, mock_get_llm, mock_llm_client, mock_llm_response, tmp_path
+    ):
+        """Task 6b follow-up -- the feedback loop's missing signal:
+        enforce-tier AppliedFixes (here, seo's title down-casing) must be
+        logged as their own style_violation event with action="fixed", not
+        just baked into the persisted `<!-- style-engine: fixes: N -->`
+        provenance comment where scripts/style_report.py can't see them."""
+        rules_path = _write_rules(tmp_path)
+        mock_llm_client.config = {
+            "routing": {
+                "style_engine": _style_engine_cfg(
+                    rules_path, phases={"seo": {"pre": False, "post": "enforce"}}
+                ),
+            }
+        }
+        mock_get_llm.return_value = mock_llm_client
+        raw_title = "Wisconsin Governor Signs New Budget Bill In Madison"
+        raw_output = _seo_report(raw_title)
+        mock_llm_response.content = raw_output
+        mock_llm_client.chat = AsyncMock(return_value=mock_llm_response)
+
+        logged_events = []
+
+        async def _capture(event):
+            logged_events.append(event)
+
+        mock_log_event.side_effect = _capture
+        mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
+
+        worker = JobWorker()
+        context = {"transcript": "irrelevant"}
+
+        result = await worker._run_phase(
+            job_id=1, phase_name="seo", context=context, project_path=tmp_path
+        )
+        assert result["success"] is True
+
+        style_violation_events = [e for e in logged_events if e.event_type == EventType.style_violation]
+        fixed_events = [e for e in style_violation_events if e.data.extra.get("action") == "fixed"]
+        assert len(fixed_events) == 1
+        assert fixed_events[0].data.phase == "seo"
+        assert fixed_events[0].data.extra["rule_id"] == "casing.down_style.title"
+        assert fixed_events[0].data.extra["mode"] == "enforce"
+        assert fixed_events[0].data.extra["before"] == raw_title
+
+    @pytest.mark.asyncio
+    @patch("api.services.worker.get_llm_client")
+    @patch("api.services.worker.log_event")
+    @patch("api.services.worker.AGENTS_DIR")
     async def test_enforce_keep_raw_on_fix_false_skips_archive(
         self, mock_agents_dir, mock_log_event, mock_get_llm, mock_llm_client, mock_llm_response, tmp_path
     ):

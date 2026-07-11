@@ -12,10 +12,10 @@ one invariant that governs the whole loop:
 
 ## Signal sources
 
-Three kinds of evidence feed the report, all persisted to the `session_stats`
+Four kinds of evidence feed the report, all persisted to the `session_stats`
 table (`event_type` column) via `api.services.database.log_event`:
 
-1. **`style_violation` (post-stage).** Emitted by
+1. **`style_violation` (post-stage, violations).** Emitted by
    `api/services/worker.py:_apply_style_post`, one event per
    `RuleViolation` the deterministic post-generation stage
    (`api.services.style_engine.post_stage.run_post_stage`) surfaces for a
@@ -25,13 +25,24 @@ table (`event_type` column) via `api.services.database.log_event`:
    configured mode for that phase) and `action` (`"flagged"` in enforce
    mode, `"shadow"` in shadow mode — post-stage violations are flag-tier by
    construction, so they're never auto-fixed regardless of mode).
-2. **`style_violation` (lint).** Emitted by
+2. **`style_violation` (post-stage, fixes).** Also emitted by
+   `_apply_style_post`, but only in enforce mode and only after the
+   violations loop above: one event per `AppliedFix` the post-generation
+   stage actually applied (e.g. `formatter.substitution.ok`,
+   `casing.down_style.title`, `timestamp.emit`). Payload: `data.extra` =
+   the fix's `to_dict()` (`rule_id`, `before`, `after`, `count`) plus
+   `mode: "enforce"` and `action: "fixed"`. This is the feedback loop's
+   primary signal for "the model keeps getting X wrong (auto-fixed N
+   times)" — before this event existed, deterministic fixes were only
+   visible in the `<!-- style-engine: fixes: N | flags: N -->` provenance
+   comment on the persisted output file, invisible to `style_report.py`.
+3. **`style_violation` (lint).** Emitted by
    `api/services/worker.py:_apply_style_lint`, one event per violation the
    deterministic validator lint suite (`api.services.style_engine.lint.
    run_lint`) finds when merging into the QA verdict. Same `rule_id`/
    `phase`/`severity` shape, plus `source: "lint"` and `mode`
    (`shadow`|`enforce`) — no `action` key.
-3. **`editor_correction`.** Emitted by
+4. **`editor_correction`.** Emitted by
    `mcp_server/server.py:_log_editor_corrections`, once per writable field
    after a successful `commit_sst_edits` MCP write. Payload: `field`,
    `media_id`, `committed_value` (what the editor actually wrote to
@@ -42,7 +53,7 @@ table (`event_type` column) via `api.services.database.log_event`:
    `None` for those), and `original_value` (the pre-edit Airtable
    snapshot).
 
-A fourth, complementary source lives **outside** `session_stats`: the eval
+A fifth, complementary source lives **outside** `session_stats`: the eval
 harness (`scripts/eval_pipeline.py --style-report`, compared across runs by
 `scripts/eval_compare.py`) captures the same kind of pre/post violation and
 title-convergence data from offline eval runs against known transcripts —
@@ -89,29 +100,32 @@ smoke-test path, not an error.
 ## What the report contains
 
 1. **Violations summary** — counts by `rule_id` × `phase`, split into
-   `enforce`/`flagged`/`shadow` columns (see `classify_action`'s docstring
-   in `scripts/style_report.py` for the exact mode→bucket mapping — lint's
-   `mode: enforce` maps to the `enforce` column, post-stage's `mode:
-   enforce` maps to `flagged`, since post-stage violations are never
-   auto-fixed), sub-broken by model and `app_version` when present in the
-   payload.
+   `enforce`/`flagged`/`shadow`/`fixed`/`unknown` columns (see
+   `classify_action`'s docstring in `scripts/style_report.py` for the exact
+   mode→bucket mapping — lint's `mode: enforce` maps to the `enforce`
+   column, post-stage's `mode: enforce` maps to `flagged` for
+   `RuleViolation`s and `fixed` for `AppliedFix`es, since a violation and a
+   fix are different outcomes even in the same enforce run; `unknown`
+   catches any payload matching neither emitter's shape rather than
+   dropping the event silently), sub-broken by model and `app_version` when
+   present in the payload.
 2. **Correction patterns** — word-level diff clustering (`difflib`) over
    `editor_correction` events with a recoverable `pipeline_value`, grouping
    recurring replacements (e.g. `explores` → `examines` ×7) with example
    provenance. Corrections with no recoverable `pipeline_value` are listed
    separately, by field, count-only.
 3. **Zero-hit rules** — enforce/flag-tier `config/house_style.yaml` entries
-   that never appeared in any violation event in the window: retirement or
-   review candidates. **Caveat baked into the report itself:** enforce-tier
-   substitutions apply as silent `AppliedFix`es and are *never* logged as
-   `style_violation` events at all (only flag-tier `RuleViolation`s are
-   logged) — so every enforce-tier substitution will always show zero hits
-   here. That's a structural gap in what `session_stats` can observe, not
-   evidence the substitution never fires; don't retire an enforce-tier rule
-   on this signal alone. Forbidden-phrase entries sharing a `category` also
-   collapse onto one event `rule_id`, so the zero-hit table can only tell
-   you a *category* had no hits, not which specific phrase within it never
-   fired.
+   that never appeared in any violation *or fix* event in the window:
+   retirement or review candidates. Enforce-tier substitutions apply as
+   deterministic `AppliedFix`es; since `_apply_style_post` now logs one
+   `style_violation` event per `AppliedFix` in enforce mode (`action:
+   "fixed"`), a substitution that actually fires shows up here as a hit
+   under its `formatter.substitution.<slug>` rule_id — a zero-hit result
+   for an enforce-tier substitution now means it genuinely never fired in
+   the window, not a blind spot in what `session_stats` can observe.
+   Forbidden-phrase entries sharing a `category` still collapse onto one
+   event `rule_id`, so the zero-hit table can only tell you a *category*
+   had no hits, not which specific phrase within it never fired.
 4. **Proposed YAML edits** — heuristic, evidence-gated only: a correction
    cluster needs **≥ 3 occurrences** before it's proposed at all. Two
    proposal shapes: an `old`/`new` pair differing only by case becomes a

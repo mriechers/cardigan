@@ -2187,7 +2187,10 @@ Extract any name or spelling corrections that should be added to the glossary. S
         use the ``None`` sentinel to know no provenance/raw-archive handling
         is needed). Enforce mode returns the normalized output and the full
         result so the caller can persist provenance + the pre-normalization
-        raw file.
+        raw file -- and additionally logs one ``style_violation`` event per
+        ``AppliedFix`` (``action: "fixed"``), the feedback loop's signal for
+        which deterministic fixes are actually firing in production (see
+        ``docs/STYLE_FEEDBACK_LOOP.md``).
         """
         cfg = self._style_cfg()
         mode = cfg.get("phases", {}).get(phase_name, {}).get("post", "off")
@@ -2221,6 +2224,25 @@ Extract any name or spelling corrections that should be added to the glossary. S
 
             if mode == "shadow":
                 return content, None  # record-only: raw content flows
+
+            # Enforce mode only, past this point. Log one style_violation
+            # event per deterministic AppliedFix so "the model keeps
+            # getting X wrong (auto-fixed N times)" is visible to the
+            # feedback loop (scripts/style_report.py), not just the
+            # provenance comment in the persisted output file. Mirrors the
+            # violations loop above exactly (same EventCreate/EventData
+            # shape) and stays inside this method's fail-open try.
+            for fix in post.check.fixes:
+                await log_event(
+                    EventCreate(
+                        job_id=job_id,
+                        event_type=EventType.style_violation,
+                        data=EventData(
+                            phase=phase_name,
+                            extra={**fix.to_dict(), "mode": mode, "action": "fixed"},
+                        ),
+                    )
+                )
 
             if post.changed and cfg.get("keep_raw_on_fix", True):
                 (project_path / f"{phase_name}_output.raw.md").write_text(content)

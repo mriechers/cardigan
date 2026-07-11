@@ -19,11 +19,18 @@ Usage:
 
 DB access: plain ``sqlite3`` against the same SQLite file the API/worker
 write to (default: ``$DATABASE_PATH`` or ``dashboard.db`` at the repo
-root) -- matching ``scripts/backfill_transcript_metrics.py`` /
-``scripts/backfill_v21_data.py``'s established precedent for one-shot CLI
-scripts, rather than ``api.services.database``'s async SQLAlchemy session
-machinery, which is built for the live FastAPI app's request lifecycle.
-Read-only: no INSERT/UPDATE/DELETE anywhere in this module.
+root) -- matching ``scripts/backfill_transcript_metrics.py``'s established
+precedent for one-shot CLI scripts (plain ``sqlite3``, no
+``api.services.database`` import), rather than ``api.services.database``'s
+async SQLAlchemy session machinery, which is built for the live FastAPI
+app's request lifecycle. (``scripts/backfill_v21_data.py`` is NOT a
+precedent for this: it also reads its *source* snapshot DB with raw
+``sqlite3``, but it imports ``api.services.database``/SQLAlchemy to write
+the live DB, so it mixes both approaches rather than avoiding ``api.*``.
+``scripts/eval_compare.py`` is the honest precedent for this script's
+overall "stay out of ``api.*``, plain stdlib" stance -- see the rules-file
+paragraph below.) Read-only: no INSERT/UPDATE/DELETE anywhere in this
+module.
 
 Rules file access: plain ``yaml.safe_load`` (not
 ``api.services.style_engine.rules.load_rules``) -- mirrors
@@ -94,17 +101,28 @@ def _as_dict(value: object) -> dict:
 
 def classify_action(extra: dict) -> str:
     """Map a ``style_violation`` event's ``extra`` payload to one of
-    "enforce" / "flagged" / "shadow" / "unknown".
+    "enforce" / "flagged" / "shadow" / "fixed" / "unknown".
 
     Mirrors the two emitters in ``api/services/worker.py``:
 
     - ``_apply_style_post`` (post-generation stage) sets an explicit
-      ``action`` key directly: ``"flagged"`` when the engine ran in enforce
-      mode (post-stage violations are flag-tier by construction -- surfaced
-      for review, never auto-fixed, even when enforce mode is active for
-      the phase's OTHER, fixable substitutions), ``"shadow"`` when the
-      whole engine is in shadow (record-only) mode. This emitter never sets
-      ``action="enforce"``.
+      ``action`` key directly:
+
+      - ``"flagged"`` when the engine ran in enforce mode (post-stage
+        ``RuleViolation``s are flag-tier by construction -- surfaced for
+        review, never auto-fixed, even when enforce mode is active for the
+        phase's OTHER, fixable substitutions).
+      - ``"shadow"`` when the whole engine is in shadow (record-only) mode
+        -- covers both violations and (as of the fixed-tier signal below)
+        would-be fixes, though shadow mode never actually applies a fix.
+      - ``"fixed"`` -- enforce mode only, one event per deterministic
+        ``AppliedFix`` (e.g. ``formatter.substitution.ok``,
+        ``casing.down_style.title``) the post-stage actually applied to the
+        model's output, logged after the ordinary violations loop. This is
+        the primary feedback-loop signal for "the model keeps getting X
+        wrong (auto-fixed N times)" -- see ``docs/STYLE_FEEDBACK_LOOP.md``.
+
+      This emitter never sets ``action="enforce"``.
     - ``_apply_style_lint`` (validator lint pass) sets no ``action`` key at
       all -- only ``source: "lint"`` and ``mode`` (``"shadow"`` |
       ``"enforce"``). Its ``"enforce"`` mode means the lint flags were
@@ -116,7 +134,7 @@ def classify_action(extra: dict) -> str:
     as ``"unknown"`` rather than raising or silently dropping the event.
     """
     action = extra.get("action")
-    if action in ("flagged", "shadow"):
+    if action in ("flagged", "shadow", "fixed"):
         return action
     if extra.get("source") == "lint":
         mode = extra.get("mode")
@@ -145,8 +163,8 @@ def summarize_violations(records: list[dict]) -> list[dict]:
     """Group normalized violation records by ``(rule_id, phase)``.
 
     Returns a list of dicts (sorted by total desc, then rule_id/phase),
-    each: ``{rule_id, phase, enforce, flagged, shadow, unknown, total,
-    by_model, by_app_version}`` -- the last two are ``{value: count}``
+    each: ``{rule_id, phase, enforce, flagged, shadow, fixed, unknown,
+    total, by_model, by_app_version}`` -- the last two are ``{value: count}``
     dicts (value ``"(unset)"`` when the field was absent from the payload),
     most-common first.
     """
@@ -161,13 +179,14 @@ def summarize_violations(records: list[dict]) -> list[dict]:
                 "enforce": 0,
                 "flagged": 0,
                 "shadow": 0,
+                "fixed": 0,
                 "unknown": 0,
                 "by_model": Counter(),
                 "by_app_version": Counter(),
             },
         )
         action = rec["action"]
-        if action in ("enforce", "flagged", "shadow"):
+        if action in ("enforce", "flagged", "shadow", "fixed"):
             g[action] += 1
         else:
             g["unknown"] += 1
@@ -177,7 +196,7 @@ def summarize_violations(records: list[dict]) -> list[dict]:
     out: list[dict] = []
     for g in groups.values():
         row = dict(g)
-        row["total"] = row["enforce"] + row["flagged"] + row["shadow"] + row["unknown"]
+        row["total"] = row["enforce"] + row["flagged"] + row["shadow"] + row["fixed"] + row["unknown"]
         row["by_model"] = dict(row["by_model"].most_common())
         row["by_app_version"] = dict(row["by_app_version"].most_common())
         out.append(row)
@@ -310,19 +329,22 @@ def build_candidate_rules(rules_raw: dict) -> list[CandidateRule]:
     Mirrors the *real* rule_id generation so "zero hits" is checked at the
     same granularity ``session_stats`` can actually see:
     ``api.services.style_engine.substitutions._rule_id_for`` (enforce-tier:
-    ``id`` or ``replace`` or ``find``) and
-    ``api.services.style_engine.scanner.scan_forbidden`` (forbidden
+    ``formatter.substitution.<slug>``, replicated verbatim below -- see the
+    comment at the call site for why this is a copy rather than an import)
+    and ``api.services.style_engine.scanner.scan_forbidden`` (forbidden
     phrases: ``voice.forbidden.<category>`` -- NOT keyed by the entry's own
     ``id``, so every entry sharing a ``category`` collapses onto one
     candidate).
 
-    CAVEAT (see also the rendered report / docs/STYLE_FEEDBACK_LOOP.md):
-    enforce-tier substitutions apply as deterministic ``AppliedFix``
-    records, which ``api/services/worker.py``'s ``_apply_style_post`` only
-    ever logs from ``post.check.violations`` -- never from ``post.fixes``.
-    Every enforce-tier substitution therefore ALWAYS shows zero hits here;
-    that is a structural gap in what ``style_violation`` events can see,
-    not evidence the substitution never fires.
+    Enforce-tier substitutions apply as deterministic ``AppliedFix``
+    records; ``api/services/worker.py``'s ``_apply_style_post`` logs one
+    ``style_violation`` event per ``AppliedFix`` in enforce mode
+    (``action: "fixed"``, after the ordinary violations loop -- see
+    ``docs/STYLE_FEEDBACK_LOOP.md``). So a substitution that actually fires
+    now shows up here as a hit under its ``formatter.substitution.<slug>``
+    rule_id; a genuine zero-hit result means the substitution never fired
+    in the window, not a structural blind spot in what ``session_stats``
+    can observe.
     """
     candidates: list[CandidateRule] = []
 
@@ -331,15 +353,24 @@ def build_candidate_rules(rules_raw: dict) -> list[CandidateRule]:
     for sub in formatter.get("substitutions", []) or []:
         tier = sub.get("tier")
         if tier == "enforce":
-            rule_id = sub.get("id") or sub.get("replace") or sub.get("find") or "substitution"
+            # Verbatim copy of api.services.style_engine.substitutions.
+            # _rule_id_for (a private, pure-stdlib helper) rather than an
+            # import: this script deliberately keeps zero api.* imports
+            # (see the module docstring), and the logic is a two-line slug
+            # -- cheaper to duplicate-with-a-comment than to special-case
+            # an import of a single private function. Keep in sync with
+            # substitutions.py if that function's slugging ever changes.
+            identifier = sub.get("id") or sub.get("replace") or sub.get("find") or "substitution"
+            slug = re.sub(r"[^a-z0-9]+", "_", str(identifier).lower()).strip("_") or "substitution"
+            rule_id = f"formatter.substitution.{slug}"
             label = sub.get("id") or f"{sub.get('find')} -> {sub.get('replace')}"
             candidates.append(
                 CandidateRule(
-                    rule_id=str(rule_id),
+                    rule_id=rule_id,
                     tier="enforce",
                     kind="substitution",
                     labels=(str(label),),
-                    note="enforce-tier fix -- applied as an AppliedFix, never logged as a violation event",
+                    note='enforce-tier fix -- logged as a style_violation event with action="fixed" once applied (see _apply_style_post)',
                 )
             )
         elif tier == "flag":
@@ -459,15 +490,15 @@ def _render_violations_summary(summary: list[dict]) -> list[str]:
         lines.append("_No style_violation events in this window._")
         return lines
     lines += [
-        "| rule_id | phase | enforce | flagged | shadow | total | by model | by app_version |",
-        "|---|---|--:|--:|--:|--:|---|---|",
+        "| rule_id | phase | enforce | flagged | shadow | fixed | unknown | total | by model | by app_version |",
+        "|---|---|--:|--:|--:|--:|--:|--:|---|---|",
     ]
     for row in summary:
         models = ", ".join(f"{k}×{v}" for k, v in row["by_model"].items()) or "—"
         versions = ", ".join(f"{k}×{v}" for k, v in row["by_app_version"].items()) or "—"
         lines.append(
             f"| {row['rule_id']} | {row['phase']} | {row['enforce']} | {row['flagged']} | "
-            f"{row['shadow']} | {row['total']} | {models} | {versions} |"
+            f"{row['shadow']} | {row['fixed']} | {row['unknown']} | {row['total']} | {models} | {versions} |"
         )
     return lines
 
@@ -505,11 +536,12 @@ def _render_zero_hit(rules_raw: dict, observed_rule_ids: set[str]) -> list[str]:
         return lines
 
     lines.append(
-        "Note: enforce-tier substitutions apply as deterministic fixes and are never logged as "
-        "`style_violation` events (only `RuleViolation`s are logged, not `AppliedFix`es) -- they will "
-        "always show zero hits here; that is a structural gap in what session_stats can see, not "
-        "evidence the substitution never fires. Forbidden-phrase entries that share a `category` also "
-        "share one event `rule_id`, so a hit on any entry in the group marks the whole group as hit."
+        "Note: enforce-tier substitutions apply as deterministic fixes; each applied fix is logged as "
+        "a `style_violation` event with `action: \"fixed\"` (see `_apply_style_post` in "
+        "`api/services/worker.py`), so a substitution that actually fired in the window shows up as a "
+        "hit here under its `formatter.substitution.<slug>` rule_id -- a zero-hit result means it "
+        "genuinely never fired. Forbidden-phrase entries that share a `category` also share one event "
+        "`rule_id`, so a hit on any entry in the group marks the whole group as hit."
     )
     lines.append("")
 

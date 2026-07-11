@@ -15,6 +15,7 @@ from __future__ import annotations
 from scripts.style_report import (
     PROPOSAL_BANNER,
     CandidateRule,
+    _render_violations_summary,
     build_candidate_rules,
     build_report,
     classify_action,
@@ -122,6 +123,12 @@ def test_classify_action_lint_shadow_mode_is_shadow():
     assert classify_action({"source": "lint", "mode": "shadow"}) == "shadow"
 
 
+def test_classify_action_post_stage_fixed_action_is_fixed():
+    """Task 6b follow-up: _apply_style_post's new AppliedFix events set
+    action="fixed" in enforce mode -- distinct from "flagged" (violations)."""
+    assert classify_action({"action": "fixed", "mode": "enforce"}) == "fixed"
+
+
 def test_classify_action_unrecognized_payload_is_unknown():
     assert classify_action({}) == "unknown"
     assert classify_action({"mode": "enforce"}) == "unknown"  # no action, no source=lint
@@ -186,6 +193,53 @@ def test_summarize_violations_sub_breaks_by_model_and_app_version():
     assert row["by_model"]["(unset)"] == 1
     assert row["by_app_version"]["v4.2"] == 3
     assert row["by_app_version"]["v4.1"] == 1
+
+
+def test_summarize_violations_counts_fixed_bucket():
+    """Task 6b follow-up: enforce-tier AppliedFix events (action="fixed")
+    must be counted in their own bucket, separate from flagged/enforce."""
+    records = [
+        normalize_violation_record(
+            _violation_row(rule_id="formatter.substitution.ok", phase="formatter", action="fixed", mode="enforce")
+        ),
+        normalize_violation_record(
+            _violation_row(rule_id="formatter.substitution.ok", phase="formatter", action="fixed", mode="enforce")
+        ),
+    ]
+    summary = summarize_violations(records)
+    row = summary[0]
+    assert row["fixed"] == 2
+    assert row["enforce"] == 0
+    assert row["flagged"] == 0
+    assert row["total"] == 2
+
+
+def test_summarize_violations_buckets_malformed_payload_as_unknown():
+    """Minor finding: a garbled/malformed extra payload (no action, no
+    source=lint) must still be visible in the summary, not silently
+    dropped -- it lands in the "unknown" bucket."""
+    row = _violation_row(rule_id="mystery.rule", phase="seo", action=None, mode=None)
+    rec = normalize_violation_record(row)
+    summary = summarize_violations([rec])
+    assert summary[0]["unknown"] == 1
+    assert summary[0]["total"] == 1
+
+
+def test_render_violations_summary_includes_fixed_and_unknown_columns():
+    records = [
+        normalize_violation_record(
+            _violation_row(rule_id="formatter.substitution.ok", phase="formatter", action="fixed", mode="enforce")
+        ),
+        normalize_violation_record(_violation_row(rule_id="mystery.rule", phase="seo", action=None, mode=None)),
+    ]
+    summary = summarize_violations(records)
+    lines = _render_violations_summary(summary)
+    header = lines[2]
+    assert "fixed" in header
+    assert "unknown" in header
+    body = "\n".join(lines)
+    assert "formatter.substitution.ok" in body
+    assert "mystery.rule" in body
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +342,12 @@ _SYNTHETIC_RULES = {
 def test_build_candidate_rules_covers_substitutions_and_forbidden_groups():
     candidates = build_candidate_rules(_SYNTHETIC_RULES)
     rule_ids = {c.rule_id for c in candidates}
-    assert "OK" in rule_ids  # enforce-tier substitution with no explicit id -> rule_id is the replace text
+    # Enforce-tier substitution with no explicit id -> rule_id mirrors the
+    # REAL emitter, api.services.style_engine.substitutions._rule_id_for:
+    # identifier falls back to "replace" ("OK"), slugged to "ok", giving
+    # "formatter.substitution.ok" -- NOT the bare replace text "OK".
+    assert "formatter.substitution.ok" in rule_ids
+    assert "OK" not in rule_ids
     assert "formatter.oxford_comma" in rule_ids
     assert "voice.forbidden.viewer_directive" in rule_ids  # watch_as + watch_how collapse to one candidate
     assert "voice.forbidden.cta" in rule_ids
@@ -306,7 +365,7 @@ def test_zero_hit_rules_excludes_observed_and_keeps_unobserved():
     zero_ids = {c.rule_id for c in zero}
     assert "voice.forbidden.cta" not in zero_ids
     assert "voice.forbidden.viewer_directive" in zero_ids
-    assert "OK" in zero_ids
+    assert "formatter.substitution.ok" in zero_ids
     assert "formatter.oxford_comma" in zero_ids
 
 
