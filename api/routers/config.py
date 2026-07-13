@@ -204,6 +204,14 @@ async def update_phase_models(update: PhaseModelsUpdate):
     config = _load_config()
     valid_phases = {"analyst", "formatter", "seo", "validator", "timestamp", "copy_editor", "chat"}
     models_data = await get_available_models()
+    # Without a roster we can neither validate the model id nor look up its serving
+    # backend, so routing the (backend, model) pair below would silently leave
+    # phase_backends stale — an inconsistent config. Fail loudly instead.
+    if not models_data:
+        raise HTTPException(
+            status_code=503,
+            detail="Model roster is unavailable right now; cannot assign models safely. Try again after it refreshes.",
+        )
     available_model_ids = {m["id"] for m in models_data}
 
     for phase, model_id in update.phase_models.items():

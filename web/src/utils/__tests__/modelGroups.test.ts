@@ -19,11 +19,13 @@ describe('groupAvailableModels', () => {
     expect(groups.map((g) => g.label)).toEqual(['oMLX · h:1'])
   })
 
-  it('separates two local servers into their own groups', () => {
+  it('separates two local servers into their own groups, ordered alphabetically by label', () => {
     const groups = groupAvailableModels([
-      { id: 'a', name: 'A', provider: 'oMLX', host: 'studio:8000' },
       { id: 'b', name: 'B', provider: 'vLLM', host: 'gpu-box:8000' },
+      { id: 'a', name: 'A', provider: 'oMLX', host: 'studio:8000' },
     ])
-    expect(groups.map((g) => g.label).sort()).toEqual(['oMLX · studio:8000', 'vLLM · gpu-box:8000'])
+    // Assert the emitted order directly (no .sort()) so the alphabetical-by-label
+    // contract is what's under test — inputs are deliberately reversed.
+    expect(groups.map((g) => g.label)).toEqual(['oMLX · studio:8000', 'vLLM · gpu-box:8000'])
   })
 })

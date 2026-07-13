@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { usePreferences, TextSize } from '../context/PreferencesContext'
 import { AGENT_INFO } from '../constants/agents'
@@ -224,9 +224,19 @@ export default function Settings() {
   // After any endpoint change, rebuild the roster so discovered models appear,
   // then reload the endpoints list and the model picker together.
   const refreshRosterAndLists = useCallback(async () => {
-    await fetch('/api/config/models/refresh', { method: 'POST' })
+    const res = await fetch('/api/config/models/refresh', { method: 'POST' })
+    if (!res.ok) {
+      setError('Could not rebuild the model roster — the model list may be out of date.')
+    }
     await Promise.all([fetchBackends(), fetchConfig()])
   }, [fetchBackends, fetchConfig])
+
+  // The roster is identical for every agent phase, so group it once per render
+  // rather than recomputing inside the AGENT_INFO map (once per agent).
+  const modelGroups = useMemo(
+    () => groupAvailableModels(phaseModels?.available_models || []),
+    [phaseModels?.available_models],
+  )
 
   const handleAddEndpoint = async () => {
     setBackendBusy(true)
@@ -543,8 +553,6 @@ export default function Settings() {
                   const currentModel = pendingPhaseModels?.[agent.id]
                     || phaseModels?.phase_models?.[agent.id]
                     || ''
-                  const models = phaseModels?.available_models || []
-                  const modelGroups = groupAvailableModels(models)
 
                   return (
                     <div key={agent.id} className="p-4 bg-surface-900 rounded-lg space-y-2">
@@ -633,6 +641,7 @@ export default function Settings() {
                             onClick={() => handleToggleEndpoint(b.name, !b.enabled)}
                             disabled={backendBusy}
                             className="text-xs text-surface-400 hover:text-white transition-colors disabled:opacity-50"
+                            aria-label={`${b.enabled ? 'Disable' : 'Enable'} endpoint ${b.name}`}
                           >
                             {b.enabled ? 'Disable' : 'Enable'}
                           </button>
@@ -640,6 +649,7 @@ export default function Settings() {
                             onClick={() => handleDeleteEndpoint(b.name)}
                             disabled={backendBusy}
                             className="text-xs text-status-failed/80 hover:text-status-failed transition-colors disabled:opacity-50"
+                            aria-label={`Remove endpoint ${b.name}`}
                           >
                             Remove
                           </button>

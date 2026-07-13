@@ -35,7 +35,7 @@ export function groupAvailableModels(models: RosterModel[]): ModelGroup[] {
   const groups: ModelGroup[] = []
   if (cloud.length) groups.push({ label: 'Cloud', models: [...cloud].sort(byName) })
   for (const label of [...localByHost.keys()].sort()) {
-    groups.push({ label, models: localByHost.get(label)!.sort(byName) })
+    groups.push({ label, models: [...localByHost.get(label)!].sort(byName) })
   }
   return groups
 }
