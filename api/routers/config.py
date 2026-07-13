@@ -127,14 +127,18 @@ async def update_phase_backends(update: PhaseBackendsUpdate):
 
 
 class AvailableModel(BaseModel):
-    """A model available for phase assignment."""
+    """A model available for phase assignment (cloud via OpenRouter or a locally
+    discovered model)."""
 
-    id: str = Field(..., description="OpenRouter model ID (e.g., 'anthropic/claude-sonnet-4-5-20250514')")
+    id: str = Field(..., description="Model ID (e.g. 'anthropic/claude-sonnet-4.6' or 'Qwen2.5-7B-Instruct-4bit')")
     name: str = Field(..., description="Human-readable model name")
-    provider: str = Field(..., description="Model provider (e.g., 'Anthropic', 'Google')")
-    tier: int = Field(..., ge=0, le=2, description="Cost tier (0=economy, 1=standard, 2=premium)")
+    provider: str = Field(..., description="Serving provider (e.g. 'Anthropic', 'Google', 'oMLX')")
+    tier: Optional[int] = Field(None, ge=0, le=2, description="Cost tier (0=economy..2=premium); null for local models")
     pricing_input: Optional[float] = Field(None, description="Cost per 1M input tokens (USD)")
     pricing_output: Optional[float] = Field(None, description="Cost per 1M output tokens (USD)")
+    backend: Optional[str] = Field(None, description="Config backend key that serves this model (local models)")
+    host: Optional[str] = Field(None, description="Host of the serving endpoint (local models), for grouping")
+    context_len: Optional[int] = Field(None, description="Max context length if the server advertises it")
 
 
 class PhaseModelsResponse(BaseModel):
@@ -200,6 +204,14 @@ async def update_phase_models(update: PhaseModelsUpdate):
     config = _load_config()
     valid_phases = {"analyst", "formatter", "seo", "validator", "timestamp", "copy_editor", "chat"}
     models_data = await get_available_models()
+    # Without a roster we can neither validate the model id nor look up its serving
+    # backend, so routing the (backend, model) pair below would silently leave
+    # phase_backends stale — an inconsistent config. Fail loudly instead.
+    if not models_data:
+        raise HTTPException(
+            status_code=503,
+            detail="Model roster is unavailable right now; cannot assign models safely. Try again after it refreshes.",
+        )
     available_model_ids = {m["id"] for m in models_data}
 
     for phase, model_id in update.phase_models.items():
@@ -214,6 +226,27 @@ async def update_phase_models(update: PhaseModelsUpdate):
     phase_models = config.get("phase_models", DEFAULT_PHASE_MODELS)
     phase_models.update(update.phase_models)
     config["phase_models"] = phase_models
+
+    # Route on the (backend, model) pair: keep phase_backends consistent with the
+    # assigned model so the model actually reaches the right server. A local model
+    # carries its serving backend in the roster; assigning it points the phase at
+    # that backend. A cloud model has no roster backend, so only reset the phase
+    # *off* a local backend (back to the primary cloud backend) — an existing cloud
+    # tier (e.g. openrouter-cheapskate) is left untouched.
+    roster_by_id = {m["id"]: m for m in models_data}
+    phase_backends = config.get("phase_backends", {})
+    backends = config.get("backends", {})
+    primary = config.get("primary_backend", "openrouter")
+    for phase, model_id in update.phase_models.items():
+        model_backend = roster_by_id.get(model_id, {}).get("backend")
+        if model_backend:
+            phase_backends[phase] = model_backend
+        else:
+            current = phase_backends.get(phase)
+            if current and backends.get(current, {}).get("type") == "openai":
+                phase_backends[phase] = primary
+    config["phase_backends"] = phase_backends
+
     _save_config(config)
 
     # Reload the live LLM client so changes take effect immediately

@@ -1,20 +1,33 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { usePreferences, TextSize } from '../context/PreferencesContext'
 import { AGENT_INFO } from '../constants/agents'
 import ModelStatsWidget from '../components/ModelStatsWidget'
 import PhaseStatsWidget from '../components/PhaseStatsWidget'
+import { groupAvailableModels } from '../utils/modelGroups'
 
 interface AvailableModel {
   id: string
   name: string
   provider: string
+  host?: string | null
+  backend?: string | null
+  tier?: number | null
+  context_len?: number | null
 }
 
 interface PhaseModelsConfig {
   phase_models: Record<string, string>
   available_models: AvailableModel[]
   available_phases: string[]
+}
+
+interface BackendInfo {
+  name: string
+  type: string
+  endpoint?: string | null
+  enabled: boolean
+  discover: boolean
 }
 
 interface WorkerConfig {
@@ -41,10 +54,11 @@ interface IngestConfigUpdate {
   scan_time?: string  // "HH:MM" format
 }
 
-type TabId = 'agents' | 'worker' | 'ingest' | 'system' | 'export' | 'accessibility'
+type TabId = 'agents' | 'models' | 'worker' | 'ingest' | 'system' | 'export' | 'accessibility'
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: 'agents', label: 'Agents', icon: '🤖' },
+  { id: 'models', label: 'Models', icon: '🧠' },
   { id: 'worker', label: 'Worker', icon: '⚙️' },
   { id: 'ingest', label: 'Ingest', icon: '📥' },
   { id: 'system', label: 'System', icon: '🖥️' },
@@ -83,6 +97,12 @@ export default function Settings() {
   const [pendingWorker, setPendingWorker] = useState<Partial<WorkerConfig> | null>(null)
   const [pendingIngest, setPendingIngest] = useState<Partial<IngestConfigUpdate> | null>(null)
   const [refreshingModels, setRefreshingModels] = useState(false)
+
+  // Local-endpoint management (Models tab)
+  const [backends, setBackends] = useState<BackendInfo[] | null>(null)
+  const [newEndpoint, setNewEndpoint] = useState('')
+  const [newApiKeyEnv, setNewApiKeyEnv] = useState('')
+  const [backendBusy, setBackendBusy] = useState(false)
 
   const fetchConfig = useCallback(async () => {
     try {
@@ -135,11 +155,24 @@ export default function Settings() {
   }, [])
 
 
+  const fetchBackends = useCallback(async () => {
+    try {
+      const res = await fetch('/api/config/backends')
+      if (res.ok) {
+        const data = await res.json()
+        setBackends(data.backends)
+      }
+    } catch {
+      // Non-critical — the Models tab shows an empty list if this fails.
+    }
+  }, [])
+
   useEffect(() => {
     fetchConfig()
     fetchIngestConfig()
     fetchSystemStatus()
-  }, [fetchConfig, fetchIngestConfig, fetchSystemStatus])
+    fetchBackends()
+  }, [fetchConfig, fetchIngestConfig, fetchSystemStatus, fetchBackends])
 
   // Poll system status when on System tab
   useEffect(() => {
@@ -186,6 +219,96 @@ export default function Settings() {
   const handlePhaseModelChange = (phase: string, modelId: string) => {
     const current = pendingPhaseModels || phaseModels?.phase_models || {}
     setPendingPhaseModels({ ...current, [phase]: modelId })
+  }
+
+  // After any endpoint change, rebuild the roster so discovered models appear,
+  // then reload the endpoints list and the model picker together.
+  const refreshRosterAndLists = useCallback(async () => {
+    const res = await fetch('/api/config/models/refresh', { method: 'POST' })
+    if (!res.ok) {
+      setError('Could not rebuild the model roster — the model list may be out of date.')
+    }
+    await Promise.all([fetchBackends(), fetchConfig()])
+  }, [fetchBackends, fetchConfig])
+
+  // The roster is identical for every agent phase, so group it once per render
+  // rather than recomputing inside the AGENT_INFO map (once per agent).
+  const modelGroups = useMemo(
+    () => groupAvailableModels(phaseModels?.available_models || []),
+    [phaseModels?.available_models],
+  )
+
+  const handleAddEndpoint = async () => {
+    setBackendBusy(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      const res = await fetch('/api/config/backends', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          endpoint: newEndpoint.trim(),
+          api_key_env: newApiKeyEnv.trim() || undefined,
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.detail || 'Could not add endpoint')
+      }
+      const created = await res.json()
+      setNewEndpoint('')
+      setNewApiKeyEnv('')
+      await refreshRosterAndLists()
+      setSuccess(`Added ${created.name}`)
+      setTimeout(() => setSuccess(null), 3000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not add endpoint')
+      setTimeout(() => setError(null), 5000)
+    } finally {
+      setBackendBusy(false)
+    }
+  }
+
+  const handleToggleEndpoint = async (name: string, enabled: boolean) => {
+    setBackendBusy(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/config/backends/${encodeURIComponent(name)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.detail || 'Could not update endpoint')
+      }
+      await refreshRosterAndLists()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not update endpoint')
+      setTimeout(() => setError(null), 5000)
+    } finally {
+      setBackendBusy(false)
+    }
+  }
+
+  const handleDeleteEndpoint = async (name: string) => {
+    setBackendBusy(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/config/backends/${encodeURIComponent(name)}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.detail || 'Could not remove endpoint')
+      }
+      await refreshRosterAndLists()
+      setSuccess(`Removed ${name}`)
+      setTimeout(() => setSuccess(null), 3000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not remove endpoint')
+      setTimeout(() => setError(null), 5000)
+    } finally {
+      setBackendBusy(false)
+    }
   }
 
   const handleWorkerChange = (key: keyof WorkerConfig, value: number) => {
@@ -430,11 +553,6 @@ export default function Settings() {
                   const currentModel = pendingPhaseModels?.[agent.id]
                     || phaseModels?.phase_models?.[agent.id]
                     || ''
-                  const models = phaseModels?.available_models || []
-                  // Sort by provider then name
-                  const sortedModels = [...models].sort((a, b) =>
-                    a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name)
-                  )
 
                   return (
                     <div key={agent.id} className="p-4 bg-surface-900 rounded-lg space-y-2">
@@ -454,10 +572,14 @@ export default function Settings() {
                           className="pl-3 pr-8 py-2 rounded-md border text-sm font-medium bg-surface-800 border-surface-600 text-surface-200"
                           aria-label={`Select model for ${agent.name} agent`}
                         >
-                          {sortedModels.map(m => (
-                            <option key={m.id} value={m.id} className="bg-surface-800 text-white">
-                              {m.name}
-                            </option>
+                          {modelGroups.map((group) => (
+                            <optgroup key={group.label} label={group.label}>
+                              {group.models.map((m) => (
+                                <option key={m.id} value={m.id} className="bg-surface-800 text-white">
+                                  {m.name}
+                                </option>
+                              ))}
+                            </optgroup>
                           ))}
                         </select>
                       </div>
@@ -472,6 +594,100 @@ export default function Settings() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <ModelStatsWidget />
               <PhaseStatsWidget />
+            </div>
+          </div>
+        )}
+
+        {/* MODELS TAB */}
+        {activeTab === 'models' && (
+          <div className="space-y-6">
+            <div className="bg-surface-800 rounded-lg border border-surface-700 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-white">Local model endpoints</h2>
+                <button
+                  onClick={refreshRosterAndLists}
+                  disabled={backendBusy}
+                  className="text-xs text-surface-400 hover:text-white transition-colors disabled:opacity-50"
+                  aria-label="Re-check endpoints for available models"
+                >
+                  ↻ Rediscover
+                </button>
+              </div>
+              <p className="text-sm text-surface-400 mb-6">
+                Connect an OpenAI-compatible server (oMLX, vLLM, LM Studio). Its models join
+                the cloud ones in the Agents tab, free to run.
+              </p>
+
+              <div className="space-y-3">
+                {(backends || []).filter((b) => b.type === 'openai' && b.discover).length === 0 && (
+                  <p className="text-sm text-surface-500">
+                    No endpoints yet. Add one below to run models on your own hardware.
+                  </p>
+                )}
+                {(backends || [])
+                  .filter((b) => b.type === 'openai' && b.discover)
+                  .map((b) => {
+                    const count = (phaseModels?.available_models || []).filter((m) => m.backend === b.name).length
+                    return (
+                      <div key={b.name} className="flex items-center justify-between p-4 bg-surface-900 rounded-lg">
+                        <div className="min-w-0">
+                          <div className="font-medium text-white truncate">{b.name}</div>
+                          <div className="text-xs text-surface-400">
+                            {b.enabled ? `${count} model${count === 1 ? '' : 's'} available` : 'disabled'}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-4 shrink-0">
+                          <button
+                            onClick={() => handleToggleEndpoint(b.name, !b.enabled)}
+                            disabled={backendBusy}
+                            className="text-xs text-surface-400 hover:text-white transition-colors disabled:opacity-50"
+                            aria-label={`${b.enabled ? 'Disable' : 'Enable'} endpoint ${b.name}`}
+                          >
+                            {b.enabled ? 'Disable' : 'Enable'}
+                          </button>
+                          <button
+                            onClick={() => handleDeleteEndpoint(b.name)}
+                            disabled={backendBusy}
+                            className="text-xs text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
+                            aria-label={`Remove endpoint ${b.name}`}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+              </div>
+
+              <div className="mt-6 pt-6 border-t border-surface-700 space-y-3">
+                <h3 className="text-sm font-semibold text-white">Add an endpoint</h3>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <input
+                    value={newEndpoint}
+                    onChange={(e) => setNewEndpoint(e.target.value)}
+                    placeholder="http://host:8000/v1"
+                    aria-label="Endpoint base URL"
+                    className="flex-1 px-3 py-2 rounded-md bg-surface-900 border border-surface-600 text-surface-200 text-sm placeholder:text-surface-500"
+                  />
+                  <input
+                    value={newApiKeyEnv}
+                    onChange={(e) => setNewApiKeyEnv(e.target.value)}
+                    placeholder="API key env var (optional)"
+                    aria-label="API key environment variable name (optional)"
+                    className="flex-1 px-3 py-2 rounded-md bg-surface-900 border border-surface-600 text-surface-200 text-sm placeholder:text-surface-500"
+                  />
+                  <button
+                    onClick={handleAddEndpoint}
+                    disabled={backendBusy || !newEndpoint.trim()}
+                    className="px-4 py-2 bg-pbs-500 hover:bg-pbs-400 disabled:opacity-50 text-white rounded-md text-sm transition-colors whitespace-nowrap"
+                  >
+                    {backendBusy ? 'Working…' : 'Add & discover'}
+                  </button>
+                </div>
+                <p className="text-xs text-surface-500">
+                  The key is read from that named environment variable on the server — it isn't stored here.
+                </p>
+              </div>
             </div>
           </div>
         )}
