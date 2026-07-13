@@ -9,7 +9,7 @@ import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from api.models.events import EventCreate, EventData, EventType
 from api.models.job import JobStatus
@@ -43,6 +43,13 @@ from api.services.llm import (
     start_run_tracking,
 )
 from api.services.logging import get_logger, setup_logging
+from api.services.style_engine import (
+    PostStageResult,
+    PromptBlockError,
+    render_prompt_blocks,
+    strip_style_tokens,
+)
+from api.services.style_engine.prompt_blocks import resolve_prompt_profile
 from api.services.utils import calculate_transcript_metrics
 
 # Initialize logging for worker
@@ -560,6 +567,7 @@ class JobWorker:
                     if validator_result.get("output"):
                         try:
                             validation_data = self._parse_validation_result(validator_result["output"])
+                            validation_data = await self._apply_style_lint(job_id, context, validation_data)
                             refreshed = await get_job(job_id)
                             phases = refreshed.phases or [] if refreshed else []
                             phases = apply_validator_model(phases, validator_result.get("model"))
@@ -736,7 +744,7 @@ Extract any name or spelling corrections that should be added to the glossary. S
         # Pick up any model/config changes made via the Settings API since
         # this worker process started (api and worker are separate containers).
         self.llm.reload_config()
-        project_name = job.get("project_name", "Unknown")
+        project_name = job.get("project_name") or "Unknown"
 
         logger.info("Processing job", extra={"job_id": job_id, "project_name": project_name})
 
@@ -889,6 +897,7 @@ Extract any name or spelling corrections that should be added to the glossary. S
 
             # Process each phase
             context = {
+                "project_name": project_name,  # Expose project name for style-engine emitters (e.g., timestamp post-stage)
                 "transcript": transcript_content,
                 "transcript_file": job.get("transcript_file", ""),
                 "project_path": project_path,
@@ -990,6 +999,7 @@ Extract any name or spelling corrections that should be added to the glossary. S
                 if phase_name == "validator" and phase_result.get("output"):
                     try:
                         validation_data = self._parse_validation_result(phase_result["output"])
+                        validation_data = await self._apply_style_lint(job_id, context, validation_data)
                         from api.models.job import JobUpdate as JU
                         from api.services.database import update_job as db_update_job
 
@@ -1435,6 +1445,7 @@ Extract any name or spelling corrections that should be added to the glossary. S
         reval = await self._run_phase(job_id, "validator", context, project_path)
         if reval and reval.get("success"):
             verdict = self._parse_validation_result(reval.get("output", ""))
+            verdict = await self._apply_style_lint(job_id, context, verdict)
             escalated_models["validator"] = {"model": reval.get("model"), "cost": reval.get("cost")}
         else:
             verdict = {"overall": "fail"}
@@ -1928,6 +1939,31 @@ Extract any name or spelling corrections that should be added to the glossary. S
 
                 context["transcript"] = split_interior_speaker_changes(context.get("transcript", ""))
 
+        # Style-engine pre-generation hook (kill-switched by default; see
+        # routing.style_engine in config/llm-config.json). Placed ahead of the
+        # chunking branch so a chunked formatter path would inherit it once
+        # that phase is wired (later task). Stale-state guard is unconditional
+        # so a prior phase's style_pre never leaks into this phase's prompt.
+        context.pop("style_pre", None)
+        style_cfg = self._style_cfg()
+        if style_cfg.get("enabled") and style_cfg.get("phases", {}).get(phase_name, {}).get("pre"):
+            try:
+                from api.services.style_engine import load_rules, run_pre_stage
+
+                pre = run_pre_stage(
+                    phase_name,
+                    context,
+                    load_rules(style_cfg.get("rules_file", "config/house_style.yaml")),
+                )
+                if pre.prompt_section:
+                    context["style_pre"] = {"prompt_section": pre.prompt_section, **pre.data}
+            except Exception:
+                logger.warning(
+                    "style pre-stage failed open",
+                    extra={"job_id": job_id, "phase": phase_name},
+                    exc_info=True,
+                )
+
         # Check for chunked formatter processing
         if phase_name == "formatter":
             chunking_config = self.llm.config.get("routing", {}).get("chunking", {})
@@ -2011,6 +2047,17 @@ Extract any name or spelling corrections that should be added to the glossary. S
                 timeout=effective_timeout,
             )
 
+            # Style-engine post-generation hook (kill-switched by default; see
+            # routing.style_engine in config/llm-config.json). Shadow mode
+            # records checks/events but returns the raw content unchanged;
+            # enforce mode returns normalized content plus the full result so
+            # the persist step below can write provenance + a pre-fix raw
+            # archive. Off (default) returns (response.content, None) as a
+            # pure passthrough.
+            final_content, style_post = await self._apply_style_post(
+                job_id, phase_name, response.content, context, project_path
+            )
+
             # Save output
             output_file = project_path / f"{phase_name}_output.md"
             if output_file.exists():
@@ -2027,7 +2074,13 @@ Extract any name or spelling corrections that should be added to the glossary. S
             provenance_header = (
                 f"<!-- model: {response.model} | cost: ${response.cost:.4f} | tokens: {response.total_tokens} -->\n"
             )
-            output_file.write_text(provenance_header + response.content)
+            style_line = ""
+            if style_post is not None:
+                style_line = (
+                    f"<!-- style-engine: fixes: {len(style_post.check.fixes)} | "
+                    f"flags: {len(style_post.check.violations)} -->\n"
+                )
+            output_file.write_text(provenance_header + style_line + final_content)
 
             # Log phase completed
             await log_event(
@@ -2045,7 +2098,7 @@ Extract any name or spelling corrections that should be added to the glossary. S
 
             return {
                 "success": True,
-                "output": response.content,
+                "output": final_content,
                 "cost": response.cost,
                 "tokens": response.total_tokens,
                 "input_tokens": response.input_tokens,
@@ -2110,6 +2163,188 @@ Extract any name or spelling corrections that should be added to the glossary. S
                 )
             )
             return {"success": False, "error": str(e), "cost": 0, "tokens": 0}
+
+    def _style_cfg(self) -> dict:
+        """The `routing.style_engine` config block (empty dict when absent).
+
+        Absent block, or `enabled: false`, or a phase mode of "off" is the
+        kill switch: every hook that reads this must degrade to a no-op.
+        """
+        return self.llm.config.get("routing", {}).get("style_engine", {}) or {}
+
+    async def _apply_style_post(
+        self,
+        job_id: int,
+        phase_name: str,
+        content: str,
+        context: Dict[str, Any],
+        project_path: Path,
+    ) -> Tuple[str, Optional[PostStageResult]]:
+        """Run the style-engine post-generation stage for one phase's raw output.
+
+        Returns ``(final_content, PostStageResult | None)``. Fail-open on any
+        exception (rules load failure, engine bug, event-logging failure) --
+        logs a warning and returns the original ``content`` unchanged, exactly
+        as if the hook were off. The engine can never fail a job.
+
+        Shadow mode records events + `context["style_checks"]` but returns the
+        raw ``content`` untouched (``PostStageResult`` is discarded -- callers
+        use the ``None`` sentinel to know no provenance/raw-archive handling
+        is needed). Enforce mode returns the normalized output and the full
+        result so the caller can persist provenance + the pre-normalization
+        raw file -- and additionally logs one ``style_violation`` event per
+        ``AppliedFix`` (``action: "fixed"``), the feedback loop's signal for
+        which deterministic fixes are actually firing in production (see
+        ``docs/STYLE_FEEDBACK_LOOP.md``).
+        """
+        cfg = self._style_cfg()
+        mode = cfg.get("phases", {}).get(phase_name, {}).get("post", "off")
+        if not (cfg.get("enabled") and mode in ("shadow", "enforce")):
+            return content, None
+        try:
+            from api.services.style_engine import load_rules, run_post_stage
+
+            post = run_post_stage(
+                phase_name,
+                content,
+                context,
+                load_rules(cfg.get("rules_file", "config/house_style.yaml")),
+            )
+            for violation in post.check.violations:
+                await log_event(
+                    EventCreate(
+                        job_id=job_id,
+                        event_type=EventType.style_violation,
+                        data=EventData(
+                            phase=phase_name,
+                            extra={
+                                **violation.to_dict(),
+                                "mode": mode,
+                                "action": "flagged" if mode == "enforce" else "shadow",
+                            },
+                        ),
+                    )
+                )
+
+            if mode == "shadow":
+                # Record-only: raw content flows AND no downstream state changes.
+                # Deliberately does NOT set context["style_checks"] -- that key
+                # feeds the validator pre-stage's "deterministic checks already
+                # performed" section, so populating it in shadow would alter the
+                # validator prompt for checks that were never enforced (PR #295
+                # review #4). The style_violation events above are shadow's record.
+                return content, None
+
+            # Enforce mode only, past this point. Record the check for the
+            # validator pre-stage + lint merge to consume, then log one
+            # style_violation event per deterministic AppliedFix so "the model
+            # keeps getting X wrong (auto-fixed N times)" is visible to the
+            # feedback loop (scripts/style_report.py), not just the
+            # provenance comment in the persisted output file. Mirrors the
+            # violations loop above exactly (same EventCreate/EventData
+            # shape) and stays inside this method's fail-open try.
+            context.setdefault("style_checks", {})[phase_name] = post.check.to_dict()
+            for fix in post.check.fixes:
+                await log_event(
+                    EventCreate(
+                        job_id=job_id,
+                        event_type=EventType.style_violation,
+                        data=EventData(
+                            phase=phase_name,
+                            extra={**fix.to_dict(), "mode": mode, "action": "fixed"},
+                        ),
+                    )
+                )
+
+            if post.changed and cfg.get("keep_raw_on_fix", True):
+                (project_path / f"{phase_name}_output.raw.md").write_text(content)
+
+            return post.normalized_output, post
+        except Exception:
+            logger.warning(
+                "style post-stage failed open",
+                extra={"job_id": job_id, "phase": phase_name},
+                exc_info=True,
+            )
+            # Clean up partial style_checks entry on fail-open. If log_event
+            # raised mid-loop, the already-written context["style_checks"][phase]
+            # entry is incomplete; remove it so the QA-gate merge doesn't consume
+            # a partial event trail as if the phase checked completely.
+            checks = context.get("style_checks")
+            if isinstance(checks, dict):
+                checks.pop(phase_name, None)
+            return content, None
+
+    async def _apply_style_lint(
+        self, job_id: int, context: Dict[str, Any], validation_data: Optional[dict]
+    ) -> Optional[dict]:
+        """Run the deterministic lint suite and merge style flags into the validator verdict.
+
+        Returns the (possibly merged) ``validation_data``. Fail-open: any
+        exception logs a warning and returns ``validation_data`` unchanged,
+        exactly as if the hook were off.
+
+        Shadow mode records ``context["lint_checks"]`` and logs
+        ``style_violation`` events (``source: "lint"``) but returns
+        ``validation_data`` untouched. Enforce mode combines each canonical
+        phase's post-stage ``context["style_checks"]`` entry (if any, from
+        ``_apply_style_post``) with its ``run_lint`` result -- post-stage
+        violations first, lint violations appended after, deduped by
+        ``(rule_id, message)`` -- and merges the combined result into
+        ``validation_data`` via ``merge_style_flags`` so BOTH deterministic
+        sources (not lint alone) reach the persisted QA verdict.
+        """
+        cfg = self._style_cfg()
+        mode = cfg.get("phases", {}).get("validator", {}).get("lint", "off")
+        if not (cfg.get("enabled") and mode in ("shadow", "enforce")):
+            return validation_data
+        try:
+            from api.services.style_engine import load_rules, merge_style_flags, run_lint
+
+            rules = load_rules(cfg.get("rules_file", "config/house_style.yaml"))
+            lint_results = run_lint(context, rules)  # {phase: PhaseCheckResult}
+
+            # Combine: post-stage style_checks (context) + lint results, per
+            # phase -- post-stage violations first, lint appended after,
+            # deduped by (rule_id, message) within a phase.
+            post_checks = context.get("style_checks") or {}
+            combined: Dict[str, dict] = {}
+            for phase, lint_check in lint_results.items():
+                lint_dict = lint_check.to_dict()
+                post_violations = list((post_checks.get(phase) or {}).get("violations") or [])
+                seen = {(v.get("rule_id"), v.get("message")) for v in post_violations}
+                merged_violations = list(post_violations)
+                for violation in lint_dict.get("violations") or []:
+                    key = (violation.get("rule_id"), violation.get("message"))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    merged_violations.append(violation)
+                combined[phase] = {**lint_dict, "violations": merged_violations}
+
+            for phase, check in lint_results.items():
+                for violation in check.violations:
+                    await log_event(
+                        EventCreate(
+                            job_id=job_id,
+                            event_type=EventType.style_violation,
+                            data=EventData(
+                                phase=phase,
+                                extra={**violation.to_dict(), "source": "lint", "mode": mode},
+                            ),
+                        )
+                    )
+
+            context["lint_checks"] = {p: c.to_dict() for p, c in lint_results.items()}
+
+            if mode == "shadow":
+                return validation_data  # record-only
+
+            return merge_style_flags(validation_data, combined, cfg.get("qa_gate", {}))
+        except Exception:
+            logger.warning("style lint failed open", extra={"job_id": job_id}, exc_info=True)
+            context.pop("lint_checks", None)  # no partial state (1b precedent)
+            return validation_data
 
     @staticmethod
     def _section_tail(content: str, max_chars: int = 200) -> str:
@@ -2269,6 +2504,16 @@ Please format this transcript section:
 {chunk.content}
 ---"""
 
+                # Append the style-engine pre-generation prompt section (if the
+                # kill-switched hook in `_run_phase` produced one before the
+                # chunking branch ran). Every chunk is an independent LLM call,
+                # so each one needs the rules -- mirrors `_build_phase_prompt`'s
+                # append for the unchunked path.
+                style_pre = context.get("style_pre") or {}
+                style_section = style_pre.get("prompt_section")
+                if style_section:
+                    user_message = f"{user_message}\n\n{style_section}"
+
                 messages = [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message},
@@ -2397,6 +2642,14 @@ Please format this transcript section:
             # Merge text outputs
             merged = merge_formatter_chunks([r["content"] for r in chunk_results])
 
+            # Style-engine post-generation hook, run ONCE on the merged output
+            # (not per-chunk -- see `_apply_style_post` for shadow/enforce/
+            # fail-open semantics; kill-switched by default). Mirrors the
+            # `_run_phase` persist site exactly, including the `.raw.md`
+            # pre-normalization archive, which `_apply_style_post` handles
+            # internally.
+            final_content, style_post = await self._apply_style_post(job_id, "formatter", merged, context, project_path)
+
             # Save merged output
             output_file = project_path / "formatter_output.md"
             if output_file.exists():
@@ -2410,7 +2663,13 @@ Please format this transcript section:
                 f"backend: {backend} | "
                 f"cost: ${total_cost:.4f} | tokens: {total_tokens} -->\n"
             )
-            output_file.write_text(provenance_header + merged)
+            style_line = ""
+            if style_post is not None:
+                style_line = (
+                    f"<!-- style-engine: fixes: {len(style_post.check.fixes)} | "
+                    f"flags: {len(style_post.check.violations)} -->\n"
+                )
+            output_file.write_text(provenance_header + style_line + final_content)
 
             await log_event(
                 EventCreate(
@@ -2430,7 +2689,7 @@ Please format this transcript section:
 
             return {
                 "success": True,
-                "output": merged,
+                "output": final_content,
                 "cost": total_cost,
                 "tokens": total_tokens,
                 "input_tokens": total_input_tokens,
@@ -2458,6 +2717,18 @@ Please format this transcript section:
                 "cost": 0,
             }
 
+    def _style_prompt_profile(self, phase_name: str) -> str:
+        """Which prompt-block profile ("full" or "slim") to render for this phase.
+
+        Reads `routing.style_engine` from the LLM config (empty dict when
+        absent -- the kill-switch default, which resolves to "full"). "slim" is
+        selected only when the phase's style-engine mode is "enforce".
+        Delegates to the pure `resolve_prompt_profile` so the selection logic is
+        unit-testable without a DB-backed worker.
+        """
+        cfg = self.llm.config.get("routing", {}).get("style_engine", {})
+        return resolve_prompt_profile(cfg, phase_name)
+
     def _load_agent_prompt(self, phase_name: str, model: Optional[str] = None) -> str:
         """Load the system prompt for an agent phase.
 
@@ -2467,6 +2738,14 @@ Please format this transcript section:
           the model identifier, if provided. Without this, the LLM would
           hallucinate (typically a date near its training cutoff and a generic
           model name).
+
+        Finally, whichever path produced the text (file or hardcoded
+        fallback), it flows through a single `render_prompt_blocks` call at
+        the end of this method to substitute any `{{style:KEY}}` tokens. All
+        five phase prompts (`prompts/{analyst,formatter,timestamp,seo,
+        validator}.md`) carry `{{style:*}}` tokens now, so this call is live
+        on every phase run -- the fallback prompts above do not carry tokens
+        and pass through render_prompt_blocks as a no-op.
         """
         prompt_file = AGENTS_DIR / f"{phase_name}.md"
 
@@ -2479,11 +2758,10 @@ Please format this transcript section:
             if model:
                 text = text.replace("{model name you are running as}", model)
                 text = text.replace("{the model you are running as}", model)
-            return text
-
-        # Fallback prompts if files don't exist
-        fallback_prompts = {
-            "analyst": """You are a transcript analyst for PBS Wisconsin. Your role is to analyze raw video transcripts and identify:
+        else:
+            # Fallback prompts if files don't exist
+            fallback_prompts = {
+                "analyst": """You are a transcript analyst for PBS Wisconsin. Your role is to analyze raw video transcripts and identify:
 
 1. Key topics and themes discussed
 2. Speaker identification and roles
@@ -2492,7 +2770,7 @@ Please format this transcript section:
 5. Items that may need human review (unclear audio, names to verify)
 
 Output a detailed analysis document in markdown format that will guide the formatting and SEO agents.""",
-            "formatter": """You are a transcript formatter for PBS Wisconsin. Your role is to transform raw transcripts into clean, readable markdown documents.
+                "formatter": """You are a transcript formatter for PBS Wisconsin. Your role is to transform raw transcripts into clean, readable markdown documents.
 
 CRITICAL: Preserve ALL spoken dialogue. Do NOT summarize or condense. Every sentence must appear in your output.
 
@@ -2505,7 +2783,7 @@ Guidelines:
 - Maintain the original meaning and voice
 
 Output a clean, well-formatted markdown transcript with COMPLETE content.""",
-            "seo": """You are an SEO specialist for PBS Wisconsin streaming content. Your role is to generate search-optimized metadata for video content.
+                "seo": """You are an SEO specialist for PBS Wisconsin streaming content. Your role is to generate search-optimized metadata for video content.
 
 Generate:
 1. Title (compelling, keyword-rich, under 60 chars)
@@ -2515,7 +2793,7 @@ Generate:
 5. Categories
 
 Output as JSON with keys: title, short_description, long_description, tags, categories""",
-            "copy_editor": """You are a copy editor for PBS Wisconsin. Your role is to review and refine formatted transcripts for broadcast quality.
+                "copy_editor": """You are a copy editor for PBS Wisconsin. Your role is to review and refine formatted transcripts for broadcast quality.
 
 Focus on:
 - Grammar and punctuation
@@ -2525,7 +2803,7 @@ Focus on:
 - Preserving speaker voice while improving prose
 
 Output the polished transcript with any notes on changes made.""",
-            "validator": """You are a quality validation agent for Cardigan. Review all pipeline outputs for quality.
+                "validator": """You are a quality validation agent for Cardigan. Review all pipeline outputs for quality.
 
 Check:
 1. Formatter: Speaker labels use first+last name only (no titles like Dr./Mr./Ms.), review notes only at top
@@ -2537,11 +2815,35 @@ Output a structured JSON checklist with:
 - checks: array of {phase, criterion, passed, note}
 - issues: array of {severity, phase, description}
 - recommendation: string""",
-        }
+            }
 
-        return fallback_prompts.get(
-            phase_name, f"You are the {phase_name} agent. Process the input and provide appropriate output."
+            text = fallback_prompts.get(
+                phase_name, f"You are the {phase_name} agent. Process the input and provide appropriate output."
+            )
+
+        rules_file = (
+            self.llm.config.get("routing", {}).get("style_engine", {}).get("rules_file", "config/house_style.yaml")
         )
+        try:
+            return render_prompt_blocks(
+                text,
+                profile=self._style_prompt_profile(phase_name),
+                rules_path=rules_file,
+            )
+        except PromptBlockError:
+            # Graceful degradation (PR #295 review #1): prompt-block rendering
+            # is fail-fast, but a missing/corrupt house-style YAML must not fail
+            # every job. Fall back to the raw prompt with {{style:*}} tokens
+            # stripped (never leak literal tokens to the LLM). A boot-time
+            # check (validate_prompt_blocks in main.lifespan) already refuses to
+            # start on a broken file, so reaching here means the file broke
+            # AFTER boot (e.g. an mtime-triggered live reload of bad YAML).
+            logger.warning(
+                "prompt-block rendering failed; running phase on unstyled prompt (tokens stripped)",
+                extra={"phase": phase_name, "rules_file": rules_file},
+                exc_info=True,
+            )
+            return strip_style_tokens(text)
 
     def _build_phase_prompt(self, phase_name: str, context: Dict[str, Any]) -> str:
         """Build the user prompt for a phase with relevant context.
@@ -2564,6 +2866,13 @@ Output a structured JSON checklist with:
             prompt += "\n\n## Previous Output (for reference)\n\n"
             prompt += "Use this as a starting point. Fix the flagged issues while preserving what worked:\n\n"
             prompt += f"---\n{previous_output}\n---"
+
+        # Append the style-engine pre-generation prompt section (if the
+        # kill-switched hook in `_run_phase` produced one for this phase).
+        style_pre = context.get("style_pre") or {}
+        section = style_pre.get("prompt_section")
+        if section:
+            prompt = f"{prompt}\n\n{section}"
 
         return prompt
 
@@ -2855,7 +3164,16 @@ The editor reviewed the copy-edited transcript and requests these changes:
 
 Identify 3-8 logical chapter breaks based on topic transitions, speaker changes, and segment markers in the content above.
 
-Output a timestamp report with TWO sections:
+"""
+            if self._style_prompt_profile("timestamp") == "slim":
+                # Slim profile: the system prompt's {{style:timestamp.output_contract}}
+                # token already spells out the fenced ```chapters contract (and the
+                # deterministic post-stage renders the Media Manager/YouTube sections
+                # from it) -- a "TWO sections" instruction here would contradict that
+                # contract, so keep this minimal and defer to the system instructions.
+                prompt += "Select chapter boundaries and titles per the output contract in your instructions."
+            else:
+                prompt += """Output a timestamp report with TWO sections:
 1. **Media Manager Format** - Table with Title, Start Time (H:MM:SS.000), End Time (H:MM:SS.999)
 2. **YouTube Format** - Simple list like "0:00 Introduction" for video descriptions
 

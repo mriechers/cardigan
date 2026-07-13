@@ -1,0 +1,546 @@
+########################################################################
+# PBS Wisconsin house-style rule data — machine source of truth.
+#
+# Loaded by api.services.style_engine.rules.load_rules(). This file is
+# transcribed from (and must stay reconciled with) the human-canonical
+# guide plus the machine sources it was itself reconciled against:
+#
+#   - pbswi workspace skill: reference/house-style/SKILL.md   (human doc)
+#   - cardigan-v4/prompts/{seo,formatter,timestamp,validator,analyst}.md
+#   - cardigan-v4/claude-desktop-project/EDITOR_AGENT_INSTRUCTIONS.md
+#   - cardigan-v4/mcp_server/server.py (WRITABLE_FIELDS char limits)
+#   - cardigan-v4/scripts/poc_house_style_normalizer.py (RULES dict seed)
+#
+# When the human-facing SKILL.md changes, update this file too and bump
+# meta.style_guide_synced.
+########################################################################
+
+meta:
+  version: 1
+  human_doc: "pbswi workspace skill: reference/house-style/SKILL.md"
+  style_guide_synced: "2026-07-10"
+
+# ------------------------------------------------------------------
+# Voice — prohibited language + person-voice markers.
+# Tier: flag (never auto-fix — these need editorial judgment).
+# Severity: error, except "learn" and "free" (false-positive prone
+# substring/word matches) which are warning.
+# ------------------------------------------------------------------
+voice:
+  forbidden_phrases:
+    # --- viewer directives (never tell the viewer what to do) ---
+    - {id: watch_as, match: "watch as", category: viewer_directive, tier: flag, severity: error}
+    - {id: watch_how, match: "watch how", category: viewer_directive, tier: flag, severity: error}
+    - {id: see_how, match: "see how", category: viewer_directive, tier: flag, severity: error}
+    - {id: follow, match: "follow", category: viewer_directive, tier: flag, severity: error}
+    - {id: discover, match: "discover", category: viewer_directive, tier: flag, severity: error}
+    - {id: learn, match: "learn", category: viewer_directive, tier: flag, severity: warning}
+    - {id: explore, match: "explore", category: viewer_directive, tier: flag, severity: error}
+    - {id: find_out, match: "find out", category: viewer_directive, tier: flag, severity: error}
+    - {id: experience, match: "experience", category: viewer_directive, tier: flag, severity: error}
+    # --- promises (don't promise what the content will do for the viewer) ---
+    - {id: will_show, match: "will show", category: promise, tier: flag, severity: error}
+    - {id: will_teach, match: "will teach", category: promise, tier: flag, severity: error}
+    - {id: will_reveal, match: "will reveal", category: promise, tier: flag, severity: error}
+    # --- sales language ---
+    - {id: free, match: "\\bfree\\b", category: sales, tier: flag, severity: warning, regex: true}
+    # --- emotional predictions (don't tell viewers how they'll feel/what to expect) ---
+    - {id: what_viewers_can_expect, match: "what viewers can expect", category: emotional_prediction, tier: flag, severity: error}
+    # --- unevidenced superlatives ---
+    - {id: amazing, match: "amazing", category: superlative, tier: flag, severity: error}
+    - {id: incredible, match: "incredible", category: superlative, tier: flag, severity: error}
+    - {id: extraordinary, match: "extraordinary", category: superlative, tier: flag, severity: error}
+    # --- calls to action ---
+    - {id: join_us, match: "join us", category: cta, tier: flag, severity: error}
+    - {id: dont_miss, match: "don't miss", category: cta, tier: flag, severity: error}
+    - {id: tune_in, match: "tune in", category: cta, tier: flag, severity: error}
+    # --- first-person promotional voice ("we sell", not "we describe") ---
+    - {id: we_break_down, match: "we break down", category: first_person_promo, tier: flag, severity: error}
+    - {id: we_analyze, match: "we analyze", category: first_person_promo, tier: flag, severity: error}
+  # Broader first/second-person constructions (beyond the fixed forbidden
+  # phrases above) — house style is third-person, descriptive, never
+  # addresses or instructs the viewer directly.
+  first_person_markers:
+    - "\\bwe\\b"
+    - "\\bwe'll\\b"
+    - "\\bwe've\\b"
+    - "\\bour\\b"
+    - "\\bus\\b"
+    - "\\bI\\b"
+    - "\\bmy\\b"
+  second_person_markers:
+    - "\\byou\\b"
+    - "\\byou'll\\b"
+    - "\\byou're\\b"
+    - "\\byou've\\b"
+    - "\\byour\\b"
+
+# ------------------------------------------------------------------
+# Casing — down style, with a canonical-casing seed for proper nouns,
+# acronyms, and abbreviation variants. Seeded from
+# scripts/poc_house_style_normalizer.py RULES (every PoC entry kept),
+# extended with Wisconsin institutional/program terms from the house
+# style skill.
+# ------------------------------------------------------------------
+casing:
+  style: down
+  proper_nouns:
+    - Wisconsin
+    - Madison
+    - Eau Claire
+    - Democratic
+    - Republican
+    - Supreme Court
+    - Congress
+    - Senate
+    - Legislature
+    - Capitol
+    - Governor
+    - Lt. Governor
+    - Attorney General
+    - Here & Now
+    - Inside Wisconsin Politics
+    - Wisconsin Life
+    - University Place
+    - The Look Back
+    - Digital Shorts
+    - Garden Wanderings
+    - Marquette Poll
+    - PBS Wisconsin
+    # Tribal nations & cultural terms (stage-0 baseline evidence: normalization
+    # lowercased these in Wisconsin Life / Look Back titles — 2026-07-10)
+    - Ojibwe
+    - Ho-Chunk
+    - Ho-Chunk Nation
+    - Menominee
+    - Oneida
+    - Potawatomi
+    - Stockbridge-Munsee
+    - Anishinaabe
+    # Months & days (proper nouns in English; absent from seed → down-styled
+    # titles lowercased "August" in stage-0 baselines).
+    # "May" and "March" are deliberately excluded: they're ambiguous English
+    # homographs (the modal verb "may" / the common noun "a march") as well
+    # as month names, and the casing engine restores canonical case on every
+    # match with no surrounding-context awareness -- seeding them corrupts
+    # any sentence using the non-month sense (e.g. "what the ruling may mean
+    # for a march to the Capitol"). See
+    # tests/test_house_style_config.py::TestCasingSeedExcludesAmbiguousMonths.
+    - January
+    - February
+    - April
+    - June
+    - July
+    - August
+    - September
+    - October
+    - November
+    - December
+    - Monday
+    - Tuesday
+    - Wednesday
+    - Thursday
+    - Friday
+    - Saturday
+    - Sunday
+  acronyms:
+    - SCOTUS
+    - PBS
+    - WI
+    - US
+    - U.S.
+    - DSA
+    - ACLU
+    - CPC
+    - GOP
+  casing_variants:
+    dem: "Dem"
+    dems: "Dems"
+    gov: "Gov."
+    sen: "Sen."
+    rep: "Rep."
+    pres: "Pres."
+    "atty gen": "Atty. Gen."
+  surname_stoplist:
+    - van
+    - der
+    - de
+    - la
+    - the
+
+# ------------------------------------------------------------------
+# Field character/count limits. SINGLE numbers, sourced from
+# mcp_server/server.py:100-109 WRITABLE_FIELDS (ground truth). The
+# seo.md and validator.md prompts no longer hardcode their own copies of
+# these numbers -- both now pull them via {{style:*}} tokens rendered
+# from this file (see prompt_blocks below), so this is the only place
+# the limits are authored. See drift test.
+# ------------------------------------------------------------------
+limits:
+  fields:
+    title: {max: 80}
+    short_description: {max: 90}
+    long_description: {max: 350}
+    keywords: {count: {min: 15, max: 20}}
+    social_description: {}
+    social_tags: {}
+    facebook_description: {}
+    hashtags: {}
+  content_type_overrides:
+    short:
+      keywords: {count: {min: 5, max: 10}}
+
+# ------------------------------------------------------------------
+# Per-phase deterministic rules.
+# ------------------------------------------------------------------
+phases:
+  analyst:
+    # Required output-section headings, transcribed from prompts/analyst.md's
+    # "Brainstorming Document Structure" schema. Matched case-insensitively
+    # as a SUBSTRING of an actual markdown heading by post_stage's
+    # analyst.section_missing check -- "SEO Keywords" matches the doc's
+    # real "## SEO Keywords (Preliminary)" heading without needing the
+    # parenthetical spelled out here.
+    required_sections:
+      - Summary
+      - Key Themes
+      - Speakers & Roles
+      - Structural Breakdown
+      - SEO Keywords
+  formatter:
+    # Enforce-tier: deterministic find/replace, word-boundary regexes,
+    # from prompts/formatter.md's "PBS Wisconsin House Style" section
+    # (and mirrored in the house-style skill §2). Sentence-initial
+    # guarding for liberals/conservatives (and their singular adjective
+    # forms) is left to the phase engine — see `note` on those entries
+    # — rather than encoded as a lookbehind, since "sentence-initial"
+    # spans more than just string-start (mid-document sentence starts
+    # too).
+    substitutions:
+      - {find: "\\b[Oo]kay\\b", replace: "OK", tier: enforce}
+      - {find: "\\b[Pp]artizan\\b", replace: "partisan", tier: enforce, note: "misspelling fix; always lowercase per AP spelling of partisan/bipartisan/nonpartisan"}
+      - {find: "\\b[Mm]arquette [Pp]oll\\b", replace: "Marquette Poll", tier: enforce}
+      - {find: "\\bSenator\\b", replace: "Sen.", tier: enforce}
+      - {find: "\\bRepresentative\\b", replace: "Rep.", tier: enforce}
+      - {find: "\\bGovernor\\b", replace: "Gov.", tier: enforce}
+      - {find: "\\bPresident\\b", replace: "Pres.", tier: enforce}
+      - {find: "\\bAttorney General\\b", replace: "Atty. Gen.", tier: enforce}
+      - {find: "\\bLiberals\\b", replace: "liberals", tier: enforce, note: "engine applies non-sentence-initial guard before matching"}
+      - {find: "\\bLiberal\\b", replace: "liberal", tier: enforce, note: "adjective form; engine applies non-sentence-initial guard before matching"}
+      - {find: "\\bConservatives\\b", replace: "conservatives", tier: enforce, note: "engine applies non-sentence-initial guard before matching"}
+      - {find: "\\bConservative\\b", replace: "conservative", tier: enforce, note: "adjective form; engine applies non-sentence-initial guard before matching"}
+      - {id: de_italicize_program_names, find: "\\*(Here & Now|University Place|Wisconsin Life|The Look Back|Digital Shorts|Garden Wanderings|Inside Wisconsin Politics)\\*", replace: "\\1", tier: enforce, note: "strips markdown italics around known program names; replace is a backreference to the matched name"}
+      # Flag-tier: context-dependent, surfaced for editorial review, never auto-fixed.
+      - {id: oxford_comma, detect: ",\\s+and\\b", tier: flag, severity: warning, note: "no Oxford comma in lists, except when a list of clauses needs it for clarity — context-dependent"}
+      - {id: capitol_capital, detect: "\\bcapital\\b", tier: flag, severity: warning, note: "'Capitol' (building/district) vs 'capital' (money/assets) — context-dependent, needs human judgment"}
+    speaker_label:
+      pattern: "^\\*\\*[A-Z][\\w.'-]+(?: [A-Z][\\w.'-]+)+:\\*\\*"
+      trailing_spaces: 2
+      blank_lines_between_turns: 1
+      no_honorifics: true
+    review_notes:
+      placement: top
+      format: html_comment
+      tier: flag
+  timestamp:
+    chapter_max_by_duration:
+      - {lt: 5, max: 3}
+      - {lt: 15, max: 5}
+      - {lt: 30, max: 7}
+      - {lt: 60, max: 8}
+      - {lt: null, max: 10}
+    first_chapter: {time: "0:00", title: "Episode intro", tier: enforce}
+    chapter_name: {case: sentence, words: {min: 2, max: 6}, tier: flag}
+    formats:
+      media_manager: {start: "H:MM:SS.000", end: "H:MM:SS.999", tier: enforce}
+      youtube: {style: "M:SS", tier: enforce}
+    constraints: {no_gaps: true, chronological: true, final_end_equals_srt_end: true}
+  validator:
+    semantic_checks:
+      - "title accurately reflects content"
+      - "description accurately reflects content"
+
+# ------------------------------------------------------------------
+# Program-specific copy formulas (house style skill §4 / EDITOR
+# instructions "PROGRAM-SPECIFIC RULES"). Only programs with documented
+# formulas get an entry here; programs without special rules fall back
+# to the cross-cutting voice/casing/limits rules above.
+# ------------------------------------------------------------------
+programs:
+  "Here & Now":
+    livestream_title_suffix: " | Here & Now"
+    title_format: "{subject} on {topic}"
+    short_description_formula: "{role} {verb} {subject}."
+    long_description_formula: "{name}, {organization_and_title}, {verb} {subject}."
+    verbs:
+      elected: [discusses]
+      non_elected: [explains, describes, considers]
+    electeds_include_party_location: true
+    capitalize_executive_titles: true
+  "University Place":
+    require_series_keyword: true
+    no_honorifics: true
+    tone: informative_not_inflammatory
+  "Wisconsin Life":
+    style: character_driven
+    location_tags: important
+    cultural_regional_context: emphasized
+  "The Look Back":
+    must_name: [hosts, institutions, historians]
+    tier: advise
+    hosts: [Nick, Taylor]
+    focus: why_it_matters_over_what_happened
+  "Digital Shorts":
+    title_words: {min: 6, max: 8}
+    description_count: 1
+    description_max: 150
+  "Garden Wanderings":
+    botanical_accuracy: critical
+    title_includes: [location, plant_species]
+    seasonal_context: when_relevant
+
+# ------------------------------------------------------------------
+# Prompt blocks — rendered by api.services.style_engine.prompt_blocks
+# into `{{style:KEY}}` tokens in prompts/*.md. This is the mechanism
+# that lets agent prompts consume rule text FROM this file instead of
+# duplicating it inline (and drifting). Each key has a "full" profile
+# (verbose, for unconstrained runs) and a "slim" profile (condensed,
+# for runs where the deterministic post-stage enforces casing/limits
+# and the prompt only needs to say so). Numbers quoted in the text
+# below are human-authored copies of limits.fields — see the drift
+# check in tests/test_house_style_config.py that keeps them honest.
+# ------------------------------------------------------------------
+prompt_blocks:
+  "analyst.draft_guidance":
+    full: |
+      ## Metadata Suggestions
+
+      Draft placeholder metadata for the SEO agent to refine later. Use the exact limits
+      below — they are hard limits, not targets — and never fabricate a character count.
+
+      **Suggested Title (draft):**
+      [title ≤ 80 characters incorporating the primary keyword]
+
+      **Suggested Short Description (draft):**
+      [short description ≤ 90 characters summarizing content with a factual hook]
+
+      **Suggested Long Description (draft):**
+      [long description ≤ 350 characters with more detail, context, and keywords]
+
+      Aim for 15-20 total keywords across the SEO Keywords section above.
+    slim: |
+      Draft metadata guidance arrives in the Style Rules section — the pipeline verifies limits deterministically.
+  "seo.copy_rules":
+    full: |
+      ## Copy style (REQUIRED)
+
+      These rules govern every title, description, and social line you write. They are instructions, not text to reproduce in the report.
+
+      - **Down style for titles/headlines:** capitalize ONLY the first word and proper nouns (people, places, organizations). NOT title case.
+        - Correct: `Wisconsin Democratic primary turns negative`
+        - Wrong: `Wisconsin Democratic Primary Turns Negative`
+      - **Use active, descriptive language.** Titles and descriptions should clearly convey what the content is about using vivid, specific language that draws readers without hype or manipulation.
+      - **State what it is — no teasers, clickbait, hype, or sales language.** Never use viewer directives (watch, discover, see how, don't miss), promises (will reveal), calls to action, no ALL-CAPS or excessive punctuation (!!!, ???), and no unevidenced superlatives (amazing, incredible). Avoid misleading or vague language.
+      - **Third person, no "we"/"our".** Describe what the episode covers; don't sell it.
+      - **Name specifics:** prefer real names/places/topics over dramatic adjectives. Spell out place names ("Wisconsin", not "WI"; "gubernatorial", not "Gub") unless the character limit genuinely forces a well-known abbreviation.
+      - **Lead with the primary keyword**, ideally within the first 50 characters of the title.
+      - **Avoid generic titles** ("A Look at Nature") and **keyword stuffing** ("Wisconsin Parks Wisconsin Hiking Wisconsin Nature Wisconsin").
+      - **No fabricated data:** you have no live keyword metrics — never invent search volume, difficulty, or CPC numbers (see the keyword tables and SEMRush section below).
+
+      Quality checklist — verify before saving your report:
+
+      - [ ] Title ≤80 characters, down style, with the primary keyword early
+      - [ ] Short description ≤90 characters
+      - [ ] Long description ≤350 characters
+      - [ ] Primary keywords appear in title and both descriptions, integrated naturally (not stuffed)
+      - [ ] No viewer directives, calls to action, ALL-CAPS, excessive punctuation, or unevidenced superlatives
+      - [ ] Tags are prioritized and platform-appropriate; recommendations are actionable
+      - [ ] Keyword tables use Source (direct/implied) — no invented volume/difficulty numbers
+      - [ ] If SEMRush data is available: keyword strategy is data-driven
+      - [ ] Accessibility considerations noted (alt text, captions)
+    slim: |
+      Casing and character counts are enforced after generation. Hard limits: title 80, short description 90, long description 350 characters, 15-20 keywords. Write naturally within them; use down style (first word + proper nouns); third person, no calls to action.
+  "shared.char_budgets":
+    full: |
+      **PBS Wisconsin platform limits** (enforced by the SST write path — write to these, not past them):
+
+      - Title: ≤80 characters
+      - Short description: ≤90 characters
+      - Long description: ≤350 characters
+      - Keywords: 15-20 total
+
+      These are hard limits, not targets. Metadata over these limits is rejected downstream, so do not treat them as approximate.
+    slim: |
+      Hard limits (enforced after generation): title 80, short description 90, long description 350 characters, 15-20 keywords.
+  "validator.checklist":
+    full: |
+      ## Validation Checklist
+
+      ### Analyst Phase
+      - Key themes and topics are identified
+      - Segment count is reasonable for content duration
+      - Speaker identification is present
+      - Output is structured and complete (not truncated)
+
+      ### Formatter Phase
+      - No review notes, agent instructions, or metadata appear in the transcript body
+      - Speaker labels are consistent throughout (same speaker isn't labeled differently)
+      - No content appears past the actual episode duration
+      - Paragraphs and sections are properly formatted
+      - No obvious truncation (content doesn't end abruptly mid-sentence)
+
+      ### SEO Phase
+      - Title is under 80 characters
+      - Short description is under 90 characters
+      - Long description is under 350 characters
+      - Keywords are present and relevant to content
+      - No placeholder text or template artifacts
+
+      ### Semantic accuracy
+      - Title accurately reflects content
+      - Description accurately reflects content
+    slim: |
+      - Title accurately reflects content
+      - Description accurately reflects content
+
+      All mechanical checks (character limits, formatting, placeholders, truncation, speaker labels) run deterministically in the pipeline and are merged into your verdict — do NOT re-check them; judge only the semantic accuracy items above.
+  "formatter.house_rules":
+    full: |
+      ### PBS Wisconsin House Style
+
+      Apply these editorial conventions consistently:
+
+      - **"Capitol" not "capital"** — In local/state news context, use "Capitol" (the building/district). Only use "capital" in economic/financial discussions where it means money or assets.
+      - **"OK" not "okay"** — Always use the abbreviated form.
+      - **"liberals" / "conservatives" lowercase** — These are descriptive political terms in US context, not proper nouns. Always lowercase unless starting a sentence. Same for "liberal" and "conservative" as adjectives.
+      - **"Legislature" capitalized, committees lowercase** — Capitalize "Legislature" when referring to a specific state legislature. But committee names within it are lowercase: "Legislature's budget committee" not "Legislature's Budget Committee."
+      - **No oxford commas** — Omit the serial comma in lists (e.g., "red, white and blue"). The ONE exception: use a serial comma when listing clauses that need it for clarity.
+      - **Abbreviate honorifics** — Use abbreviated forms in running text: "Sen." (Senator), "Rep." (Representative), "Gov." (Governor), "Pres." (President), "Atty. Gen." (Attorney General), etc.
+      - **Em dashes** — Use sparingly and consistently. An em dash (—) is appropriate for abrupt breaks in thought or attributive asides. Do not over-apply them as substitutes for commas, colons, or parentheses.
+      - **Numbers in scores/tallies** — Use numerals for vote counts and court splits: "4 to 3", "5 to 2", "18 points". Spell out numbers only at the start of a sentence.
+      - **"Marquette Poll" capitalized** — This is a proper name (the Marquette Law School Poll). Always capitalize.
+      - **"partisan" not "partizan"** — Always use the standard English spelling "partisan" (also: "bipartisan", "nonpartisan"). Never use the archaic "partizan" spelling.
+      - **Program names are NOT italicized** — Write program names in plain text: "Inside Wisconsin Politics", "Here & Now", "Wisconsin Life". Do NOT italicize them. Be consistent — if the program name appears multiple times, format it the same way every time.
+      - **Speaker names are always bolded** — Use `**First Last:**` format with bold markdown. Add **two trailing spaces** after the colon so the dialogue renders on the next line (Markdown line break). Example: `**Shawn Johnson:**··` (where `··` represents two spaces).
+      - **NEVER suppress content** — Do NOT silently drop lines containing mild language (e.g., "damned", "hell"), short interjections, or any other spoken content. ALL dialogue must be preserved verbatim. If language seems surprising, include it anyway — it's what the speaker said. Flag in review notes if concerned, but never omit.
+    slim: |
+      Apply these editorial conventions where judgment is required (mechanical substitutions are handled deterministically — see below):
+
+      - **"Capitol" not "capital"** — In local/state news context, use "Capitol" (the building/district). Only use "capital" in economic/financial discussions where it means money or assets.
+      - **"Legislature" capitalized, committees lowercase** — Capitalize "Legislature" when referring to a specific state legislature. Committee names within it stay lowercase ("Legislature's budget committee," not "Legislature's Budget Committee"). Context-dependent — no automated fix.
+      - **No oxford commas** — Omit the serial comma in lists (e.g., "red, white and blue"). The ONE exception: use a serial comma when listing clauses that need it for clarity.
+      - **Em dashes** — Use sparingly and consistently. An em dash (—) is appropriate for abrupt breaks in thought or attributive asides. Do not over-apply them as substitutes for commas, colons, or parentheses.
+      - **Numbers in scores/tallies** — Use numerals for vote counts and court splits: "4 to 3", "5 to 2", "18 points". Spell out numbers only at the start of a sentence.
+      - **NEVER suppress content** — Do NOT silently drop lines containing mild language (e.g., "damned", "hell"), short interjections, or any other spoken content. ALL dialogue must be preserved verbatim. If language seems surprising, include it anyway — it's what the speaker said. Flag in review notes if concerned, but never omit.
+
+      Lexical house-style substitutions (OK/partisan/Marquette Poll/program-name italics/honorific abbreviations/liberals-conservatives casing) are applied deterministically after generation — do not worry about them.
+  "timestamp.output_contract":
+    full: |
+      ### Required Output Format
+
+      ```markdown
+      # Timestamp Report
+
+      **Project:** {project_name}
+      **Duration:** {total_duration}
+
+      ---
+
+      ## Media Manager Format
+
+      Copy-paste this table into PBS Media Manager chapter fields:
+
+      | Title | Start Time | End Time |
+      |-------|------------|----------|
+      | Introduction | 0:00:00.000 | 0:02:29.999 |
+      | {Chapter 2 Title} | 0:02:30.000 | 0:08:14.999 |
+      | {Chapter 3 Title} | 0:08:15.000 | 0:15:44.999 |
+      | Closing | 0:22:30.000 | 0:28:15.000 |
+
+      ---
+
+      ## YouTube Format
+
+      Copy-paste these timestamps directly into your YouTube description:
+
+      0:00 Introduction
+      2:30 {Chapter 2 Title}
+      8:15 {Chapter 3 Title}
+      22:30 Closing
+
+      ---
+
+      ## Notes
+
+      - Timestamps derived from SRT timecodes
+      - End times are 1ms before the next chapter starts
+      - Verify against actual video content
+      ```
+
+      ### Chapter Count Targets (Maximum)
+
+      | Duration | Max chapters |
+      |----------|-------------|
+      | Under 5 min | 3 |
+      | 5-15 min | 5 |
+      | 15-30 min | 7 |
+      | 30-60 min | 8 |
+      | 60+ min | 10 |
+
+      Fewer chapters is almost always better. Only add a chapter when there's a genuinely distinct topic shift.
+
+      ### First Chapter Rule
+
+      The first chapter is always `0:00 Episode intro`. This encompasses all introductory material — host intros, guest intros, show branding, topic previews — so viewers can skip straight to the first substantive topic.
+
+      ### Time Format Specifications
+
+      **Media Manager format:**
+      - Use `H:MM:SS.000` with millisecond precision
+      - End times should be `.999` (1ms before next chapter)
+
+      **YouTube format:**
+      - Use `M:SS` for times under 1 hour
+      - Use `H:MM:SS` for times over 1 hour
+      - No leading zeros on hours/minutes
+      - No milliseconds
+
+      ## Quality Checklist
+
+      Before outputting, verify:
+      - [ ] First chapter is `0:00 Episode intro`
+      - [ ] Chapter count is within the maximum for the content duration
+      - [ ] Chapters are in chronological order
+      - [ ] No gaps between chapters (end time → next start time)
+      - [ ] Chapter titles use sentence case (only first word and proper nouns capitalized)
+      - [ ] Chapter titles are concise (2-6 words) and describe the topic, not the format
+      - [ ] Tone is neutral and professional (suitable for PBS descriptions)
+      - [ ] Both format tables are complete and match
+      - [ ] Total duration matches the video length
+      - [ ] All timestamps derived from SRT timecodes (not estimated from metadata)
+      - [ ] Final chapter end time matches the last SRT timestamp
+    slim: |
+      Output ONLY a fenced code block labeled `chapters` — no markdown tables, no prose before or after it. One chapter per line:
+
+      `<timecode> <title>`
+
+      - `<timecode>`: M:SS (or H:MM:SS for content past the one-hour mark). No milliseconds — the pipeline computes exact millisecond math for both published formats.
+      - `<title>`: 2-6 words, sentence case, naming the topic (not the format) in a neutral, professional tone — no generic names like "Discussion" or "Conclusion", and parallel framing for political content (symmetric descriptions across candidates/parties).
+      - Choose boundaries ONLY from the candidate list in the Style Rules section — never invent a boundary that isn't listed there.
+      - Produce at most the maximum chapter count stated in the Style Rules section for this content's duration.
+
+      Do not include the forced first chapter (`0:00 Episode intro`) yourself — the pipeline prepends it automatically. Do not compute end times, and do not render the Media Manager table or the YouTube list — the pipeline builds both deterministically from your chapter list. Sentence case is also enforced automatically after generation, so focus on picking the right words, not the capitalization.
+
+      Example:
+
+      ```chapters
+      2:30 Sports betting debate begins
+      8:15 Legislative response
+      22:30 Closing remarks
+      ```
+
+      Before outputting, verify:
+      - [ ] Output is ONLY the fenced `chapters` block — no extra text before or after it
+      - [ ] Every boundary you chose is from the candidate list
+      - [ ] Your chapter count is at most the stated maximum (not counting the forced first chapter)
+      - [ ] Titles are 2-6 words, sentence case, and name the topic

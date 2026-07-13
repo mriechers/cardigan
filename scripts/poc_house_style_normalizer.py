@@ -24,25 +24,51 @@ RULES = {
     "char_limits": {"title": 60, "short_desc": 90, "long_desc": 350},
     # House style §1: viewer directives, promises, CTAs, hype, sales language.
     "forbidden_phrases": [
-        "watch as", "watch how", "see how", "discover", "explore", "find out",
-        "don't miss", "tune in", "join us", "will show", "will reveal",
-        "amazing", "incredible", "extraordinary", "free", "we break down",
-        "we analyze", "what viewers can expect",
+        "watch as",
+        "watch how",
+        "see how",
+        "discover",
+        "explore",
+        "find out",
+        "don't miss",
+        "tune in",
+        "join us",
+        "will show",
+        "will reveal",
+        "amazing",
+        "incredible",
+        "extraordinary",
+        "free",
+        "we break down",
+        "we analyze",
+        "what viewers can expect",
     ],
     # First-person / promotional voice (house style: third person, describe don't sell).
     "first_person": ["we ", "our ", "we'll", "we've", "us "],
     # Stable institutional proper nouns + party/gov terms (down style keeps these capped).
     "proper_nouns_seed": [
-        "Wisconsin", "Madison", "Eau Claire", "Democratic", "Republican",
-        "Supreme Court", "Congress", "Senate", "Legislature", "Capitol",
-        "Governor", "Lt. Governor", "Attorney General", "Here & Now",
-        "Inside Wisconsin Politics", "Wisconsin Life", "University Place",
+        "Wisconsin",
+        "Madison",
+        "Eau Claire",
+        "Democratic",
+        "Republican",
+        "Supreme Court",
+        "Congress",
+        "Senate",
+        "Legislature",
+        "Capitol",
+        "Governor",
+        "Lt. Governor",
+        "Attorney General",
+        "Here & Now",
+        "Inside Wisconsin Politics",
+        "Wisconsin Life",
+        "University Place",
     ],
     # Acronyms preserved as-is (upper).
     "acronyms": ["SCOTUS", "PBS", "WI", "US", "U.S.", "DSA", "ACLU", "CPC", "GOP"],
     # Casing variants / abbreviations that aren't full proper nouns (data, not code).
-    "casing_variants": {"dem": "Dem", "dems": "Dems", "gov": "Gov.", "sen": "Sen.",
-                        "rep": "Rep."},
+    "casing_variants": {"dem": "Dem", "dems": "Dems", "gov": "Gov.", "sen": "Sen.", "rep": "Rep."},
     # Common surname-position words to NOT promote to proper nouns on their own.
     "surname_stoplist": ["van", "der", "de", "la", "the"],
 }
@@ -95,7 +121,7 @@ def to_down_style(text: str, canon: dict[str, str]) -> str:
     m = re.search(r"[A-Za-z]", result)
     if m and result[m.start()].islower():
         i = m.start()
-        result = result[:i] + result[i].upper() + result[i + 1:]
+        result = result[:i] + result[i].upper() + result[i + 1 :]
     return result
 
 
@@ -118,8 +144,7 @@ def check(text: str, limit: int, rules: dict) -> list[str]:
 # ─────────────────────────────────────────────────────────────────────────────
 def extract_recommended(seo_md: str) -> dict[str, str]:
     out = {}
-    fields = {"title": r"### Title", "short_desc": r"### Short Description",
-              "long_desc": r"### Long Description"}
+    fields = {"title": r"### Title", "short_desc": r"### Short Description", "long_desc": r"### Long Description"}
     for key, header in fields.items():
         m = re.search(header + r".*?\*\*Recommended:\*\*\s*\n+([^\n]+)", seo_md, re.DOTALL)
         if m:
@@ -156,7 +181,7 @@ def main() -> int:
         print(f"  NORMALIZED: {norm}")
         print(f"              flags: {norm_flags or 'none'}")
         if rec.get("short_desc"):
-            sd_flags = check(rec['short_desc'], RULES['char_limits']['short_desc'], RULES)
+            sd_flags = check(rec["short_desc"], RULES["char_limits"]["short_desc"], RULES)
             print(f"  short desc flags (raw): {sd_flags or 'none'}")
     print("═" * 78)
     return 0

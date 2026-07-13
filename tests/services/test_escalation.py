@@ -178,3 +178,29 @@ def test_nonfixable_review_message_includes_flags():
     msg = nonfixable_review_message(["Review notes appear in transcript body"])
     assert "human review" in msg.lower()
     assert "Review notes appear in transcript body" in msg
+
+
+# ---------------------------------------------------------------------------
+# classify_qa_failure -- "[style-nonfixable:...]" prefix (task 2b)
+# ---------------------------------------------------------------------------
+
+
+def test_classify_style_nonfixable_prefix_skips():
+    out = classify_qa_failure(
+        _vr(formatter_flags=["[style-nonfixable:lint.output_missing] formatter output is missing"]),
+        {},
+    )
+    assert out["escalate"] is False
+    assert out["nonfixable"] and not out["fixable"]
+
+
+def test_classify_style_fixable_prefix_alone_escalates():
+    # The model-fixable "[style:...]" prefix must NOT be caught by the new
+    # "style-nonfixable" pattern -- "style-nonfixable" is not a substring of
+    # "[style:lint.seo.title_over_limit] ...".
+    out = classify_qa_failure(
+        _vr(seo_flags=["[style:lint.seo.title_over_limit] title exceeds 80 characters"]),
+        {},
+    )
+    assert out["escalate"] is True
+    assert out["fixable"] and not out["nonfixable"]

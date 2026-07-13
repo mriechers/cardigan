@@ -27,12 +27,25 @@ import argparse
 import asyncio
 import json
 import time
+from collections import Counter
 from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
 
 import api.services.llm as llm_mod
 from api.services.completeness import check_completeness
+from api.services.style_engine import (
+    StyleRulesError,
+    build_canonical,
+    check_field_limits,
+    extract_proper_nouns,
+    extract_seo_fields,
+    load_rules,
+    scan_forbidden,
+    scan_person_voice,
+    splice_seo_fields,
+    to_down_style,
+)
 from api.services.worker import JobWorker
 
 PHASE_ORDER = ["analyst", "formatter", "seo", "validator", "timestamp"]
@@ -100,8 +113,114 @@ def _load_baseline(path: str | None) -> dict:
     }
 
 
-def _write_report(out_dir: Path, label: str, transcript_name: str, results: list,
-                  baseline: dict, completeness: dict | None) -> Path:
+def _run_style_checks(field_values: dict[str, str], rules) -> list:
+    """PRE/POST check bundle: limits + forbidden phrases + person voice, run
+    on each field VALUE individually (never on the whole report document --
+    keyword-strategy prose legitimately mentions words like "discover")."""
+    violations = list(check_field_limits(field_values, rules, phase="seo"))
+    for field_name, value in field_values.items():
+        violations += scan_forbidden(value, rules, "seo", field=field_name)
+        violations += scan_person_voice(value, rules, "seo", field=field_name)
+    return violations
+
+
+def compute_style_report(seo_text: str, analyst_text: str | None, rules) -> dict:
+    """Pure, LLM-free style-check computation for the seo phase's output.
+
+    Extracts SEO fields from ``seo_text``, runs the deterministic PRE checks
+    (``check_field_limits`` + ``scan_forbidden`` + ``scan_person_voice``) on
+    each extracted field VALUE, builds the down-style canonical map from
+    ``rules`` plus any proper nouns found in ``analyst_text``'s speaker
+    table, normalizes the title (title-only -- that's the enforce-tier scope
+    for seo), and re-runs the same checks POST-normalization with the
+    normalized title substituted in.
+
+    Returns the dict written under ``metrics.json``'s ``style.seo`` key: on
+    success, ``{"fields_extracted", "violations_pre", "violations_post",
+    "title_raw", "title_normalized", "title_changed", "proper_nouns_used"}``;
+    when ``seo_text`` is empty or has no extractable title (nothing to
+    normalize), ``{"skipped": True, "reason": "..."}`` instead -- this never
+    raises.
+    """
+    if not seo_text or not seo_text.strip():
+        return {"skipped": True, "reason": "seo output missing or empty"}
+
+    fields = extract_seo_fields(seo_text)
+    if fields.title is None:
+        return {"skipped": True, "reason": "seo output unparseable: no title field found"}
+
+    field_values: dict[str, str] = {"title": fields.title.value}
+    if fields.short_description is not None:
+        field_values["short_description"] = fields.short_description.value
+    if fields.long_description is not None:
+        field_values["long_description"] = fields.long_description.value
+    fields_extracted = list(field_values.keys())
+
+    violations_pre = _run_style_checks(field_values, rules)
+
+    nouns = extract_proper_nouns(analyst_text or "")
+    canonical = build_canonical(rules, nouns)
+    title_raw = fields.title.value
+    title_normalized = to_down_style(title_raw, canonical)
+
+    post_values = dict(field_values)
+    post_values["title"] = title_normalized
+    violations_post = _run_style_checks(post_values, rules)
+
+    return {
+        "fields_extracted": fields_extracted,
+        "violations_pre": [v.to_dict() for v in violations_pre],
+        "violations_post": [v.to_dict() for v in violations_post],
+        "title_raw": title_raw,
+        "title_normalized": title_normalized,
+        "title_changed": title_normalized != title_raw,
+        "proper_nouns_used": nouns,
+    }
+
+
+def _style_report_md_lines(style_report: dict) -> list[str]:
+    """Render the "## Style report" section for report.md from the dict
+    produced by ``compute_style_report`` (keyed by phase, e.g. "seo")."""
+    lines = ["", "## Style report"]
+    for phase_name, phase_style in style_report.items():
+        lines += ["", f"### {phase_name}"]
+        if phase_style.get("skipped"):
+            lines.append(f"- Skipped: {phase_style.get('reason', 'unknown')}")
+            continue
+
+        fields_extracted = ", ".join(phase_style.get("fields_extracted", [])) or "(none)"
+        nouns = phase_style.get("proper_nouns_used") or []
+        lines.append(f"- Fields extracted: {fields_extracted}")
+        lines.append(f"- Proper nouns used: {', '.join(nouns) if nouns else '(none)'}")
+        lines.append(f"- Title (raw): `{phase_style.get('title_raw')}`")
+        lines.append(
+            f"- Title (normalized): `{phase_style.get('title_normalized')}` "
+            f"(changed: {phase_style.get('title_changed')})"
+        )
+
+        pre = phase_style.get("violations_pre", [])
+        post = phase_style.get("violations_post", [])
+        pre_counts = Counter(v["rule_id"] for v in pre)
+        post_counts = Counter(v["rule_id"] for v in post)
+        rule_ids = sorted(set(pre_counts) | set(post_counts))
+        if rule_ids:
+            lines += ["", "| rule_id | violations (pre) | violations (post) |", "|---|--:|--:|"]
+            for rid in rule_ids:
+                lines.append(f"| {rid} | {pre_counts.get(rid, 0)} | {post_counts.get(rid, 0)} |")
+        else:
+            lines.append("- No violations pre- or post-normalization.")
+    return lines
+
+
+def _write_report(
+    out_dir: Path,
+    label: str,
+    transcript_name: str,
+    results: list,
+    baseline: dict,
+    completeness: dict | None,
+    style_report: dict | None = None,
+) -> Path:
     bphases = baseline.get("phases", {})
     lines = [
         f"# Local pipeline eval — {label}",
@@ -149,6 +268,8 @@ def _write_report(out_dir: Path, label: str, transcript_name: str, results: list
             f"output_words={completeness.get('output_word_count')}; "
             f"complete={completeness.get('is_complete')}.",
         ]
+    if style_report:
+        lines += _style_report_md_lines(style_report)
     lines += [
         "",
         "## Outputs for qualitative (house-style) review",
@@ -164,16 +285,36 @@ async def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--transcript", required=True)
     ap.add_argument("--backend", default="local-llm")
-    ap.add_argument("--phases", default=",".join(PHASE_ORDER),
-                    help="Comma list in dependency order.")
+    ap.add_argument("--phases", default=",".join(PHASE_ORDER), help="Comma list in dependency order.")
     ap.add_argument("--content-type", default="full", choices=["full", "short"])
     ap.add_argument("--label", default=None, help="Run label (e.g. model id).")
     ap.add_argument("--baseline-manifest", default=None)
-    ap.add_argument("--context-dir", default=None,
-                    help="Pre-load {phase}_output.md files from this dir as FIXED upstream "
-                         "context (e.g. OUTPUT/eval/baseline_20). Lets you sweep a single "
-                         "phase's model on identical inputs, decoupled from upstream quality.")
+    ap.add_argument(
+        "--context-dir",
+        default=None,
+        help="Pre-load {phase}_output.md files from this dir as FIXED upstream "
+        "context (e.g. OUTPUT/eval/baseline_20). Lets you sweep a single "
+        "phase's model on identical inputs, decoupled from upstream quality.",
+    )
     ap.add_argument("--out", default="OUTPUT/eval")
+    ap.add_argument(
+        "--style-report",
+        action="store_true",
+        help="Run the deterministic house-style checks (pre/post normalization) "
+        "on the seo phase's output and record them under metrics.json's "
+        "'style' key + a '## Style report' section in report.md.",
+    )
+    ap.add_argument(
+        "--rules",
+        default="config/house_style.yaml",
+        help="House-style rules YAML path for --style-report/--emit-normalized.",
+    )
+    ap.add_argument(
+        "--emit-normalized",
+        action="store_true",
+        help="Implies --style-report; also writes seo_output.normalized.md with "
+        "the normalized title spliced back into the full seo report.",
+    )
     args = ap.parse_args()
 
     tpath = Path(args.transcript)
@@ -221,8 +362,9 @@ async def main() -> int:
             if r["ok"]:
                 (out_dir / f"{phase}_output.md").write_text(r["content"])
                 context[f"{phase}_output"] = r["content"]
-                print(f"     ok  in={r['input_tokens']} out={r['output_tokens']} "
-                      f"{r['wall_s']}s ({r['words']} words)")
+                print(
+                    f"     ok  in={r['input_tokens']} out={r['output_tokens']} " f"{r['wall_s']}s ({r['words']} words)"
+                )
             else:
                 print(f"     FAILED {r['wall_s']}s: {r['error']}")
                 if phase in ("analyst", "formatter"):
@@ -235,6 +377,40 @@ async def main() -> int:
         cr = check_completeness(fmt["content"], transcript, is_srt=is_srt)
         completeness = cr.to_dict()
 
+    # --style-report / --emit-normalized: deterministic house-style checks on
+    # the seo phase's output (--emit-normalized implies the same computation).
+    style_report: dict | None = None
+    if args.style_report or args.emit_normalized:
+        seo_run = next((r for r in results if r["phase"] == "seo" and r.get("ok")), None)
+        if seo_run is None:
+            style_report = {"seo": {"skipped": True, "reason": "seo phase not present or failed in this run"}}
+        else:
+            try:
+                style_rules = load_rules(args.rules)
+            except StyleRulesError as e:
+                style_report = {"seo": {"skipped": True, "reason": f"could not load rules ({args.rules}): {e}"}}
+            else:
+                # "context analyst output" -- context["analyst_output"] already
+                # reflects this run's real analyst phase if it ran, or the
+                # --context-dir preload if it didn't (see the loading loop above).
+                analyst_text = context.get("analyst_output")
+                style_report = {"seo": compute_style_report(seo_run["content"], analyst_text, style_rules)}
+
+        if args.emit_normalized and seo_run is not None:
+            seo_style = style_report["seo"]
+            seo_fields = extract_seo_fields(seo_run["content"])
+            title_normalized = None if seo_style.get("skipped") else seo_style.get("title_normalized")
+            if seo_fields.title is not None and title_normalized is not None:
+                normalized_doc = splice_seo_fields(seo_run["content"], seo_fields, {"title": title_normalized})
+            else:
+                # Nothing to splice (unparseable, or normalization was a no-op) --
+                # still write the file, byte-identical, so downstream diffing
+                # against seo_output.md stays uniform across runs.
+                normalized_doc = seo_run["content"]
+            norm_path = out_dir / "seo_output.normalized.md"
+            norm_path.write_text(normalized_doc)
+            print(f"Normalized SEO output: {norm_path}")
+
     metrics = {
         "label": label,
         "transcript": str(tpath),
@@ -243,8 +419,10 @@ async def main() -> int:
         "completeness": completeness,
         "baseline_manifest": args.baseline_manifest,
     }
+    if style_report is not None:
+        metrics["style"] = style_report
     (out_dir / "metrics.json").write_text(json.dumps(metrics, indent=2))
-    report = _write_report(out_dir, label, tpath.name, results, baseline, completeness)
+    report = _write_report(out_dir, label, tpath.name, results, baseline, completeness, style_report)
 
     print(f"\nMetrics: {out_dir}/metrics.json")
     print(f"Report:  {report}")

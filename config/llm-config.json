@@ -158,6 +158,19 @@
     "deferral": {
       "backoff_minutes": [2, 5, 10, 15],
       "ceiling_hours": 6
+    },
+    "style_engine": {
+      "enabled": false,
+      "rules_file": "config/house_style.yaml",
+      "keep_raw_on_fix": true,
+      "phases": {
+        "analyst":   {"pre": false, "post": "off"},
+        "formatter": {"pre": false, "post": "off"},
+        "seo":       {"pre": false, "post": "off"},
+        "validator": {"pre": false, "lint": "off"},
+        "timestamp": {"pre": false, "post": "off"}
+      },
+      "qa_gate": {"merge_flags": true, "fail_on_error": true}
     }
   },
   "model_families": [

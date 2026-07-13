@@ -792,7 +792,7 @@ Once the user approves finalized copy:
   - Use "explain," "describe," or "consider" for non-elected subjects
   - Capitalize executive titles (Speaker, Director, President); lowercase others (professor, manager, analyst)
   - Include party and location for elected officials (R-Rochester, D-Madison, etc.)
-- **Short Description**: [name] on [subject matter] (100 chars max)
+- **Short Description**: [name] on [subject matter] (90 chars max)
   - Remove organization, job title, and verbs from long description
   - Should be "as similar as possible to the long description, just simplified and trimmed"
 
