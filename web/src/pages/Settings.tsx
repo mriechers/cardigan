@@ -648,7 +648,7 @@ export default function Settings() {
                           <button
                             onClick={() => handleDeleteEndpoint(b.name)}
                             disabled={backendBusy}
-                            className="text-xs text-status-failed/80 hover:text-status-failed transition-colors disabled:opacity-50"
+                            className="text-xs text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
                             aria-label={`Remove endpoint ${b.name}`}
                           >
                             Remove
