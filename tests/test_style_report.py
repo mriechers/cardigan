@@ -375,22 +375,52 @@ def test_build_candidate_rules_covers_substitutions_and_forbidden_groups():
     assert "formatter.substitution.ok" in rule_ids
     assert "OK" not in rule_ids
     assert "formatter.oxford_comma" in rule_ids
-    assert "voice.forbidden.viewer_directive" in rule_ids  # watch_as + watch_how collapse to one candidate
-    assert "voice.forbidden.cta" in rule_ids
+    # Forbidden phrases are now keyed per-entry by `id` (mirroring the scanner),
+    # so same-category phrases stay DISTINCT rather than collapsing.
+    assert "voice.forbidden.watch_as" in rule_ids
+    assert "voice.forbidden.watch_how" in rule_ids
+    assert "voice.forbidden.join_us" in rule_ids
 
-    viewer_directive = next(c for c in candidates if c.rule_id == "voice.forbidden.viewer_directive")
-    assert set(viewer_directive.labels) == {"watch_as", "watch_how"}
-    assert isinstance(viewer_directive, CandidateRule)
+    watch_as = next(c for c in candidates if c.rule_id == "voice.forbidden.watch_as")
+    assert set(watch_as.labels) == {"watch_as"}
+    assert isinstance(watch_as, CandidateRule)
+
+
+def test_forbidden_candidate_rule_ids_match_scanner_emitter():
+    """Feedback-loop alignment guard: build_candidate_rules (the "expected"
+    catalog) MUST derive forbidden-phrase rule_ids exactly as the scanner (the
+    "observed" event emitter) does. If they diverge, observed style_violation
+    events never match expected candidates and zero_hit_rules silently
+    misreports every forbidden phrase as never-fired. Importing the api scanner
+    here (the report script itself keeps zero api.* imports) is the only place
+    the two derivations are checked against each other.
+    """
+    from api.services.style_engine.rules import StyleRules
+    from api.services.style_engine.scanner import scan_forbidden
+
+    expected_ids = {c.rule_id for c in build_candidate_rules(_SYNTHETIC_RULES) if c.kind == "forbidden"}
+
+    text = "watch as it starts, watch how it ends, join us tonight"
+    observed_ids = {v.rule_id for v in scan_forbidden(text, StyleRules(raw=_SYNTHETIC_RULES), "seo")}
+
+    assert observed_ids == expected_ids
+    assert observed_ids == {
+        "voice.forbidden.watch_as",
+        "voice.forbidden.watch_how",
+        "voice.forbidden.join_us",
+    }
 
 
 def test_zero_hit_rules_excludes_observed_and_keeps_unobserved():
     candidates = build_candidate_rules(_SYNTHETIC_RULES)
-    # "cta" was observed; "viewer_directive" and the enforce substitution were not.
-    observed = {"voice.forbidden.cta"}
+    # "join_us" was observed; "watch_as"/"watch_how" and the enforce
+    # substitution were not.
+    observed = {"voice.forbidden.join_us"}
     zero = zero_hit_rules(candidates, observed)
     zero_ids = {c.rule_id for c in zero}
-    assert "voice.forbidden.cta" not in zero_ids
-    assert "voice.forbidden.viewer_directive" in zero_ids
+    assert "voice.forbidden.join_us" not in zero_ids
+    assert "voice.forbidden.watch_as" in zero_ids
+    assert "voice.forbidden.watch_how" in zero_ids
     assert "formatter.substitution.ok" in zero_ids
     assert "formatter.oxford_comma" in zero_ids
 

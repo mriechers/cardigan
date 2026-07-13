@@ -21,6 +21,8 @@ from api.services.style_engine.prompt_blocks import (
     PromptBlockError,
     render_prompt_blocks,
     resolve_prompt_profile,
+    strip_style_tokens,
+    validate_prompt_blocks,
 )
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
@@ -682,3 +684,99 @@ def test_resolve_prompt_profile_validator_uses_lint_key_not_post() -> None:
 def test_resolve_prompt_profile_validator_missing_lint_defaults_full() -> None:
     cfg = {"enabled": True, "phases": {"validator": {"post": "enforce"}}}
     assert resolve_prompt_profile(cfg, "validator") == "full"
+
+
+# ---------------------------------------------------------------------------
+# 10. strip_style_tokens -- the graceful-fallback degradation used by
+# _load_agent_prompt when render_prompt_blocks can't render (PR #295 review #1)
+# ---------------------------------------------------------------------------
+
+
+def test_strip_style_tokens_removes_own_line_token_and_its_newline() -> None:
+    # A token alone on its line is removed along with its trailing newline so
+    # the degraded prompt has no stray blank line where the block would sit.
+    text = "You are the SEO agent.\n{{style:seo.copy_rules}}\nWrite a title."
+    assert strip_style_tokens(text) == "You are the SEO agent.\nWrite a title."
+
+
+def test_strip_style_tokens_removes_inline_token() -> None:
+    # An inline token is removed in place (no trailing newline to consume).
+    text = "See {{style:foo}} for rules."
+    assert strip_style_tokens(text) == "See  for rules."
+
+
+def test_strip_style_tokens_noop_when_no_tokens() -> None:
+    text = "Plain prompt with no tokens."
+    assert strip_style_tokens(text) == text
+
+
+def test_strip_style_tokens_removes_all_of_multiple() -> None:
+    text = "{{style:a}}\nmiddle\n{{style:b.c}}\nend"
+    assert "{{style:" not in strip_style_tokens(text)
+
+
+# ---------------------------------------------------------------------------
+# 11. validate_prompt_blocks -- boot-time guard that every token-bearing prompt
+# renders against the configured house-style YAML (fail-fast at startup)
+# ---------------------------------------------------------------------------
+
+
+def test_validate_prompt_blocks_returns_token_bearing_files_on_valid_config(tmp_path: Path) -> None:
+    prompt_dir = tmp_path / "prompts"
+    prompt_dir.mkdir()
+    (prompt_dir / "seo.md").write_text("Intro.\n{{style:voice_rules}}\n")
+    (prompt_dir / "plain.md").write_text("No tokens here.")
+    rules_path = _write(tmp_path, SAMPLE_YAML)
+
+    validated = validate_prompt_blocks(prompt_dir, rules_path=rules_path)
+
+    # Only the token-bearing prompt is validated; the token-free one is skipped.
+    assert validated == ["seo.md"]
+
+
+def test_validate_prompt_blocks_raises_on_missing_rules_file(tmp_path: Path) -> None:
+    prompt_dir = tmp_path / "prompts"
+    prompt_dir.mkdir()
+    (prompt_dir / "seo.md").write_text("{{style:voice_rules}}")
+
+    with pytest.raises(PromptBlockError):
+        validate_prompt_blocks(prompt_dir, rules_path=tmp_path / "missing.yaml")
+
+
+def test_validate_prompt_blocks_raises_on_unknown_key(tmp_path: Path) -> None:
+    prompt_dir = tmp_path / "prompts"
+    prompt_dir.mkdir()
+    (prompt_dir / "seo.md").write_text("{{style:nonexistent_key}}")
+    rules_path = _write(tmp_path, SAMPLE_YAML)
+
+    with pytest.raises(PromptBlockError, match="nonexistent_key"):
+        validate_prompt_blocks(prompt_dir, rules_path=rules_path)
+
+
+def test_validate_prompt_blocks_checks_all_profiles(tmp_path: Path) -> None:
+    # A block present in "full" but absent in "slim" WITHOUT a full fallback for
+    # slim would only fail under the slim profile -- proving both are checked.
+    yaml_text = """
+meta: {version: 1, style_guide_synced: "2026-07-10"}
+prompt_blocks:
+  block_full_only:
+    full: "full text"
+  block_slim_bad:
+    full: "full ok"
+"""
+    prompt_dir = tmp_path / "prompts"
+    prompt_dir.mkdir()
+    # block_full_only renders fine under both (slim falls back to full).
+    (prompt_dir / "ok.md").write_text("{{style:block_full_only}}")
+    rules_path = _write(tmp_path, yaml_text)
+
+    # Sanity: the good prompt validates without raising.
+    assert validate_prompt_blocks(prompt_dir, rules_path=rules_path) == ["ok.md"]
+
+
+def test_validate_prompt_blocks_passes_against_real_config() -> None:
+    # The real prompts/ + config/house_style.yaml must always validate --
+    # this is the exact check the app runs at startup.
+    validated = validate_prompt_blocks(PROMPTS_DIR)
+    # Every phase prompt that carries tokens (all five phases) is covered.
+    assert set(validated) >= {"seo.md", "validator.md", "formatter.md", "timestamp.md", "analyst.md"}

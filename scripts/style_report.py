@@ -332,9 +332,10 @@ def build_candidate_rules(rules_raw: dict) -> list[CandidateRule]:
     ``formatter.substitution.<slug>``, replicated verbatim below -- see the
     comment at the call site for why this is a copy rather than an import)
     and ``api.services.style_engine.scanner.scan_forbidden`` (forbidden
-    phrases: ``voice.forbidden.<category>`` -- NOT keyed by the entry's own
-    ``id``, so every entry sharing a ``category`` collapses onto one
-    candidate).
+    phrases: ``voice.forbidden.<id>`` using the entry's own ``id`` when
+    present, falling back to ``voice.forbidden.<category>`` for entries
+    without one -- one candidate per entry, matching the scanner so
+    same-category phrases like ``watch as`` / ``watch how`` stay distinct).
 
     Enforce-tier substitutions apply as deterministic ``AppliedFix``
     records; ``api/services/worker.py``'s ``_apply_style_post`` logs one
@@ -379,20 +380,15 @@ def build_candidate_rules(rules_raw: dict) -> list[CandidateRule]:
             candidates.append(CandidateRule(rule_id=rule_id, tier="flag", kind="substitution", labels=(str(label),)))
 
     voice = rules_raw.get("voice", {}) or {}
-    by_category: dict[str, list[str]] = defaultdict(list)
     for entry in voice.get("forbidden_phrases", []) or []:
         category = entry.get("category") or "uncategorized"
-        by_category[category].append(str(entry.get("id") or entry.get("match") or "?"))
-    for category, labels in by_category.items():
-        note = ""
-        if len(labels) > 1:
-            note = (
-                "multiple entries share this category's event rule_id -- a hit on any one marks the whole group as hit"
-            )
+        # Mirror scanner.scan_forbidden's rule_id: entry `id` when present,
+        # else category. One candidate per entry so same-category phrases stay
+        # distinct (parallels the per-id substitution candidates above).
+        rule_key = entry.get("id") or category
+        label = str(entry.get("id") or entry.get("match") or "?")
         candidates.append(
-            CandidateRule(
-                rule_id=f"voice.forbidden.{category}", tier="flag", kind="forbidden", labels=tuple(labels), note=note
-            )
+            CandidateRule(rule_id=f"voice.forbidden.{rule_key}", tier="flag", kind="forbidden", labels=(label,))
         )
 
     return candidates

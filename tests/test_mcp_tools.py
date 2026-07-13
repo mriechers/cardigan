@@ -824,7 +824,9 @@ async def test_review_proposed_edits_shows_clean_style_check(project_with_manife
 @pytest.mark.asyncio
 async def test_review_proposed_edits_flags_forbidden_phrase(project_with_manifest, monkeypatch):
     """A proposed value containing a forbidden viewer-directive phrase
-    ("discover") should surface its rule id in the Style check line.
+    ("discover") should surface its rule id in the Style check line. The rule
+    id derives from the entry's `id` in house_style.yaml (voice.forbidden.discover),
+    not the shared category, so same-category phrases stay distinguishable.
     """
     from mcp_server.server import handle_propose_sst_edit, handle_review_proposed_edits
 
@@ -846,7 +848,7 @@ async def test_review_proposed_edits_flags_forbidden_phrase(project_with_manifes
     result = await handle_review_proposed_edits({"media_id": project_name})
     text = result[0].text
     assert "Style check:" in text
-    assert "voice.forbidden.viewer_directive" in text
+    assert "voice.forbidden.discover" in text
 
 
 @pytest.mark.asyncio

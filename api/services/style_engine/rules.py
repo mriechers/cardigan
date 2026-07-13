@@ -153,6 +153,10 @@ class StyleRules:
         for entry in entries:
             lt = entry.get("lt")
             if lt is None or duration_min < lt:
+                if "max" not in entry:
+                    raise StyleRulesError(
+                        f"phases.timestamp.chapter_max_by_duration entry {entry!r} is missing its required 'max' key"
+                    )
                 return entry["max"]
         raise StyleRulesError("phases.timestamp.chapter_max_by_duration has no catch-all entry (lt: null)")
 

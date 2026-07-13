@@ -32,6 +32,8 @@ from api.services.style_engine.prompt_blocks import (
     PromptBlockError,
     render_prompt_blocks,
     resolve_prompt_profile,
+    strip_style_tokens,
+    validate_prompt_blocks,
 )
 from api.services.style_engine.qa_merge import merge_style_flags
 from api.services.style_engine.review_notes import check_review_notes_placement
@@ -72,6 +74,8 @@ __all__ = [
     "PromptBlockError",
     "render_prompt_blocks",
     "resolve_prompt_profile",
+    "strip_style_tokens",
+    "validate_prompt_blocks",
     "AppliedFix",
     "PhaseCheckResult",
     "PostStageResult",

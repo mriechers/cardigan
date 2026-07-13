@@ -141,6 +141,41 @@ class TestScanForbiddenViolationShape:
 
 
 # ---------------------------------------------------------------------------
+# scan_forbidden -- rule_id derivation (entry `id` vs category)
+# ---------------------------------------------------------------------------
+
+
+class TestScanForbiddenRuleId:
+    def test_entry_id_distinguishes_same_category_entries(self):
+        # house_style.yaml authors an explicit `id` per forbidden phrase, but
+        # many share one `category` (e.g. nine viewer_directive entries). The
+        # rule_id must derive from `id` when present so `watch as` and
+        # `watch how` violations are distinguishable (feedback-loop keying).
+        rules = StyleRules(
+            raw={
+                "meta": {"version": 1},
+                "voice": {
+                    "forbidden_phrases": [
+                        {"id": "watch_as", "match": "watch as", "category": "viewer_directive", "severity": "error"},
+                        {"id": "watch_how", "match": "watch how", "category": "viewer_directive", "severity": "error"},
+                    ]
+                },
+            }
+        )
+        violations = scan_forbidden("Watch as it starts, then watch how it ends.", rules, "seo")
+        rule_ids = {v.rule_id for v in violations}
+        assert "voice.forbidden.watch_as" in rule_ids
+        assert "voice.forbidden.watch_how" in rule_ids
+
+    def test_missing_id_falls_back_to_category(self):
+        # Entries without an `id` (the synthetic fixture) keep the historical
+        # category-based rule_id -- backward compatible.
+        rules = _voice_rules()
+        violations = scan_forbidden("You can discover Wisconsin history here.", rules, "seo")
+        assert any(v.rule_id == "voice.forbidden.viewer_directive" for v in violations)
+
+
+# ---------------------------------------------------------------------------
 # scan_person_voice
 # ---------------------------------------------------------------------------
 

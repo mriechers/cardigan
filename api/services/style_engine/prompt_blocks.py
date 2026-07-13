@@ -33,6 +33,10 @@ from api.services.style_engine.rules import (
 )
 
 TOKEN_RE = re.compile(r"\{\{style:([a-zA-Z0-9_.-]+)\}\}")
+# Same token, plus an optional immediately-following newline -- used by the
+# strip fallback so a token that sits alone on its line doesn't leave a stray
+# blank line behind when removed.
+_STRIP_RE = re.compile(TOKEN_RE.pattern + r"\n?")
 
 
 class PromptBlockError(Exception):
@@ -100,6 +104,52 @@ def render_prompt_blocks(
         return rendered
 
     return TOKEN_RE.sub(_substitute, text)
+
+
+def strip_style_tokens(text: str) -> str:
+    """Remove every ``{{style:KEY}}`` token from ``text``.
+
+    A token that sits alone on its own line also consumes the one trailing
+    newline that follows it, so removal leaves no stray blank line; an inline
+    token is removed in place. This is the graceful-degradation fallback the
+    worker's ``_load_agent_prompt`` uses when :func:`render_prompt_blocks`
+    cannot render (missing/corrupt rules file): the phase runs on the raw
+    prompt WITHOUT literal ``{{style:...}}`` tokens leaking to the LLM, instead
+    of failing the job. Contrast the fail-fast posture of
+    :func:`render_prompt_blocks` itself -- the strip only happens after that
+    raise is caught at the call site.
+    """
+    return _STRIP_RE.sub("", text)
+
+
+def validate_prompt_blocks(
+    prompt_dir: str | Path,
+    rules_path: str | Path | None = None,
+    profiles: tuple[str, ...] = ("full", "slim"),
+) -> list[str]:
+    """Render every token-bearing ``*.md`` prompt under ``prompt_dir``.
+
+    For each prompt file that contains a ``{{style:...}}`` token, renders it
+    against ``rules_path`` (default ``config/house_style.yaml``) for every
+    profile in ``profiles``, raising the first :class:`PromptBlockError`
+    encountered. This is the boot-time guard (wired into the app lifespan) that
+    surfaces a missing/corrupt house-style YAML loudly at startup rather than
+    letting it fail every job at runtime -- the deploy-time counterpart to
+    ``_load_agent_prompt``'s runtime graceful fallback.
+
+    Returns the sorted list of prompt file names that carried tokens and
+    validated cleanly (token-free prompts are skipped, mirroring
+    :func:`render_prompt_blocks`' short-circuit).
+    """
+    validated: list[str] = []
+    for md in sorted(Path(prompt_dir).glob("*.md")):
+        text = md.read_text()
+        if "{{style:" not in text:
+            continue
+        for profile in profiles:
+            render_prompt_blocks(text, profile=profile, rules_path=rules_path)
+        validated.append(md.name)
+    return validated
 
 
 def resolve_prompt_profile(routing_cfg: dict, phase_name: str) -> str:

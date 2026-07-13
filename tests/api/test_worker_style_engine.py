@@ -501,13 +501,15 @@ class TestPostHookShadow:
         assert "style-engine:" not in persisted
         assert not (tmp_path / "seo_output.raw.md").exists()
 
-        # But context + events record the check.
-        assert "style_checks" in context
-        violations = context["style_checks"]["seo"]["violations"]
-        assert len(violations) >= 1
+        # Events record the check, but context["style_checks"] must NOT be
+        # populated in shadow mode (PR #295 review #4): that key flips on the
+        # validator pre-stage's "deterministic checks already performed" prompt
+        # section, a downstream change shadow mode is contractually forbidden
+        # from making. The style_violation events are shadow's record of truth.
+        assert "style_checks" not in context
 
         style_violation_events = [e for e in logged_events if e.event_type == EventType.style_violation]
-        assert len(style_violation_events) == len(violations)
+        assert len(style_violation_events) >= 1
         assert style_violation_events[0].data.phase == "seo"
         assert style_violation_events[0].data.extra["mode"] == "shadow"
         assert style_violation_events[0].data.extra["action"] == "shadow"
@@ -552,6 +554,11 @@ class TestPostHookEnforce:
         raw_archive = tmp_path / "seo_output.raw.md"
         assert raw_archive.exists()
         assert raw_archive.read_text() == raw_output
+
+        # Enforce mode DOES record context["style_checks"] -- the validator
+        # pre-stage + lint merge legitimately consume it (contrast shadow,
+        # which must not; PR #295 review #4).
+        assert "seo" in context.get("style_checks", {})
 
     @pytest.mark.asyncio
     @patch("api.services.worker.get_llm_client")
@@ -1424,12 +1431,12 @@ class TestChunkedFormatterStylePost:
         assert "style-engine:" not in persisted
         assert not (tmp_path / "formatter_output.raw.md").exists()
 
-        assert "style_checks" in context
-        violations = context["style_checks"]["formatter"]["violations"]
-        assert len(violations) >= 2  # oxford_comma + capitol_capital
+        # Shadow must not populate style_checks (PR #295 review #4) -- events
+        # are the record; the context key would leak into the validator prompt.
+        assert "style_checks" not in context
 
         style_violation_events = [e for e in logged_events if e.event_type == EventType.style_violation]
-        assert len(style_violation_events) == len(violations)
+        assert len(style_violation_events) >= 2  # oxford_comma + capitol_capital
         assert all(e.data.phase == "formatter" for e in style_violation_events)
         assert all(e.data.extra["mode"] == "shadow" for e in style_violation_events)
 
@@ -1759,3 +1766,67 @@ class TestTimestampUserMessagePromptProfile:
         worker = self._worker_with_style_cfg(style_cfg)
         prompt = worker._build_phase_prompt_base("timestamp", self._base_context())
         assert "Output a timestamp report with TWO sections:" in prompt
+
+
+# ---------------------------------------------------------------------------
+# 9. _load_agent_prompt graceful fallback (review fix #1, PR #295)
+#
+# Prompt-block token rendering is LIVE on every phase run -- all five phase
+# prompts carry {{style:*}} tokens and _load_agent_prompt calls
+# render_prompt_blocks unconditionally. A missing/corrupt house-style YAML
+# must NOT fail the phase (fail-fast here fails every job); it degrades to the
+# raw prompt with tokens stripped. A boot-time check (validate_prompt_blocks,
+# wired into main.lifespan) catches a broken file loudly at deploy instead.
+# ---------------------------------------------------------------------------
+
+
+class TestLoadAgentPromptFallback:
+    def test_unrenderable_rules_file_strips_tokens_instead_of_raising(self, tmp_path, monkeypatch):
+        (tmp_path / "seo.md").write_text("You are the SEO agent.\n{{style:seo.copy_rules}}\nWrite a title.")
+        monkeypatch.setattr(worker_mod, "AGENTS_DIR", tmp_path)
+
+        worker = JobWorker.__new__(JobWorker)
+        worker.llm = MagicMock()
+        worker.llm.config = {
+            "routing": {
+                "style_engine": {
+                    "enabled": True,
+                    "rules_file": str(tmp_path / "missing.yaml"),
+                    "phases": {"seo": {"post": "enforce"}},
+                }
+            }
+        }
+        warning_calls = []
+        monkeypatch.setattr(worker_mod.logger, "warning", lambda *a, **kw: warning_calls.append((a, kw)))
+
+        result = worker._load_agent_prompt("seo")
+
+        # No raise; token stripped; surrounding prompt text preserved.
+        assert "{{style:" not in result
+        assert "You are the SEO agent." in result
+        assert "Write a title." in result
+        assert warning_calls, "fail-open must log a warning for observability"
+
+    def test_valid_rules_file_still_renders_tokens(self, tmp_path, monkeypatch):
+        # Regression guard: a healthy YAML must still REPLACE tokens (not strip).
+        (tmp_path / "seo.md").write_text("Intro.\n{{style:voice_rules}}\n")
+        rules = tmp_path / "house_style.yaml"
+        rules.write_text('meta: {version: 1}\nprompt_blocks:\n  voice_rules:\n    full: "No viewer directives."\n')
+        monkeypatch.setattr(worker_mod, "AGENTS_DIR", tmp_path)
+
+        worker = JobWorker.__new__(JobWorker)
+        worker.llm = MagicMock()
+        worker.llm.config = {
+            "routing": {
+                "style_engine": {
+                    "enabled": True,
+                    "rules_file": str(rules),
+                    "phases": {"seo": {"post": "shadow"}},
+                }
+            }
+        }
+
+        result = worker._load_agent_prompt("seo")
+
+        assert "No viewer directives." in result
+        assert "{{style:" not in result

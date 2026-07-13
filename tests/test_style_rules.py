@@ -312,6 +312,14 @@ class TestChapterMax:
         # duration_min == lt is NOT "< lt", so 5 falls into the next bucket.
         assert rules.chapter_max(5) == 5
 
+    def test_entry_missing_max_raises_descriptive_style_rules_error(self):
+        # A malformed chapter_max_by_duration entry (missing its 'max' key, e.g.
+        # mid-edit of the YAML) must raise a StyleRulesError naming the problem,
+        # not a bare KeyError the operator can't diagnose.
+        rules = StyleRules(raw={"phases": {"timestamp": {"chapter_max_by_duration": [{"lt": None}]}}})
+        with pytest.raises(StyleRulesError, match="max"):
+            rules.chapter_max(10)
+
 
 # ---------------------------------------------------------------------------
 # StyleRules.program_rules

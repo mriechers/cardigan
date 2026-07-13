@@ -43,7 +43,12 @@ from api.services.llm import (
     start_run_tracking,
 )
 from api.services.logging import get_logger, setup_logging
-from api.services.style_engine import PostStageResult, render_prompt_blocks
+from api.services.style_engine import (
+    PostStageResult,
+    PromptBlockError,
+    render_prompt_blocks,
+    strip_style_tokens,
+)
 from api.services.style_engine.prompt_blocks import resolve_prompt_profile
 from api.services.utils import calculate_transcript_metrics
 
@@ -2205,7 +2210,6 @@ Extract any name or spelling corrections that should be added to the glossary. S
                 context,
                 load_rules(cfg.get("rules_file", "config/house_style.yaml")),
             )
-            context.setdefault("style_checks", {})[phase_name] = post.check.to_dict()
             for violation in post.check.violations:
                 await log_event(
                     EventCreate(
@@ -2223,15 +2227,23 @@ Extract any name or spelling corrections that should be added to the glossary. S
                 )
 
             if mode == "shadow":
-                return content, None  # record-only: raw content flows
+                # Record-only: raw content flows AND no downstream state changes.
+                # Deliberately does NOT set context["style_checks"] -- that key
+                # feeds the validator pre-stage's "deterministic checks already
+                # performed" section, so populating it in shadow would alter the
+                # validator prompt for checks that were never enforced (PR #295
+                # review #4). The style_violation events above are shadow's record.
+                return content, None
 
-            # Enforce mode only, past this point. Log one style_violation
-            # event per deterministic AppliedFix so "the model keeps
-            # getting X wrong (auto-fixed N times)" is visible to the
+            # Enforce mode only, past this point. Record the check for the
+            # validator pre-stage + lint merge to consume, then log one
+            # style_violation event per deterministic AppliedFix so "the model
+            # keeps getting X wrong (auto-fixed N times)" is visible to the
             # feedback loop (scripts/style_report.py), not just the
             # provenance comment in the persisted output file. Mirrors the
             # violations loop above exactly (same EventCreate/EventData
             # shape) and stays inside this method's fail-open try.
+            context.setdefault("style_checks", {})[phase_name] = post.check.to_dict()
             for fix in post.check.fixes:
                 await log_event(
                     EventCreate(
@@ -2709,10 +2721,10 @@ Please format this transcript section:
         """Which prompt-block profile ("full" or "slim") to render for this phase.
 
         Reads `routing.style_engine` from the LLM config (empty dict when
-        absent, which is the case today -- no prompt contains tokens yet, so
-        this always resolves to "full"). Delegates to the pure
-        `resolve_prompt_profile` so the selection logic is unit-testable
-        without a DB-backed worker.
+        absent -- the kill-switch default, which resolves to "full"). "slim" is
+        selected only when the phase's style-engine mode is "enforce".
+        Delegates to the pure `resolve_prompt_profile` so the selection logic is
+        unit-testable without a DB-backed worker.
         """
         cfg = self.llm.config.get("routing", {}).get("style_engine", {})
         return resolve_prompt_profile(cfg, phase_name)
@@ -2809,13 +2821,29 @@ Output a structured JSON checklist with:
                 phase_name, f"You are the {phase_name} agent. Process the input and provide appropriate output."
             )
 
-        return render_prompt_blocks(
-            text,
-            profile=self._style_prompt_profile(phase_name),
-            rules_path=self.llm.config.get("routing", {})
-            .get("style_engine", {})
-            .get("rules_file", "config/house_style.yaml"),
+        rules_file = (
+            self.llm.config.get("routing", {}).get("style_engine", {}).get("rules_file", "config/house_style.yaml")
         )
+        try:
+            return render_prompt_blocks(
+                text,
+                profile=self._style_prompt_profile(phase_name),
+                rules_path=rules_file,
+            )
+        except PromptBlockError:
+            # Graceful degradation (PR #295 review #1): prompt-block rendering
+            # is fail-fast, but a missing/corrupt house-style YAML must not fail
+            # every job. Fall back to the raw prompt with {{style:*}} tokens
+            # stripped (never leak literal tokens to the LLM). A boot-time
+            # check (validate_prompt_blocks in main.lifespan) already refuses to
+            # start on a broken file, so reaching here means the file broke
+            # AFTER boot (e.g. an mtime-triggered live reload of bad YAML).
+            logger.warning(
+                "prompt-block rendering failed; running phase on unstyled prompt (tokens stripped)",
+                extra={"phase": phase_name, "rules_file": rules_file},
+                exc_info=True,
+            )
+            return strip_style_tokens(text)
 
     def _build_phase_prompt(self, phase_name: str, context: Dict[str, Any]) -> str:
         """Build the user prompt for a phase with relevant context.
