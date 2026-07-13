@@ -2187,10 +2187,13 @@ Extract any name or spelling corrections that should be added to the glossary. S
         logs a warning and returns the original ``content`` unchanged, exactly
         as if the hook were off. The engine can never fail a job.
 
-        Shadow mode records events + `context["style_checks"]` but returns the
-        raw ``content`` untouched (``PostStageResult`` is discarded -- callers
-        use the ``None`` sentinel to know no provenance/raw-archive handling
-        is needed). Enforce mode returns the normalized output and the full
+        Shadow mode records ``style_violation`` events but returns the raw
+        ``content`` untouched -- it deliberately does NOT set
+        ``context["style_checks"]`` (that write is enforce-mode-only; see the
+        shadow early-return, PR #295 review #4). The ``PostStageResult`` is
+        discarded -- callers use the ``None`` sentinel to know no
+        provenance/raw-archive handling is needed. Enforce mode returns the
+        normalized output and the full
         result so the caller can persist provenance + the pre-normalization
         raw file -- and additionally logs one ``style_violation`` event per
         ``AppliedFix`` (``action: "fixed"``), the feedback loop's signal for
