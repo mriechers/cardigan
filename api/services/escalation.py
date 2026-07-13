@@ -88,6 +88,16 @@ NONFIXABLE_FLAG_PATTERNS = [
     "unconfirmed",
     "semrush",
     "excerpt",
+    # Deterministic lint/style-engine flags explicitly marked non-model-fixable
+    # (RuleViolation.to_flag_text()'s "[style-nonfixable:{rule_id}]" prefix,
+    # e.g. lint.output_missing, lint.formatter.review_notes_in_body). A
+    # stronger validator model cannot retroactively fix a phase's own output
+    # -- that requires re-running the phase, which the escalation loop already
+    # does for model-fixable flags; this pattern routes the truly mechanical,
+    # non-model-fixable ones straight to a human-review pause instead of
+    # (task 2b). Substring-matched against the lowercased flag text, so this
+    # is NOT a substring of the model-fixable "[style:...]" prefix.
+    "style-nonfixable",
 ]
 
 # Markers the formatter writes into its OWN output when it surfaces an

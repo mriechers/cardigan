@@ -26,6 +26,10 @@ class EventType(str, Enum):
     user_action = "user_action"
     api_call = "api_call"
     job_deferred = "job_deferred"  # local backend busy; job requeued with backoff
+    style_violation = "style_violation"  # house-style rule violation flagged by the style engine
+    editor_correction = (
+        "editor_correction"  # human editor's committed SST value vs. the pipeline's (MCP commit_sst_edits)
+    )
 
 
 class EventData(BaseModel):

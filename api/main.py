@@ -49,8 +49,24 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Cardigan API v4.0")
     await database.init_db()
     logger.info("Database initialized")
-    get_llm_client()  # Initialize LLM client
+    llm_client = get_llm_client()  # Initialize LLM client
     logger.info("LLM client initialized")
+    # Fail-fast at boot if the house-style YAML can't render the phase prompts
+    # (PR #295 review #1). Every phase prompt carries {{style:*}} tokens now, so
+    # a missing/corrupt config/house_style.yaml would otherwise fail every job
+    # at runtime. Runtime still degrades gracefully (worker._load_agent_prompt
+    # strips tokens); this surfaces the problem loudly at deploy instead.
+    from api.services.style_engine.prompt_blocks import PromptBlockError, validate_prompt_blocks
+    from api.services.worker import AGENTS_DIR
+
+    _style_cfg = llm_client.config.get("routing", {}).get("style_engine", {})
+    _rules_file = _style_cfg.get("rules_file", "config/house_style.yaml")
+    try:
+        _validated = validate_prompt_blocks(AGENTS_DIR, rules_path=_rules_file)
+        logger.info("Prompt-block validation passed (%d prompt(s) carry style tokens)", len(_validated))
+    except PromptBlockError:
+        logger.critical("House-style prompt-block validation FAILED; refusing to start", exc_info=True)
+        raise
     langfuse = get_langfuse_client()
     await langfuse.initialize()
     logger.info("Langfuse client initialized")

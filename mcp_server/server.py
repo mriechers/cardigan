@@ -42,6 +42,22 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Prompt, PromptArgument, PromptMessage, TextContent, Tool
 
+# Task 6a: deterministic house-style rule engine. Pure stdlib + PyYAML
+# modules -- no DB, no async I/O, no FastAPI (see api/services/style_engine/
+# __init__.py's module docstring) -- so importing them here at module scope
+# carries no meaningful startup risk to the MCP server. Only the *call* to
+# load_rules() (module init, below) can fail on a missing/bad YAML file, and
+# that is individually guarded with a fallback -- see
+# _writable_fields_char_limits().
+from api.services.style_engine import (
+    check_field_limits,
+    load_rules,
+    scan_forbidden,
+    scan_person_voice,
+    to_down_style,
+)
+from api.services.style_engine.casing import build_canonical
+
 # Load .env file FIRST — it contains the current, correct credentials.
 # The MCP server runs as a separate process, so it needs its own load_dotenv().
 load_dotenv(Path(__file__).parent.parent / ".env")
@@ -95,17 +111,72 @@ AIRTABLE_BASE_ID = "appZ2HGwhiifQToB6"
 AIRTABLE_TABLE_ID = "tblTKFOwTvK7xw1H5"
 AIRTABLE_API_BASE = "https://api.airtable.com/v0"
 
+# Fallback char-limit values, used ONLY when config/house_style.yaml can't be
+# loaded at import time (missing file, bad YAML, missing keys, etc.) — the
+# SST write path must never break because a config file is bad. These are
+# the exact hardcoded values this module used before Task 6a (YAML-sourced
+# limits). They are now the DRIFT ANCHOR that
+# tests/test_house_style_config.py checks against config/house_style.yaml:
+# once the YAML loads successfully (the normal case in every real
+# deployment), WRITABLE_FIELDS itself is sourced FROM that YAML and would
+# trivially match it — so the meaningful drift guard going forward is
+# "do these fallback constants (the safety net used only when the YAML
+# fails to load) still agree with the YAML", not "does WRITABLE_FIELDS agree
+# with the YAML it was just built from". See TestFallbackCharLimitsMatchYaml
+# in tests/test_house_style_config.py.
+_FALLBACK_CHAR_LIMITS: dict[str, int | None] = {
+    "title": 80,
+    "short_description": 90,
+    "long_description": 350,
+    "keywords": None,
+    "social_description": None,
+    "social_tags": None,
+    "facebook_description": None,
+    "hashtags": None,
+}
+
+
+def _writable_fields_char_limits() -> dict[str, int | None]:
+    """Resolve WRITABLE_FIELDS' char limits from config/house_style.yaml's
+    ``limits.fields``, falling back to (the whole of) _FALLBACK_CHAR_LIMITS
+    on ANY failure — missing file, invalid YAML, missing keys, unexpected
+    shape. This backs the SST write path's enforcement gate, so it must
+    never raise; a bad config file degrades to the old hardcoded behavior
+    instead of breaking editorial writes.
+    """
+    try:
+        rules = load_rules()
+        limits = rules.limits_for()
+        resolved = dict(_FALLBACK_CHAR_LIMITS)
+        for field_key in ("title", "short_description", "long_description"):
+            max_len = (limits.get(field_key) or {}).get("max")
+            if isinstance(max_len, int):
+                resolved[field_key] = max_len
+        return resolved
+    except Exception:
+        logger.warning(
+            "Could not load config/house_style.yaml for WRITABLE_FIELDS char limits; "
+            "falling back to hardcoded constants",
+            exc_info=True,
+        )
+        return dict(_FALLBACK_CHAR_LIMITS)
+
+
+_CHAR_LIMITS = _writable_fields_char_limits()
+
 # Writable field allowlist — ONLY these fields can be written to Airtable.
 # Everything else is read-only. Format: key -> (airtable_column, field_id, char_limit or None)
+# Char limits (index 2) are sourced from config/house_style.yaml via
+# _writable_fields_char_limits() above (fail-safe fallback: _FALLBACK_CHAR_LIMITS).
 WRITABLE_FIELDS: dict[str, tuple[str, str, int | None]] = {
-    "title": ("Release Title", "fldXqxjjxR4z5IJv6", 80),
-    "short_description": ("Short Description", "fldDwTtKlOCdgKHpW", 90),
-    "long_description": ("Long Description", "fld6HsWiKL77bFqo1", 350),
-    "keywords": ("General Keywords/Tags", "fldjdPEXZyvx3rc6Y", None),
-    "social_description": ("Social Media Description", "fldntHlzk6PfIT5k2", None),
-    "social_tags": ("Social Media Tags", "fldcenwfu4nEWjPbt", None),
-    "facebook_description": ("Facebook Description", "fldnprt2bJEsndv96", None),
-    "hashtags": ("Hashtags", "fldYSGo5EBidQYL7W", None),
+    "title": ("Release Title", "fldXqxjjxR4z5IJv6", _CHAR_LIMITS["title"]),
+    "short_description": ("Short Description", "fldDwTtKlOCdgKHpW", _CHAR_LIMITS["short_description"]),
+    "long_description": ("Long Description", "fld6HsWiKL77bFqo1", _CHAR_LIMITS["long_description"]),
+    "keywords": ("General Keywords/Tags", "fldjdPEXZyvx3rc6Y", _CHAR_LIMITS["keywords"]),
+    "social_description": ("Social Media Description", "fldntHlzk6PfIT5k2", _CHAR_LIMITS["social_description"]),
+    "social_tags": ("Social Media Tags", "fldcenwfu4nEWjPbt", _CHAR_LIMITS["social_tags"]),
+    "facebook_description": ("Facebook Description", "fldnprt2bJEsndv96", _CHAR_LIMITS["facebook_description"]),
+    "hashtags": ("Hashtags", "fldYSGo5EBidQYL7W", _CHAR_LIMITS["hashtags"]),
 }
 
 # Initialize MCP server
@@ -1658,10 +1729,16 @@ async def handle_get_sst_metadata(arguments: dict) -> list[TextContent]:
 
 async def handle_validate_copy(arguments: dict) -> list[TextContent]:
     """Validate metadata field lengths against PBS character limits."""
+    # Sourced from the same YAML-backed _CHAR_LIMITS as WRITABLE_FIELDS (Task
+    # 6a) — this tool previously carried its own hardcoded copy that had
+    # drifted (short_description: 100 here vs. the 90 enforced by
+    # commit_sst_edits / WRITABLE_FIELDS), which meant validate_copy could
+    # tell an editor a field was "under limit" when the write path would
+    # then reject it. One source now, so that class of bug can't recur.
     LIMITS = {
-        "title": 80,
-        "short_description": 100,
-        "long_description": 350,
+        "title": _CHAR_LIMITS["title"],
+        "short_description": _CHAR_LIMITS["short_description"],
+        "long_description": _CHAR_LIMITS["long_description"],
     }
 
     title = arguments.get("title")
@@ -2034,6 +2111,46 @@ async def handle_propose_sst_edit(arguments: dict) -> list[TextContent]:
     return [TextContent(type="text", text="\n".join(lines))]
 
 
+def _build_style_notes(proposed: dict) -> dict[str, list[str]]:
+    """Per-field house-style check notes for review_proposed_edits' preview.
+
+    Informational only — this NEVER blocks or alters propose/review/commit;
+    only the hard character-limit gate already in handle_commit_sst_edits
+    does that. Runs check_field_limits + scan_forbidden + scan_person_voice
+    against each proposed field's VALUE text, and — for ``title`` only —
+    compares against the down-styled/casing-normalized form, noting a
+    casing suggestion when they differ.
+
+    Raises on any style-engine failure (bad/missing YAML, etc.) — the caller
+    wraps this in a fail-open try/except so a broken config file never
+    blocks the SST propose → review → commit workflow, only silences this
+    add-on preview section.
+    """
+    rules = load_rules()
+    canonical = build_canonical(rules)
+    notes: dict[str, list[str]] = {}
+
+    for field_key, edit in proposed.items():
+        value = edit.get("proposed_value", "") or ""
+        field_notes: list[str] = []
+
+        for violation in check_field_limits({field_key: value}, rules, phase="mcp_review"):
+            field_notes.append(violation.to_flag_text())
+        for violation in scan_forbidden(value, rules, phase="mcp_review", field=field_key):
+            field_notes.append(violation.to_flag_text())
+        for violation in scan_person_voice(value, rules, phase="mcp_review", field=field_key):
+            field_notes.append(violation.to_flag_text())
+
+        if field_key == "title":
+            normalized = to_down_style(value, canonical)
+            if normalized != value:
+                field_notes.append(f"[style:casing.suggested] suggested casing: {normalized}")
+
+        notes[field_key] = field_notes
+
+    return notes
+
+
 async def handle_review_proposed_edits(arguments: dict) -> list[TextContent]:
     """Show all staged Airtable edits for a project."""
     media_id = arguments.get("media_id")
@@ -2050,6 +2167,18 @@ async def handle_review_proposed_edits(arguments: dict) -> list[TextContent]:
                 text=f"# Proposed Edits for {media_id}\n\nNo pending edits. Use `propose_sst_edit` to stage changes.",
             )
         ]
+
+    # Inline style check (Task 6a) — informational only, never blocking.
+    # Fail-open: any style-engine exception (bad/missing YAML, etc.) drops
+    # the per-edit "Style check" lines entirely and the preview renders
+    # exactly as it did before this feature, plus one explanatory note.
+    style_notes_by_field: dict[str, list[str]] = {}
+    style_check_unavailable = False
+    try:
+        style_notes_by_field = _build_style_notes(proposed)
+    except Exception:
+        style_check_unavailable = True
+        logger.warning("Inline style check failed during review_proposed_edits for %s", media_id, exc_info=True)
 
     lines = [f"# Proposed Edits for {media_id}\n"]
     lines.append(f"**{len(proposed)} edit{'s' if len(proposed) != 1 else ''} staged**\n")
@@ -2072,6 +2201,13 @@ async def handle_review_proposed_edits(arguments: dict) -> list[TextContent]:
         lines.append(f"**Current:** {current}")
         lines.append(f"**Proposed:** {proposed_val}{limit_info}")
         lines.append(f"**Reason:** {reason}")
+        if field_key in style_notes_by_field:
+            field_notes = style_notes_by_field[field_key]
+            lines.append(f"**Style check:** {'; '.join(field_notes) if field_notes else 'clean'}")
+        lines.append("")
+
+    if style_check_unavailable:
+        lines.append("_Style check unavailable._")
         lines.append("")
 
     lines.append("---")
@@ -2079,6 +2215,118 @@ async def handle_review_proposed_edits(arguments: dict) -> list[TextContent]:
     lines.append("Use `propose_sst_edit` to modify or add more changes.")
 
     return [TextContent(type="text", text="\n".join(lines))]
+
+
+def _pipeline_value_for_field(media_id: str, manifest: dict | None, field_key: str) -> str | None:
+    """Best-effort recovery of the SEO phase's original recommendation for
+    ``field_key``, parsed from the project's ``seo_output.md``.
+
+    Only title / short_description / long_description have a structured,
+    parseable "### <Heading>\\n**Recommended:** ..." section in that report
+    (see api.services.style_engine.phase_io.extract_seo_fields) — the other
+    WRITABLE_FIELDS (keywords, social_description, social_tags,
+    facebook_description, hashtags) have no equivalent per-field SEO-phase
+    output to parse today, so pipeline_value is genuinely not cleanly
+    recoverable for those in v1. Wiring a real source for them (e.g. a
+    dedicated social/keywords phase-output contract) is follow-up work — see
+    task 6a report.
+
+    Never raises: any missing manifest/file/parse issue returns None, which
+    callers treat identically to "not recoverable".
+    """
+    if field_key not in ("title", "short_description", "long_description"):
+        return None
+    try:
+        outputs = (manifest or {}).get("outputs", {})
+        seo_filename = outputs.get("seo_metadata", "seo_output.md")
+        seo_path = get_project_path(media_id) / seo_filename
+        if not seo_path.exists():
+            return None
+
+        from api.services.style_engine.phase_io import extract_seo_fields
+
+        seo_fields = extract_seo_fields(seo_path.read_text())
+        span = getattr(seo_fields, field_key, None)
+        return span.value if span else None
+    except Exception:
+        return None
+
+
+async def _log_editor_corrections(media_id: str, manifest: dict | None, proposed: dict) -> None:
+    """Best-effort ``editor_correction`` event logging after a successful
+    SST commit. Fail-open by design: called AFTER commit_sst_edits has
+    already written to Airtable and built its success response — nothing
+    here can fail the commit. A DB or extraction failure for one field is
+    caught, logged as a warning, and skipped; every other field still gets
+    its own independent attempt.
+
+    Persistence-channel design note (Task 6a investigation): mcp_server runs
+    as its own process/container, separate from the FastAPI ``api`` process
+    that owns the ``session_stats`` events table — but docker-compose.yml
+    gives the ``mcp``/``mcp-server`` service the SAME ``DATABASE_PATH`` and
+    the SAME shared ``db-data`` Docker volume as ``api`` and ``worker``.
+    ``api/services/worker.py`` is already exactly this shape — a separate
+    process/container that writes ``style_violation`` events straight
+    through ``api.services.database.log_event`` — so this reuses that same,
+    already-proven DB session machinery rather than inventing a second
+    logging channel. ``api.services.database`` is imported lazily (inside
+    this function) rather than at module scope — NOT because doing so would
+    add some new ``api.*`` import this module otherwise avoids. It
+    wouldn't: the module-scope ``from api.services.style_engine import
+    ...`` above already runs ``api/services/__init__.py``'s package-init
+    imports (``api.services.airtable``, ``api.services.ingest_config``),
+    which pull in ``api.services.database`` transitively the moment this
+    module is imported — so "zero api.services.database in the import
+    graph" is not actually true here, and this docstring used to overstate
+    it. The real reason for the lazy import: deferring the *use* of the DB
+    module (``init_db()`` + a live session, not just the import) to call
+    time keeps DB engine/connection-pool bring-up cost and any of its
+    failure modes out of the MCP server's startup path — a DB hiccup at
+    call time degrades to "no editor_correction event this session" here,
+    rather than a server that won't boot.
+    """
+    job_id = manifest.get("job_id") if manifest else None
+
+    try:
+        from api.models.events import EventCreate, EventData, EventType
+        from api.services.database import init_db, log_event
+
+        await init_db()  # idempotent — no-op once this process has an engine
+    except Exception:
+        logger.warning("editor_correction logging unavailable (DB init failed) for %s", media_id, exc_info=True)
+        return
+
+    for field_key, edit in proposed.items():
+        try:
+            committed_value = edit.get("proposed_value", "") or ""
+            original_value = edit.get("current_value", "") or ""
+            pipeline_value = _pipeline_value_for_field(media_id, manifest, field_key)
+
+            await log_event(
+                EventCreate(
+                    job_id=job_id,
+                    event_type=EventType.editor_correction,
+                    data=EventData(
+                        phase="mcp_commit",
+                        extra={
+                            "field": field_key,
+                            "media_id": media_id,
+                            "committed_value": committed_value,
+                            # None for fields where the SEO phase has no
+                            # structured per-field output to recover from
+                            # (see _pipeline_value_for_field docstring).
+                            "pipeline_value": pipeline_value,
+                            # The proposal's pre-edit Airtable snapshot (the
+                            # value propose_sst_edit diffed against) — always
+                            # available, logged as the best "before"
+                            # reference when pipeline_value is None.
+                            "original_value": original_value,
+                        },
+                    ),
+                )
+            )
+        except Exception:
+            logger.warning("editor_correction event logging failed for %s field=%s", media_id, field_key, exc_info=True)
 
 
 async def handle_commit_sst_edits(arguments: dict) -> list[TextContent]:
@@ -2187,6 +2435,15 @@ async def handle_commit_sst_edits(arguments: dict) -> list[TextContent]:
     comment_lines.append(f"\nSession: {datetime.now().isoformat()}")
 
     comment_ok = await post_sst_comment(record_id, "\n".join(comment_lines))
+
+    # Editor correction capture (Task 6a) — best-effort, fail-open. Runs
+    # AFTER the Airtable write above has already succeeded, so no failure
+    # here can affect the commit result returned to the caller. See
+    # _log_editor_corrections' docstring for the persistence-channel design.
+    try:
+        await _log_editor_corrections(media_id, manifest, proposed)
+    except Exception:
+        logger.warning("editor_correction logging failed for %s", media_id, exc_info=True)
 
     # Clear proposed edits from manifest
     manifest["proposed_edits"] = {}

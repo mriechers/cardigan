@@ -35,27 +35,7 @@ You MUST respond with ONLY valid JSON matching this exact structure. No markdown
 }
 ```
 
-## Validation Checklist
-
-### Analyst Phase
-- Key themes and topics are identified
-- Segment count is reasonable for content duration
-- Speaker identification is present
-- Output is structured and complete (not truncated)
-
-### Formatter Phase
-- No review notes, agent instructions, or metadata appear in the transcript body
-- Speaker labels are consistent throughout (same speaker isn't labeled differently)
-- No content appears past the actual episode duration
-- Paragraphs and sections are properly formatted
-- No obvious truncation (content doesn't end abruptly mid-sentence)
-
-### SEO Phase
-- Title is under 60 characters
-- Short description is under 160 characters
-- Keywords are present and relevant to content
-- Title and description accurately reflect the content
-- No placeholder text or template artifacts
+{{style:validator.checklist}}
 
 ## Rules
 
