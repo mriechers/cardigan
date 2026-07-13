@@ -611,13 +611,13 @@ export default function Settings() {
               </p>
 
               <div className="space-y-3">
-                {(backends || []).filter((b) => b.type === 'openai').length === 0 && (
+                {(backends || []).filter((b) => b.type === 'openai' && b.discover).length === 0 && (
                   <p className="text-sm text-surface-500">
                     No endpoints yet. Add one below to run models on your own hardware.
                   </p>
                 )}
                 {(backends || [])
-                  .filter((b) => b.type === 'openai')
+                  .filter((b) => b.type === 'openai' && b.discover)
                   .map((b) => {
                     const count = (phaseModels?.available_models || []).filter((m) => m.backend === b.name).length
                     return (
