@@ -49,6 +49,7 @@ CANCELLABLE_STATES = {
     JobStatus.pending,
     JobStatus.in_progress,
     JobStatus.paused,
+    JobStatus.awaiting_review,
 }
 
 
@@ -307,6 +308,7 @@ TRANSCRIPT_REPLACEABLE_STATES = {
     JobStatus.pending,
     JobStatus.completed,
     JobStatus.cancelled,
+    JobStatus.awaiting_review,
 }
 
 TRANSCRIPTS_DIR = Path(os.getenv("TRANSCRIPTS_DIR", "transcripts"))

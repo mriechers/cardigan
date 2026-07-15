@@ -133,6 +133,10 @@ jobs_table = Table(
     Column("retry_after", Text, nullable=True),  # don't reclaim before this time
     Column("defer_count", Integer, nullable=False, server_default="0"),
     Column("first_deferred_at", Text, nullable=True),  # anchors the give-up ceiling
+    # Audio upload mode (migration 022)
+    Column("job_type", Text, nullable=False, server_default="transcript"),  # 'transcript' | 'media'
+    Column("media_file", Text, nullable=True),  # extracted audio, relative to MEDIA_DIR
+    Column("intake", Text, nullable=True),  # JSON: speakers, context_terms, language
 )
 
 # Define session_stats table
@@ -255,6 +259,9 @@ async def init_db() -> None:
 # SQLAlchemy's DateTime renders as DATETIME in the SQLite dialect).
 _JOBS_BACKFILL_COLUMNS: dict[str, str] = {
     "auto_escalated_at": "DATETIME",
+    "job_type": "TEXT NOT NULL DEFAULT 'transcript'",
+    "media_file": "TEXT",
+    "intake": "TEXT",
 }
 
 
@@ -371,6 +378,10 @@ async def create_job(job: JobCreate, app_version: Optional[str] = None) -> Job:
     async with get_session() as session:
         # Initialize phases - automated pipeline phases (validator is QA, copy_editor is interactive)
         default_phases = ["analyst", "formatter", "seo", "validator"]
+        # Media jobs get a transcription pre-stage; the job pauses in
+        # awaiting_review after it, before the LLM phases run.
+        if getattr(job, "job_type", "transcript") == "media":
+            default_phases = ["transcription"] + default_phases
         initial_phases = [JobPhase(name=name, status=PhaseStatus.pending).model_dump() for name in default_phases]
 
         # Derive project_path from project_name if not provided
@@ -396,6 +407,9 @@ async def create_job(job: JobCreate, app_version: Optional[str] = None) -> Job:
             "retry_count": 0,
             "max_retries": 3,
             "app_version": app_version if app_version is not None else get_app_version(),
+            "job_type": getattr(job, "job_type", "transcript") or "transcript",
+            "media_file": getattr(job, "media_file", None),
+            "intake": json.dumps(job.intake) if getattr(job, "intake", None) else None,
         }
 
         # Insert job
@@ -667,6 +681,12 @@ async def update_job(job_id: int, job_update: JobUpdate) -> Optional[Job]:
 
         if job_update.validation_result is not None:
             update_values["validation_result"] = json.dumps(job_update.validation_result)
+
+        if job_update.media_file is not None:
+            update_values["media_file"] = job_update.media_file
+
+        if job_update.intake is not None:
+            update_values["intake"] = json.dumps(job_update.intake)
 
         # Handle phases update (replaces all phases)
         if job_update.phases is not None:
@@ -1524,6 +1544,9 @@ def _row_to_job(row) -> Job:
         validation_result=json.loads(row.validation_result) if getattr(row, "validation_result", None) else None,
         outputs=outputs,
         app_version=getattr(row, "app_version", None),
+        job_type=getattr(row, "job_type", None) or "transcript",
+        media_file=getattr(row, "media_file", None),
+        intake=json.loads(row.intake) if getattr(row, "intake", None) else None,
     )
 
 
