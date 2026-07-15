@@ -49,6 +49,7 @@ from api.services.style_engine import (
     render_prompt_blocks,
     strip_style_tokens,
 )
+from api.services import glossary as glossary_service
 from api.services.style_engine.prompt_blocks import resolve_prompt_profile
 from api.services.utils import calculate_transcript_metrics
 
@@ -61,7 +62,7 @@ OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "OUTPUT"))
 TRANSCRIPTS_DIR = Path(os.getenv("TRANSCRIPTS_DIR", "transcripts"))
 TRANSCRIPTS_ARCHIVE_DIR = TRANSCRIPTS_DIR / "archive"
 AGENTS_DIR = Path("prompts")
-KNOWLEDGE_DIR = Path("knowledge")
+KNOWLEDGE_DIR = Path(os.getenv("KNOWLEDGE_DIR", "knowledge"))
 
 
 def _extract_speakers_from_sst(sst_context: Dict[str, Any]) -> Dict[str, Any]:
@@ -699,43 +700,18 @@ Extract any name or spelling corrections that should be added to the glossary. S
         if not new_entries:
             return 0
 
-        # Append to the Editor Corrections section (or end of file)
-        lines = current_glossary.split("\n")
-        insert_idx = None
-        for i, line in enumerate(lines):
-            if line.strip() == "## Editor Corrections":
-                # Find end of table in this section
-                for j in range(i + 1, len(lines)):
-                    if lines[j].startswith("## "):
-                        insert_idx = j
-                        break
-                    if lines[j].startswith("|") and not lines[j].startswith("| Correct"):
-                        insert_idx = j + 1
-                if insert_idx is None:
-                    insert_idx = len(lines)
-                break
-            if line.strip() == "## Name Disambiguation":
-                insert_idx = i
-                break
+        added = glossary_service.add_corrections(new_entries, glossary_path)
 
-        if insert_idx is None:
-            insert_idx = len(lines)
+        if added:
+            logger.info(
+                "Appended glossary entries from editorial feedback",
+                extra={
+                    "job_id": job_id,
+                    "entries": [f"{w} -> {c}" for c, w, _ in new_entries],
+                },
+            )
 
-        new_lines = [f"| {correct} | {wrong} | {context_note} |" for correct, wrong, context_note in new_entries]
-        for offset, new_line in enumerate(new_lines):
-            lines.insert(insert_idx + offset, new_line)
-
-        glossary_path.write_text("\n".join(lines))
-
-        logger.info(
-            "Appended glossary entries from editorial feedback",
-            extra={
-                "job_id": job_id,
-                "entries": [f"{w} -> {c}" for c, w, _ in new_entries],
-            },
-        )
-
-        return len(new_entries)
+        return added
 
     async def process_job(self, job: Dict[str, Any]):
         """Process a single job through all phases."""

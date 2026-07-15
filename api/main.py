@@ -201,9 +201,10 @@ async def health():
 
 
 # Register routers
-from api.routers import config, export, ingest, jobs, langfuse, mmingest, queue, system, upload, websocket
+from api.routers import config, export, glossary, ingest, jobs, langfuse, mmingest, queue, system, upload, websocket
 
 app.include_router(queue.router, prefix="/api/queue", tags=["queue"])
+app.include_router(glossary.router, prefix="/api/glossary", tags=["glossary"])
 app.include_router(jobs.router, prefix="/api/jobs", tags=["jobs"])
 app.include_router(config.router, prefix="/api", tags=["config"])
 app.include_router(websocket.router, prefix="/api", tags=["websocket"])

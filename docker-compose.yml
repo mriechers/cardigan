@@ -24,6 +24,9 @@ services:
       - output-data:/data/output
       - ./transcripts:/data/transcripts
       - ./config:/app/config
+      # Glossary writes (editor corrections, whisper prompt terms) must
+      # survive rebuilds and stay consistent across api + worker.
+      - ./knowledge:/app/knowledge
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/system/health')"]
       interval: 30s
@@ -56,6 +59,7 @@ services:
       - output-data:/data/output
       - ./transcripts:/data/transcripts
       - ./config:/app/config
+      - ./knowledge:/app/knowledge
     depends_on:
       api:
         condition: service_healthy
