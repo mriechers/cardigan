@@ -1,0 +1,3 @@
+# Per-video working artifacts (transcripts, snippets, reports) stay local
+runs/
+.venv/

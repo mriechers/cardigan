@@ -13,6 +13,19 @@ Transforms raw SRT transcripts into clean, publication-ready markdown following 
 - `transcript-formatter/format-transcript.py` — CLI script for batch processing (recommended for long transcripts)
 - `transcript-formatter/reference/` — Supporting reference docs to attach as knowledge
 
+### YouTube Copy Audit (proof of concept)
+
+Validates the planned YouTube ingest + copy-audit + write-back feature before
+any Cardigan backend work: fetch a channel video's metadata and captions, run
+the captions through the production Cardigan pipeline, produce a three-way
+copy audit report (YouTube vs. Airtable SST vs. generated), and — after human
+approval of the diff — write metadata back to the live video via the pbswi
+`youtube-post` guarded executor.
+
+See `youtube-copy-audit/README.md` for setup and the run book, `PROMPT.md` for
+agent guardrails, and `planning/YOUTUBE_METADATA_FEATURE.md` for the full
+feature design this POC gates.
+
 ---
 
 ### Option A: CLI Script (recommended)
