@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from api.models.events import EventCreate, EventData, EventType
 from api.models.job import JobStatus
+from api.services import glossary as glossary_service
 from api.services.airtable import get_airtable_client
 from api.services.database import (
     claim_next_job,
@@ -49,7 +50,6 @@ from api.services.style_engine import (
     render_prompt_blocks,
     strip_style_tokens,
 )
-from api.services import glossary as glossary_service
 from api.services.style_engine.prompt_blocks import resolve_prompt_profile
 from api.services.utils import calculate_transcript_metrics
 

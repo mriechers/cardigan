@@ -1,7 +1,6 @@
 """Tests for the transcription review API (audio upload mode)."""
 
 import json
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient

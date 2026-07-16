@@ -189,3 +189,19 @@ export function formatDate(date: string | Date | number | null | undefined): str
 
   return d.toLocaleDateString()
 }
+
+/**
+ * Format a media position in seconds as a playback clock.
+ *
+ * @param seconds - Position in seconds (fractions truncated)
+ * @returns "m:ss", or "h:mm:ss" past the hour (e.g., "4:07", "1:02:39")
+ */
+export function formatClock(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds))
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  return h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${m}:${String(s).padStart(2, '0')}`
+}
