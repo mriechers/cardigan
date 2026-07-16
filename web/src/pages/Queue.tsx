@@ -8,6 +8,7 @@ import { useJobsWebSocket } from '../hooks/useWebSocket'
 import { formatRelativeTime, formatTimestamp } from '../utils/formatTime'
 import { getStatusBadgeColor } from '../utils/statusColors'
 import TranscriptUploader from '../components/TranscriptUploader'
+import MediaUploadForm from '../components/MediaUploadForm'
 
 interface Job {
   id: number
@@ -44,6 +45,7 @@ export default function Queue() {
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState<QueueStats | null>(null)
   const [showUploader, setShowUploader] = useState(false)
+  const [uploadTab, setUploadTab] = useState<'transcripts' | 'media'>('transcripts')
 
   // Pagination and search state
   const [page, setPage] = useState(1)
@@ -332,7 +334,37 @@ export default function Queue() {
 
       {/* Upload Component */}
       {showUploader && (
-        <TranscriptUploader onUploadComplete={handleUploadComplete} />
+        <div className="space-y-3">
+          <div
+            className="flex items-center space-x-1 bg-surface-800 rounded-lg p-1 w-fit"
+            role="tablist"
+            aria-label="Upload type"
+          >
+            {([
+              ['transcripts', 'Transcripts'],
+              ['media', 'Audio/Video'],
+            ] as const).map(([key, label]) => (
+              <button
+                key={key}
+                role="tab"
+                aria-selected={uploadTab === key}
+                onClick={() => setUploadTab(key)}
+                className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                  uploadTab === key
+                    ? 'bg-pbs-500 text-white'
+                    : 'text-surface-300 hover:text-white hover:bg-surface-700'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {uploadTab === 'transcripts' ? (
+            <TranscriptUploader onUploadComplete={handleUploadComplete} />
+          ) : (
+            <MediaUploadForm onUploadComplete={handleUploadComplete} />
+          )}
+        </div>
       )}
 
       {/* Filter Tabs */}
