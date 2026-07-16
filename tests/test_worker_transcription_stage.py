@@ -220,3 +220,20 @@ async def test_undiarized_result_gets_single_speaker_bucket(stage_env):
     assert edited["segments"][0]["speaker"] == "SPEAKER_00"
     assert edited["speaker_map"] == {"SPEAKER_00": "Frederica Freyberg"}
     assert edited["diarized"] is False
+
+
+@pytest.mark.asyncio
+async def test_media_path_traversal_fails_job(stage_env, tmp_path):
+    # media_file is PATCHable; a path escaping MEDIA_DIR must fail the job
+    # without ever reaching the transcription service
+    secret = tmp_path / "secret.txt"
+    secret.write_text("confidential")
+    worker = _make_worker()
+    phases = _phases()
+
+    await worker._run_transcription_stage(_make_job(str(secret)), stage_env.project_path, phases)
+
+    assert phases[0]["status"] == "failed"
+    stage_env.client.transcribe.assert_not_awaited()
+    status_call = stage_env.update_job_status.call_args_list[-1]
+    assert status_call.args[1] == JobStatus.failed

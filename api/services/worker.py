@@ -1577,7 +1577,12 @@ Extract any name or spelling corrections that should be added to the glossary. S
                 intake = {}
 
         media_file = job.get("media_file") or ""
-        media_path = MEDIA_DIR / media_file if media_file else None
+        # media_file is client-writable via PATCH /jobs/{id}; contain the
+        # resolved path to MEDIA_DIR so a crafted value can't make the worker
+        # ship an arbitrary readable file to the transcription service.
+        media_path = (MEDIA_DIR / media_file).resolve() if media_file else None
+        if media_path is not None and not media_path.is_relative_to(MEDIA_DIR.resolve()):
+            media_path = None
         if media_path is None or not media_path.exists():
             message = f"[transcription] Media file not found: {media_file or '(none)'}"
             self._mark_transcription_phase(phases, "failed", error_message=message)

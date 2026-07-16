@@ -344,7 +344,12 @@ async def get_media(job_id: int) -> FileResponse:
     if not job.media_file:
         raise HTTPException(status_code=404, detail="Job has no media file")
 
-    media_path = MEDIA_DIR / job.media_file
+    # media_file is client-writable via PATCH /jobs/{id}; contain the resolved
+    # path to MEDIA_DIR or this endpoint becomes an arbitrary file read
+    # (pathlib's / discards the base for absolute paths and follows ../).
+    media_path = (MEDIA_DIR / job.media_file).resolve()
+    if not media_path.is_relative_to(MEDIA_DIR.resolve()):
+        raise HTTPException(status_code=403, detail="Forbidden")
     if not media_path.exists():
         raise HTTPException(status_code=404, detail=f"Media file not found: {job.media_file}")
 

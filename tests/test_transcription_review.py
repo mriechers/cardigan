@@ -249,3 +249,29 @@ class TestMediaEndpoint:
         response = client.get(f"/api/jobs/{media_job['job_id']}/media", headers={"Range": "bytes=0-3"})
         assert response.status_code == 206
         assert response.content == b"audi"
+
+    def _set_media_file(self, job_id: int, media_file: str):
+        import asyncio
+
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(database.update_job(job_id, JobUpdate(media_file=media_file)))
+        loop.close()
+
+    def test_absolute_path_forbidden(self, media_job, tmp_path):
+        # media_file is PATCHable; an absolute path must never be served
+        # (pathlib's / discards the base directory for absolute operands)
+        secret = tmp_path / "outside" / "secret.txt"
+        secret.parent.mkdir()
+        secret.write_text("confidential")
+        self._set_media_file(media_job["job_id"], str(secret))
+        response = client.get(f"/api/jobs/{media_job['job_id']}/media")
+        assert response.status_code == 403
+
+    def test_relative_traversal_forbidden(self, media_job, tmp_path):
+        secret = tmp_path / "outside" / "secret.txt"
+        secret.parent.mkdir(exist_ok=True)
+        secret.write_text("confidential")
+        # MEDIA_DIR is tmp_path/"media" in the fixture; ../outside escapes it
+        self._set_media_file(media_job["job_id"], "../outside/secret.txt")
+        response = client.get(f"/api/jobs/{media_job['job_id']}/media")
+        assert response.status_code == 403
