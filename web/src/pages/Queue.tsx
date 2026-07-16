@@ -6,7 +6,7 @@ import { SkeletonQueue } from '../components/ui/Skeleton'
 import { useDebounce } from '../hooks/useDebounce'
 import { useJobsWebSocket } from '../hooks/useWebSocket'
 import { formatRelativeTime, formatTimestamp } from '../utils/formatTime'
-import { getStatusBadgeColor } from '../utils/statusColors'
+import { getStatusBadgeColor, getStatusLabel } from '../utils/statusColors'
 import TranscriptUploader from '../components/TranscriptUploader'
 import MediaUploadForm from '../components/MediaUploadForm'
 
@@ -451,7 +451,7 @@ export default function Queue() {
                         job.status
                       )}`}
                     >
-                      {job.status}
+                      {getStatusLabel(job.status)}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-surface-300 text-sm">
@@ -488,6 +488,15 @@ export default function Queue() {
                       )}
                       {job.status === 'in_progress' && (
                         <span className="text-xs text-surface-300">Processing...</span>
+                      )}
+                      {job.status === 'awaiting_review' && (
+                        <Link
+                          to={`/jobs/${job.id}/review`}
+                          className="px-2 py-1 text-xs bg-violet-500/20 hover:bg-violet-500/30 text-violet-300 border border-violet-500/30 rounded transition-colors"
+                          title="Review and correct the transcript"
+                        >
+                          Review transcript
+                        </Link>
                       )}
                       {['completed', 'failed', 'cancelled'].includes(job.status) && (
                         <Link

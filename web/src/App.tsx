@@ -8,6 +8,7 @@ import { PreferencesProvider } from './context/PreferencesContext'
 const ReadyForWork = lazy(() => import('./pages/ReadyForWork'))
 const Queue = lazy(() => import('./pages/Queue'))
 const JobDetail = lazy(() => import('./pages/JobDetail'))
+const TranscriptReview = lazy(() => import('./pages/TranscriptReview'))
 const Projects = lazy(() => import('./pages/Projects'))
 const Settings = lazy(() => import('./pages/Settings'))
 const Help = lazy(() => import('./pages/Help'))
@@ -30,6 +31,7 @@ function App() {
             <Route path="ready" element={<Suspense fallback={<PageLoader />}><ReadyForWork /></Suspense>} />
             <Route path="queue" element={<Suspense fallback={<PageLoader />}><Queue /></Suspense>} />
             <Route path="jobs/:id" element={<Suspense fallback={<PageLoader />}><JobDetail /></Suspense>} />
+            <Route path="jobs/:id/review" element={<Suspense fallback={<PageLoader />}><TranscriptReview /></Suspense>} />
             <Route path="projects" element={<Suspense fallback={<PageLoader />}><Projects /></Suspense>} />
             <Route path="settings" element={<Suspense fallback={<PageLoader />}><Settings /></Suspense>} />
             <Route path="help" element={<Suspense fallback={<PageLoader />}><Help /></Suspense>} />
