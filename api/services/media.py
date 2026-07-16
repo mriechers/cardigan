@@ -30,11 +30,14 @@ class AudioExtractionError(Exception):
 
 async def _run(cmd: list) -> Tuple[int, str]:
     """Run a subprocess, returning (returncode, stderr tail)."""
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.PIPE,
-    )
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except (FileNotFoundError, OSError) as e:
+        return 127, f"{cmd[0]} not available: {e}"
     _, stderr = await proc.communicate()
     tail = stderr.decode(errors="replace")[-2000:] if stderr else ""
     return proc.returncode or 0, tail
@@ -68,18 +71,22 @@ async def extract_audio(video_path: Path, output_path: Path) -> Path:
 
 async def get_duration_seconds(media_path: Path) -> Optional[float]:
     """Media duration via ffprobe, or None if it can't be determined."""
-    proc = await asyncio.create_subprocess_exec(
-        FFPROBE,
-        "-v",
-        "quiet",
-        "-show_entries",
-        "format=duration",
-        "-of",
-        "default=noprint_wrappers=1:nokey=1",
-        str(media_path),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL,
-    )
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            FFPROBE,
+            "-v",
+            "quiet",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(media_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    except (FileNotFoundError, OSError):
+        logger.warning("ffprobe not available; skipping duration probe")
+        return None
     stdout, _ = await proc.communicate()
     try:
         return float(stdout.decode().strip())
