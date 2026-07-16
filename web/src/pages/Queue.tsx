@@ -346,8 +346,10 @@ export default function Queue() {
             ] as const).map(([key, label]) => (
               <button
                 key={key}
+                id={`tab-${key}`}
                 role="tab"
                 aria-selected={uploadTab === key}
+                aria-controls={`panel-${key}`}
                 onClick={() => setUploadTab(key)}
                 className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
                   uploadTab === key
@@ -359,11 +361,17 @@ export default function Queue() {
               </button>
             ))}
           </div>
-          {uploadTab === 'transcripts' ? (
-            <TranscriptUploader onUploadComplete={handleUploadComplete} />
-          ) : (
-            <MediaUploadForm onUploadComplete={handleUploadComplete} />
-          )}
+          <div
+            id={`panel-${uploadTab}`}
+            role="tabpanel"
+            aria-labelledby={`tab-${uploadTab}`}
+          >
+            {uploadTab === 'transcripts' ? (
+              <TranscriptUploader onUploadComplete={handleUploadComplete} />
+            ) : (
+              <MediaUploadForm onUploadComplete={handleUploadComplete} />
+            )}
+          </div>
         </div>
       )}
 

@@ -333,15 +333,8 @@ async def upload_media(
 
     duration_seconds = await media_service.get_duration_seconds(audio_path)
 
-    # Glossary opt-in: speaker names + context terms become whisper prompt terms
-    glossary_terms_added = 0
-    if intake_form.add_to_glossary:
-        try:
-            glossary_terms_added = glossary.add_whisper_terms(intake_form.speakers + intake_form.context_terms)
-        except Exception as e:
-            logger.warning(f"Glossary opt-in failed (continuing): {e}")
-
-    # Duplicate check by media ID when the filename carries one
+    # Duplicate check by media ID when the filename carries one — before any
+    # side effects like glossary writes, so a rejected upload leaves no trace
     media_id = extract_media_id(audio_path.name)
     if media_id:
         existing_jobs = await database.find_jobs_by_media_id(media_id)
@@ -352,6 +345,14 @@ async def upload_media(
                 status_code=409,
                 detail=f"Already exists as job {existing.id} ({existing.status.value})",
             )
+
+    # Glossary opt-in: speaker names + context terms become whisper prompt terms
+    glossary_terms_added = 0
+    if intake_form.add_to_glossary:
+        try:
+            glossary_terms_added = glossary.add_whisper_terms(intake_form.speakers + intake_form.context_terms)
+        except Exception as e:
+            logger.warning(f"Glossary opt-in failed (continuing): {e}")
 
     intake_payload = {
         "speakers": intake_form.speakers,

@@ -1,7 +1,7 @@
 """Tests for POST /api/upload/media (audio upload mode)."""
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -165,3 +165,26 @@ class TestGlossaryOptIn:
 
         assert response.status_code == 200
         mock_add.assert_not_called()
+
+
+class TestDuplicateOrdering:
+    def test_duplicate_rejection_leaves_no_glossary_writes(self, media_dir):
+        # A 409 duplicate must not mutate the glossary (no side effects
+        # from failed uploads) — the opt-in runs after the duplicate check
+        intake = dict(INTAKE, add_to_glossary=True)
+        existing = MagicMock()
+        existing.id = 7
+        existing.status.value = "pending"
+
+        with (
+            patch("api.routers.upload.extract_media_id", return_value="2WLI1209HD"),
+            patch("api.routers.upload.database.find_jobs_by_media_id", new=AsyncMock(return_value=[existing])),
+            patch("api.routers.upload.glossary.add_whisper_terms") as mock_add,
+            patch("api.routers.upload.media_service.get_duration_seconds", new=AsyncMock(return_value=None)),
+        ):
+            response = _post_media("dup.mp3", intake=intake)
+
+        assert response.status_code == 409
+        mock_add.assert_not_called()
+        # Uploaded file cleaned up on rejection
+        assert not (media_dir / "dup.mp3").exists()
