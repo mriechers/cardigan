@@ -45,7 +45,7 @@ export default function SpeakerMapPanel({
               <label htmlFor={`speaker-name-${label}`} className="font-mono text-xs text-surface-400">
                 {label}
               </label>
-              <div className="flex items-center gap-2 text-xs text-surface-500">
+              <div className="flex items-center gap-2 text-xs text-surface-400">
                 <span>{segmentCounts[label] ?? 0} segments</span>
                 {firstSegmentStart[label] !== undefined && (
                   <button
@@ -67,7 +67,7 @@ export default function SpeakerMapPanel({
               disabled={disabled}
               placeholder="Speaker name"
               onChange={e => onNameChange(label, e.target.value)}
-              className="w-full bg-surface-900 border border-surface-600 rounded-md px-2.5 py-1.5 text-sm text-white placeholder-surface-500 focus:outline-none focus:border-pbs-400"
+              className="w-full bg-surface-900 border border-surface-600 rounded-md px-2.5 py-1.5 text-sm text-white placeholder-surface-400 focus:outline-none focus:border-pbs-400"
             />
           </li>
         ))}

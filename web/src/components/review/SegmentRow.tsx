@@ -101,7 +101,7 @@ const SegmentRow = memo(function SegmentRow({
           spellCheck
         />
         {isDirty && (
-          <p className="text-xs text-surface-500 mt-0.5" title={rawText}>
+          <p className="text-xs text-surface-400 mt-0.5" title={rawText}>
             <span className="text-status-pending">edited</span> — original: <span className="italic">{rawText}</span>
           </p>
         )}

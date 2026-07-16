@@ -641,7 +641,7 @@ export default function JobDetail() {
           </div>
           <Link
             to={`/jobs/${job.id}/review`}
-            className="px-4 py-2 bg-violet-500 hover:bg-violet-400 text-white rounded-md text-sm font-medium transition-colors"
+            className="px-4 py-2 bg-pbs-500 hover:bg-pbs-400 text-white rounded-md text-sm font-medium transition-colors"
           >
             Review transcript
           </Link>

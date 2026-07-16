@@ -381,7 +381,7 @@ export default function TranscriptReview() {
               value={extraTerms}
               onChange={e => setExtraTerms(e.target.value)}
               placeholder="e.g. Protasiewicz, Oconomowoc"
-              className="mt-2 w-full bg-surface-900 border border-surface-600 rounded-md px-3 py-2 text-sm text-white placeholder-surface-500 focus:outline-none focus:border-pbs-400"
+              className="mt-2 w-full bg-surface-900 border border-surface-600 rounded-md px-3 py-2 text-sm text-white placeholder-surface-400 focus:outline-none focus:border-pbs-400"
             />
           </div>
           <div className="flex justify-end gap-3">
