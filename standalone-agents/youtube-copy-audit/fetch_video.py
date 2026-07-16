@@ -152,12 +152,21 @@ def _pick_caption_track(tracks: list[dict]) -> dict | None:
 
 def _fetch_captions_api(service, video_id: str) -> tuple[bytes, str] | None:
     """captions.list -> captions.download (srt). Returns (data, kind) or None."""
+    from googleapiclient.errors import HttpError
+
     resp = service.captions().list(part="snippet", videoId=video_id).execute()
     track = _pick_caption_track(resp.get("items") or [])
     if track is None:
         return None
     kind = "manual" if track["snippet"].get("trackKind") != "asr" else "auto"
-    data = service.captions().download(id=track["id"], tfmt="srt").execute()
+    try:
+        data = service.captions().download(id=track["id"], tfmt="srt").execute()
+    except HttpError as exc:
+        # ASR tracks return 403 even for the channel owner — not downloadable
+        # via the API. Return None so the yt-dlp fallback engages.
+        if exc.resp.status == 403:
+            return None
+        raise
     if isinstance(data, str):
         data = data.encode("utf-8")
     return data, kind
