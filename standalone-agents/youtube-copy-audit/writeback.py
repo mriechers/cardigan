@@ -27,6 +27,7 @@ preserved) and refuses to run if the token doesn't authenticate as the PBS
 Wisconsin brand channel. Mutations append to youtube-post's logs/mutations.jsonl
 (override with $YOUTUBE_POST_LOG).
 """
+
 from __future__ import annotations
 
 import argparse

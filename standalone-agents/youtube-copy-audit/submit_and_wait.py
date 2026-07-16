@@ -18,6 +18,7 @@ transcript), this script:
 Targets production (http://cardigan01:8100) by default per CLAUDE.md; honor
 CARDIGAN_API_URL / CARDIGAN_API_KEY.
 """
+
 from __future__ import annotations
 
 import json
@@ -43,8 +44,7 @@ def _headers() -> dict:
 
 def find_transcript(run_dir: Path) -> Path:
     candidates = sorted(
-        p for p in run_dir.iterdir()
-        if p.suffix in (".srt", ".txt") and not p.name.startswith("captions")
+        p for p in run_dir.iterdir() if p.suffix in (".srt", ".txt") and not p.name.startswith("captions")
     )
     if not candidates:
         sys.exit(f"No transcript (.srt/.txt) found in {run_dir} — run fetch_video.py first.")
@@ -93,22 +93,16 @@ def wait(job_id: int) -> dict:
 
 def collect(job_id: int, job: dict, run_dir: Path) -> None:
     for filename in OUTPUT_FILES:
-        resp = requests.get(
-            f"{API_URL}/api/jobs/{job_id}/outputs/{filename}", headers=_headers(), timeout=30
-        )
+        resp = requests.get(f"{API_URL}/api/jobs/{job_id}/outputs/{filename}", headers=_headers(), timeout=30)
         if resp.status_code == 200:
             (run_dir / filename).write_bytes(resp.content)
             print(f"Saved {filename}")
         else:
             print(f"No {filename} (HTTP {resp.status_code})")
 
-    resp = requests.get(
-        f"{API_URL}/api/jobs/{job_id}/sst-metadata", headers=_headers(), timeout=30
-    )
+    resp = requests.get(f"{API_URL}/api/jobs/{job_id}/sst-metadata", headers=_headers(), timeout=30)
     if resp.status_code == 200:
-        (run_dir / "sst_metadata.json").write_text(
-            json.dumps(resp.json(), indent=2), encoding="utf-8"
-        )
+        (run_dir / "sst_metadata.json").write_text(json.dumps(resp.json(), indent=2), encoding="utf-8")
         print("Saved sst_metadata.json")
     else:
         print(

@@ -30,6 +30,7 @@ $PBSWI_ROOT/station-analytics/credentials/work/token.json. Read-only calls
 here; the identity gate still runs so a wrong-account token fails loudly
 instead of listing a personal channel (pbswi issue #90).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -71,10 +72,7 @@ def load_service():
 
     token_path = _token_path()
     if not token_path.exists():
-        sys.exit(
-            f"OAuth token not found at {token_path}.\n"
-            "Set YOUTUBE_TOKEN_PATH (or PBSWI_ROOT) — see README.md."
-        )
+        sys.exit(f"OAuth token not found at {token_path}.\n" "Set YOUTUBE_TOKEN_PATH (or PBSWI_ROOT) — see README.md.")
     data = json.loads(token_path.read_text())
     creds = Credentials.from_authorized_user_info(data, data.get("scopes"))
     if not creds.valid:
@@ -129,11 +127,7 @@ def cmd_list(args: argparse.Namespace) -> int:
 
     rows = []
     for i in range(0, len(ids), 50):
-        resp = (
-            service.videos()
-            .list(part="snippet,status,contentDetails", id=",".join(ids[i : i + 50]))
-            .execute()
-        )
+        resp = service.videos().list(part="snippet,status,contentDetails", id=",".join(ids[i : i + 50])).execute()
         rows += resp["items"]
 
     print(f"{'video id':<13} {'privacy':<9} {'published':<12} {'mediaId?':<16} title")
@@ -143,18 +137,13 @@ def cmd_list(args: argparse.Namespace) -> int:
         media_id, _ = derive_media_id(sn)
         published = (sn.get("publishedAt") or "")[:10]
         title = sn.get("title", "")[:55]
-        print(
-            f"{v['id']:<13} {st.get('privacyStatus', '?'):<9} {published:<12} "
-            f"{media_id or '-':<16} {title}"
-        )
+        print(f"{v['id']:<13} {st.get('privacyStatus', '?'):<9} {published:<12} " f"{media_id or '-':<16} {title}")
     return 0
 
 
 def _pick_caption_track(tracks: list[dict]) -> dict | None:
     """Prefer a manual (non-ASR) English track; fall back to ASR English."""
-    english = [
-        t for t in tracks if (t["snippet"].get("language") or "").lower().startswith("en")
-    ]
+    english = [t for t in tracks if (t["snippet"].get("language") or "").lower().startswith("en")]
     manual = [t for t in english if t["snippet"].get("trackKind") != "asr"]
     if manual:
         return manual[0]
@@ -181,10 +170,18 @@ def _fetch_captions_ytdlp(video_id: str, out_dir: Path) -> Path | None:
         return None
     subprocess.run(
         [
-            "yt-dlp", "--skip-download", "--write-subs", "--write-auto-subs",
-            "--sub-langs", "en.*,en", "--sub-format", "vtt",
-            "-o", str(out_dir / "captions.%(ext)s"),
-            f"https://www.youtube.com/watch?v={video_id}", "--no-warnings",
+            "yt-dlp",
+            "--skip-download",
+            "--write-subs",
+            "--write-auto-subs",
+            "--sub-langs",
+            "en.*,en",
+            "--sub-format",
+            "vtt",
+            "-o",
+            str(out_dir / "captions.%(ext)s"),
+            f"https://www.youtube.com/watch?v={video_id}",
+            "--no-warnings",
         ],
         check=True,
     )
@@ -223,11 +220,7 @@ def cmd_fetch(args: argparse.Namespace) -> int:
     service = load_service()
     video_id = args.video_id
 
-    resp = (
-        service.videos()
-        .list(part="snippet,status,contentDetails", id=video_id)
-        .execute()
-    )
+    resp = service.videos().list(part="snippet,status,contentDetails", id=video_id).execute()
     items = resp.get("items") or []
     if not items:
         sys.exit(f"Video {video_id!r} not found (or not visible to this token).")
