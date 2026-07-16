@@ -34,7 +34,10 @@ API authentication for the Cardigan dashboard. Set as an environment
 variable in `.env` or your shell. When empty or absent, auth is disabled
 (dev mode). Generate with: `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`
 
-### CLOUDFLARE_TUNNEL_TOKEN
-Only needed when running with `--profile tunnel` for remote access.
-Set as an environment variable. Get from Cloudflare Zero Trust >
-Tunnels > configure your tunnel. Starts with `eyJ`.
+### cardigan_web_htpasswd (remote-preview gate)
+Enables the hardened remote-preview vhost (Tailscale Funnel + per-person
+password). One `user:hash` line per editor. Provide as the file
+`secrets/cardigan_web_htpasswd` (preferred) or the `CARDIGAN_WEB_HTPASSWD`
+env var. **Absent or empty = preview off** (byte-identical to LAN-only).
+Manage with `scripts/set_preview_password.sh <user>` (`--revoke <user>` to
+remove). See `docs/REMOTE_ACCESS.md`.
