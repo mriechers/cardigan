@@ -227,9 +227,7 @@ def build_transcribe_response(result: dict, language: str, diarized: bool) -> Tr
             )
             for w in seg.get("words", [])
         ]
-        segments.append(
-            TranscriptSegment(id=idx, start=start, end=end, text=text, speaker=speaker, words=words)
-        )
+        segments.append(TranscriptSegment(id=idx, start=start, end=end, text=text, speaker=speaker, words=words))
         if speaker:
             speakers_seen.add(speaker)
         duration_seconds = max(duration_seconds, end)

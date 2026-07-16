@@ -17,8 +17,22 @@ RAW = {
     "speakers": ["SPEAKER_00", "SPEAKER_01"],
     "diarized": True,
     "segments": [
-        {"id": 0, "start": 0.0, "end": 4.0, "text": "Tonight on Here and Now with Frederica Fryberg.", "speaker": "SPEAKER_00", "words": []},
-        {"id": 1, "start": 4.5, "end": 9.0, "text": "Thanks for having me, Frederica Fryberg.", "speaker": "SPEAKER_01", "words": []},
+        {
+            "id": 0,
+            "start": 0.0,
+            "end": 4.0,
+            "text": "Tonight on Here and Now with Frederica Fryberg.",
+            "speaker": "SPEAKER_00",
+            "words": [],
+        },
+        {
+            "id": 1,
+            "start": 4.5,
+            "end": 9.0,
+            "text": "Thanks for having me, Frederica Fryberg.",
+            "speaker": "SPEAKER_01",
+            "words": [],
+        },
     ],
 }
 
@@ -104,9 +118,7 @@ class TestGetTranscription:
         import asyncio
 
         loop = asyncio.new_event_loop()
-        job = loop.run_until_complete(
-            database.create_job(JobCreate(project_name="Classic", transcript_file="c.txt"))
-        )
+        job = loop.run_until_complete(database.create_job(JobCreate(project_name="Classic", transcript_file="c.txt")))
         loop.close()
         response = client.get(f"/api/jobs/{job.id}/transcription")
         assert response.status_code == 400
@@ -152,7 +164,9 @@ class TestApprove:
             json={"segments": doc["segments"], "speaker_map": doc["speaker_map"]},
         )
 
-        response = client.post(f"/api/jobs/{media_job['job_id']}/transcription/approve", json={"update_glossary": False})
+        response = client.post(
+            f"/api/jobs/{media_job['job_id']}/transcription/approve", json={"update_glossary": False}
+        )
         assert response.status_code == 200, response.text
         data = response.json()
         assert data["status"] == "pending"
@@ -232,8 +246,6 @@ class TestMediaEndpoint:
         assert response.content == b"audio-bytes"
 
     def test_range_request(self, media_job):
-        response = client.get(
-            f"/api/jobs/{media_job['job_id']}/media", headers={"Range": "bytes=0-3"}
-        )
+        response = client.get(f"/api/jobs/{media_job['job_id']}/media", headers={"Range": "bytes=0-3"})
         assert response.status_code == 206
         assert response.content == b"audi"

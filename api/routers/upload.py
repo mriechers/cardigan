@@ -219,8 +219,12 @@ class IntakeForm(BaseModel):
     """Intake metadata submitted alongside a media upload."""
 
     project_name: str = Field(..., min_length=1, max_length=200)
-    speakers: List[str] = Field(default_factory=list, max_length=20, description="Expected speakers, most prominent first")
-    context_terms: List[str] = Field(default_factory=list, max_length=50, description="Topic terms / proper nouns for this recording")
+    speakers: List[str] = Field(
+        default_factory=list, max_length=20, description="Expected speakers, most prominent first"
+    )
+    context_terms: List[str] = Field(
+        default_factory=list, max_length=50, description="Topic terms / proper nouns for this recording"
+    )
     add_to_glossary: bool = Field(default=False, description="Append speakers + context terms to the running glossary")
     language: str = Field(default="en", max_length=10, description="ISO language hint; empty lets Whisper detect")
 
@@ -333,9 +337,7 @@ async def upload_media(
     glossary_terms_added = 0
     if intake_form.add_to_glossary:
         try:
-            glossary_terms_added = glossary.add_whisper_terms(
-                intake_form.speakers + intake_form.context_terms
-            )
+            glossary_terms_added = glossary.add_whisper_terms(intake_form.speakers + intake_form.context_terms)
         except Exception as e:
             logger.warning(f"Glossary opt-in failed (continuing): {e}")
 

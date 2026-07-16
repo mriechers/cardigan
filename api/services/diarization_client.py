@@ -183,9 +183,7 @@ class DiarizationClient:
                 return TranscribeOutcome(status="busy", retry_after_s=retry_after, detail=resp.text[:200])
 
             logger.warning(f"Transcription service returned {resp.status_code}: {resp.text[:200]}")
-            return TranscribeOutcome(
-                status="error", detail=f"Service returned {resp.status_code}: {resp.text[:200]}"
-            )
+            return TranscribeOutcome(status="error", detail=f"Service returned {resp.status_code}: {resp.text[:200]}")
 
         except httpx.TimeoutException:
             msg = f"Transcription timed out after {TRANSCRIBE_TIMEOUT_SECONDS}s for {path.name}"

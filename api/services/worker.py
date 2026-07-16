@@ -1685,9 +1685,7 @@ Extract any name or spelling corrections that should be added to the glossary. S
                     "text": (seg.get("text") or "").strip(),
                 }
             )
-        speaker_map = {
-            label: (speakers[i] if i < len(speakers) else "") for i, label in enumerate(sorted(labels_seen))
-        }
+        speaker_map = {label: (speakers[i] if i < len(speakers) else "") for i, label in enumerate(sorted(labels_seen))}
         edited = {
             "segments": segments,
             "speaker_map": speaker_map,

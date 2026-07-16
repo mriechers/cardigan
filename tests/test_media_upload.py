@@ -113,7 +113,9 @@ class TestVideoUpload:
             return output_path
 
         with (
-            patch("api.routers.upload.media_service.extract_audio", new=AsyncMock(side_effect=fake_extract)) as mock_extract,
+            patch(
+                "api.routers.upload.media_service.extract_audio", new=AsyncMock(side_effect=fake_extract)
+            ) as mock_extract,
             patch("api.routers.upload.media_service.get_duration_seconds", new=AsyncMock(return_value=60.0)),
         ):
             response = _post_media("episode.mp4")
