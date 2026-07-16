@@ -64,12 +64,14 @@ Tailscale Funnel ingress  (TLS terminated at Tailscale edge; sets X-Forwarded-Fo
 cardigan01 host :3101  ->  web container nginx :3001   [ HARDENED PREVIEW VHOST ]
   |   - HTTP Basic Auth (per-person htpasswd)  <- the gate
   |   - rate-limited auth (keyed on real client IP via X-Forwarded-For)
-  |   - location /api/config  -> 403   (Settings / model-backend writes blocked)
-  |   - location /mcp/         -> 403   (SST-write tools never exposed)
+  |   - config WRITES -> 403 (backend registration + phase/model/worker/ingest assignment)
+  |   - /mcp/          -> 403 (SST-write tools never exposed)
+  |   - sub_filter injects a preview flag into index.html (frontend hides Settings)
   |
   +-- /            SPA (static files)
-  +-- /api/        proxy -> api:8000   (producer workflow: queue/jobs/ingest/export/upload)
-  +-- /api/ws/     proxy -> api:8000   (live updates)
+  +-- /api/        proxy -> api:8000 (producer workflow: queue/jobs/ingest/export/upload
+  |                                    + config *reads* and estimate-cost)
+  +-- /api/ws/     proxy -> api:8000 (live updates)
 
 cardigan01 host :3100  ->  web container nginx :3000   [ EXISTING LAN VHOST — unchanged ]
   (no auth, full surface, LAN / Tailscale only, NOT funneled)
@@ -111,11 +113,15 @@ A review of "public URL + password" surfaced concrete risks. Findings:
   for `cardigan01.<tailnet>.ts.net`, publishing the hostname to public
   Certificate Transparency logs. Treat the URL as discoverable; the password is
   the whole wall. → *strong per-person passwords + rate-limiting.*
-- **Config-write = data-exfiltration path.** `PATCH /api/config/*` (the Settings
-  page) can register an arbitrary OpenAI-compatible model backend and route a
-  pipeline phase through it — i.e., send transcripts to an attacker's server or
-  tamper with outputs. → *`/api/config` is 403'd on the preview vhost;* operators
-  change config via the API over Tailscale during a preview window.
+- **Config-write = data-exfiltration path.** The Settings page can register an
+  arbitrary OpenAI-compatible model backend and route a pipeline phase through it
+  — i.e., send transcripts to an attacker's server or tamper with outputs. → *the
+  preview vhost 403's the config/backend **write** endpoints* (registration +
+  phase/model/worker/ingest assignment) while keeping config **reads** +
+  `estimate-cost` open (Job Detail and upload depend on them). A blanket
+  `/api/config` block would break those producer pages, so the block is
+  endpoint-specific. Operators change config via the API over Tailscale during a
+  preview window.
 - **No attribution / no per-person revocation with a shared secret.** → *per-person
   htpasswd entries;* nginx access log records `$remote_user`. Revoke by deleting
   one line + `docker compose up -d web`.
@@ -152,6 +158,12 @@ off for the preview.
   simpler single-block alternative — apply auth + denies to the existing `:3000`
   block gated on the preview toggle — is possible but blocks Settings and prompts
   for a password on LAN too during a preview; rejected to keep daily work clean.)
+- **Hide Settings cleanly in the remote app.** nginx enforcement (the config
+  write-block) is the real gate; the frontend additionally hides the Settings nav
+  link and shows a short note if `/settings` is opened directly, so remote editors
+  don't hit a visibly-broken Save button. Driven by a preview flag injected into
+  `index.html` on the hardened vhost. Note copy: **"Configuration unavailable in
+  remote application."**
 - **Remove the old Cloudflare artifacts entirely** — one clear access story.
 
 ---
@@ -164,8 +176,19 @@ off for the preview.
   3001;`) alongside the existing `:3000` block, rendered by envsubst placeholders
   so it is present only when preview mode is enabled:
   - `auth_basic "Cardigan Preview";` + `auth_basic_user_file /etc/nginx/.htpasswd;`
-  - `location = /api/config { return 403; }` and `location /api/config/ { return 403; }`
+  - **Block config/backend *writes* only** (preserve the reads the producer
+    workflow needs). Return 403 for: the model-backend registry
+    (`/api/config/backends…`, any method), `POST /api/config/models/refresh`, and
+    the write methods on `/api/config/models`, `/api/config/phase-backends`,
+    `/api/config/worker`, `/api/ingest/config` (e.g. `limit_except GET { deny
+    all; }`). **Keep open:** `GET /api/config/models` (Job Detail),
+    `POST /api/config/estimate-cost` (upload cost), `GET /api/config/worker`,
+    `GET /api/ingest/config`.
   - `location /mcp/ { return 403; }`
+  - `sub_filter` on `index.html` to inject the preview flag
+    (`<script>window.__CARDIGAN_PREVIEW__=true</script>`) so the frontend can hide
+    Settings (see change 6). Requires `sub_filter_once on;` and disabling gzip on
+    the HTML response so the filter can match.
   - `limit_req` referencing a `limit_req_zone` in the `http` block; `real_ip`
     config to trust the Funnel ingress and read `X-Forwarded-For`.
   - the producer locations (`/`, `/api/`, `/api/ws/`) proxying as the LAN block does.
@@ -214,6 +237,17 @@ web` and to share each password over a secure channel (Signal / 1Password link).
 > The Funnel command runs on the **box host**, outside Docker, so it is not wired
 > into these (Mac-oriented) scripts. It lives in the runbook (below).
 
+### 6. `web/src` — hide Settings in the remote app
+
+- A small typed accessor reads the injected `window.__CARDIGAN_PREVIEW__` flag
+  (false/undefined in the normal LAN build).
+- When set: hide the Settings nav link (`components/Layout.tsx` /
+  `components/StatusBar.tsx`) and, if `/settings` is opened directly, render a
+  short note — **"Configuration unavailable in remote application."** — instead of
+  the Settings page body.
+- Cosmetic defense-in-depth only; the nginx write-block is the real enforcement.
+  The flag just avoids a visibly-broken Save button.
+
 ---
 
 ## Box-side runbook (ops — goes in `docs/REMOTE_ACCESS.md`)
@@ -248,8 +282,16 @@ web` and to share each password over a secure channel (Signal / 1Password link).
 - With `secrets/cardigan_web_htpasswd` present, against the **preview port (3101)**:
   - No credentials → **401**.
   - `curl -u alice:<pw>` → **200**, SPA served.
-  - `GET/PATCH /api/config...` → **403** (surface-shrink proven).
+  - Config **writes** → **403**: `POST /api/config/backends`,
+    `PATCH /api/config/{models,phase-backends,worker}`,
+    `POST /api/config/models/refresh`, `PATCH /api/ingest/config`.
+  - Config **reads** still **200** (producer pages must keep working):
+    `GET /api/config/models` (Job Detail), `POST /api/config/estimate-cost`
+    (upload), `GET /api/config/worker`, `GET /api/ingest/config`.
   - `/mcp/...` → **403**.
+  - The SPA served on the preview vhost carries `window.__CARDIGAN_PREVIEW__`; the
+    Settings nav link is hidden and `/settings` shows the
+    "Configuration unavailable in remote application" note.
   - Authenticated browser: SPA loads; the **live-updates WebSocket** (`/api/ws/jobs`)
     connects and streams. *Verify explicitly* — the browser must pass cached
     basic-auth creds on the WS handshake (PR #208 had to fix WS auth).
@@ -262,8 +304,9 @@ web` and to share each password over a secure channel (Signal / 1Password link).
 **On the box (post-deploy smoke):**
 - Funnel URL prompts for a password; a valid per-person password loads the dashboard.
 - A job's phases update live through the funnel.
-- Through the funnel: `/api/config` and `/mcp/` return 403; `:8100` and `:8180`
-  are unreachable.
+- Through the funnel: config *writes* and `/mcp/` return 403 (config *reads*
+  still work, so Job Detail + upload are functional); `:8100` and `:8180` are
+  unreachable.
 
 ---
 
