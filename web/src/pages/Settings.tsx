@@ -4,6 +4,7 @@ import { usePreferences, TextSize } from '../context/PreferencesContext'
 import { AGENT_INFO } from '../constants/agents'
 import ModelStatsWidget from '../components/ModelStatsWidget'
 import PhaseStatsWidget from '../components/PhaseStatsWidget'
+import RestartComponentsButton from '../components/RestartComponentsButton'
 
 interface AvailableModel {
   id: string
@@ -56,6 +57,7 @@ interface ComponentStatus {
   name: string
   running: boolean
   pid: number | null
+  container?: string | null
 }
 
 interface SystemStatus {
@@ -70,6 +72,7 @@ export default function Settings() {
   const [worker, setWorker] = useState<WorkerConfig | null>(null)
   const [ingestConfig, setIngestConfig] = useState<IngestConfig | null>(null)
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null)
+  const [restarting, setRestarting] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -132,6 +135,18 @@ export default function Settings() {
     } catch {
       // System status may not be available — non-critical
     }
+  }, [])
+
+  const restartComponents = useCallback(async () => {
+    setRestarting(true)
+    try {
+      await fetch('/api/system/restart', { method: 'POST' })
+    } catch {
+      // Expected: the API restarts itself and the socket may drop mid-request.
+    }
+    // The 5s status poll reflects each container cycling; clear the banner after
+    // a grace period once the API is expected to be back.
+    setTimeout(() => setRestarting(false), 20000)
   }, [])
 
 
@@ -724,7 +739,7 @@ export default function Settings() {
                 <div className="p-4 bg-surface-900 rounded-lg">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
-                      <div className="w-3 h-3 rounded-full bg-status-completed" />
+                      <div className={`w-3 h-3 rounded-full ${systemStatus?.api.running !== false ? 'bg-status-completed' : 'bg-status-pending'}`} />
                       <div>
                         <div className="font-medium text-white">API Server</div>
                         <div className="text-sm text-surface-400">
@@ -733,7 +748,7 @@ export default function Settings() {
                       </div>
                     </div>
                     <div className="px-3 py-1 text-xs bg-pbs-500/20 text-pbs-400 border border-pbs-500/30 rounded">
-                      Container: cardigan-api
+                      Container: {systemStatus?.api.container ?? 'cardigan-api'}
                     </div>
                   </div>
                 </div>
@@ -753,7 +768,7 @@ export default function Settings() {
                       </div>
                     </div>
                     <div className="px-3 py-1 text-xs bg-pbs-500/20 text-pbs-400 border border-pbs-500/30 rounded">
-                      Container: cardigan-api
+                      Container: {systemStatus?.worker.container ?? 'cardigan-worker'}
                     </div>
                   </div>
                 </div>
@@ -766,17 +781,19 @@ export default function Settings() {
                       <div>
                         <div className="font-medium text-white">Transcript Watcher</div>
                         <div className="text-sm text-surface-400">
-                          {systemStatus?.watcher.running
-                            ? 'Running - Managed by Docker'
-                            : 'Managed by Docker'}
+                          {systemStatus?.watcher.running ? 'Running - Managed by Docker' : 'Not deployed'}
                         </div>
                       </div>
                     </div>
                     <div className="px-3 py-1 text-xs bg-pbs-500/20 text-pbs-400 border border-pbs-500/30 rounded">
-                      Container: cardigan-api
+                      Container: {systemStatus?.watcher.container ?? '—'}
                     </div>
                   </div>
                 </div>
+              </div>
+
+              <div className="mt-6">
+                <RestartComponentsButton onConfirm={restartComponents} restarting={restarting} />
               </div>
             </div>
 
@@ -816,10 +833,6 @@ export default function Settings() {
                     Manage the containerized system via Docker Compose
                   </p>
                   <div className="space-y-2 text-xs">
-                    <div className="p-2 bg-surface-900 rounded">
-                      <div className="text-surface-400 mb-1">Restart all services:</div>
-                      <code className="text-green-400">docker compose restart</code>
-                    </div>
                     <div className="p-2 bg-surface-900 rounded">
                       <div className="text-surface-400 mb-1">View logs:</div>
                       <code className="text-green-400">docker compose logs -f</code>
