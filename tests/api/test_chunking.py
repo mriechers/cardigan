@@ -447,3 +447,25 @@ class TestDedupSeamTurns:
         prev = "**Alice:**  \nOne.\n\n**Bob:**  \nTwo."
         nxt = "**Carol:**  \nThree.\n\n**Dave:**  \nFour."
         assert _dedup_seam_turns(prev, nxt) == nxt
+
+    def test_drops_multi_turn_contiguous_echo(self):
+        """A 2+ turn contiguous echo (prev's tail re-emitted as next's head) is
+        fully dropped, leaving only the genuinely new content."""
+        prev = "**Alice:**  \nFirst point here.\n\n**Bob:**  \nSecond point here."
+        nxt = "**Alice:**  \nFirst point here.\n\n**Bob:**  \nSecond point here.\n\n" "**Carol:**  \nBrand new content."
+        out = _dedup_seam_turns(prev, nxt)
+        assert out.count("First point here") == 0
+        assert out.count("Second point here") == 0
+        assert "Brand new content" in out
+        assert out.strip().startswith("**Carol:**")
+
+    def test_backchannel_matching_non_seam_turn_is_kept(self):
+        """A leading turn that matches a prev turn NOT at the seam (a "Right."
+        backchannel said a few turns earlier) is kept — the match must anchor at
+        prev's actual tail, so it is not misclassified as an echo."""
+        prev = (
+            "**Alice:**  \nRight.\n\n**Bob:**  \nThe vote finally passed today.\n\n"
+            "**Carol:**  \nA major milestone indeed."
+        )
+        nxt = "**Dave:**  \nRight.\n\n**Erin:**  \nOn to the next agenda item."
+        assert _dedup_seam_turns(prev, nxt) == nxt  # nothing dropped
