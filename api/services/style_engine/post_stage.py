@@ -5,9 +5,10 @@ Runs after a phase's LLM call returns raw markdown. Two tiers, never
 conflated:
 
 - **Enforce tier** -- deterministic rewrites that never change meaning. For
-  ``seo`` this is limited to down-styling the TITLE field's casing (spliced
-  back into the document via its exact span). Nothing else is ever rewritten
-  here.
+  ``seo`` this is down-styling the TITLE field's casing and truncating an
+  over-limit ``short_description``/``long_description`` to its hard character
+  budget at a word boundary (both spliced back into the document via their
+  exact spans). No other field or text is rewritten here.
 - **Flag tier** -- everything else (over-limit text, forbidden phrases,
   first/second-person voice) is detection-only. Violations are surfaced as
   ``RuleViolation``s for a human or a later model-fixable pass; this module

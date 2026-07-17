@@ -474,28 +474,33 @@ def _dedup_seam_turns(prev_body: str, next_body: str) -> str:
 
     Replaces the previous fuzzy word-window trim (which flattened structure and
     could over-trim real dialogue). It works on whole speaker turns, so it never
-    flattens, never trims mid-label, and never deletes a partial line. A leading
-    turn is dropped only when its dialogue is an exact (whitespace-normalized)
-    duplicate of one of the last few turns of the previous chunk — i.e. the
-    model echoed the input overlap despite being told not to. Because
-    ``_split_srt`` partitions the source captions with no content overlap, such
-    a leading duplicate can only be an echo; genuine new content is never an
-    exact duplicate of the immediately-preceding turn, so real dialogue is never
-    dropped.
+    flattens, never trims mid-label, and never deletes a partial line.
+
+    An echo is modelled precisely: the model re-emitting the input overlap means
+    ``next_body`` OPENS with a contiguous run of turns identical (whitespace-
+    normalized) to the turns that CLOSE ``prev_body`` — a suffix of prev
+    appearing as a prefix of next. Only that seam-adjacent contiguous run is
+    dropped (the largest match, up to ``_MAX_SEAM_ECHO_TURNS``). Anchoring on the
+    exact seam — rather than matching a leading turn against *any* recent turn —
+    avoids misclassifying a short turn that merely repeats one said a few turns
+    earlier (e.g. a "Right." backchannel) as an echo. Because ``_split_srt``
+    partitions the source captions with no content overlap, a seam-adjacent
+    contiguous duplicate is an echo, not new dialogue.
     """
     prev_turns = _split_into_turns(prev_body)
     next_turns = _split_into_turns(next_body)
     if not prev_turns or not next_turns:
         return next_body
 
-    recent_keys = {_turn_dialogue_key(t) for t in prev_turns[-_MAX_SEAM_ECHO_TURNS:]}
-    recent_keys.discard("")
+    prev_keys = [_turn_dialogue_key(t) for t in prev_turns]
+    next_keys = [_turn_dialogue_key(t) for t in next_turns]
+    max_k = min(len(prev_turns), len(next_turns), _MAX_SEAM_ECHO_TURNS)
 
     drop = 0
-    for turn in next_turns[:_MAX_SEAM_ECHO_TURNS]:
-        if _turn_dialogue_key(turn) in recent_keys:
-            drop += 1
-        else:
+    for k in range(max_k, 0, -1):
+        prev_tail = prev_keys[-k:]
+        if all(prev_tail) and prev_tail == next_keys[:k]:  # non-empty contiguous match
+            drop = k
             break
 
     if not drop:
