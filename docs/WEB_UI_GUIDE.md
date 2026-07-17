@@ -26,7 +26,7 @@ The PBS Wisconsin Editorial Assistant dashboard provides a web interface for man
 The dashboard is available at:
 
 - **Local:** `http://metadata.neighborhood:3000` (requires `./scripts/start.sh`)
-- **Remote:** `https://cardigan.bymarkriechers.com` (via Cloudflare Tunnel, requires `ENABLE_TUNNEL=true` in `.env`)
+- **Remote (preview):** a password-protected `https://<host>.ts.net` URL via Tailscale Funnel — a temporary, off-by-default editor preview. See [Remote Access](REMOTE_ACCESS.md).
 
 The API server must be running on port 8000 for the dashboard to function. Both are started together by `./scripts/start.sh`. For remote access setup, see [Remote Access](REMOTE_ACCESS.md).
 
