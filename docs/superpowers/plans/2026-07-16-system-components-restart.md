@@ -176,6 +176,8 @@ import signal as signal_module
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 
 class TestRestartAction:
     """POST /api/system/restart writes the signal, reports live components, schedules self-exit."""
@@ -198,20 +200,17 @@ class TestRestartAction:
         mock_req.assert_awaited_once()
         mock_self.assert_awaited_once()  # self-restart scheduled + run as a background task
 
-    def test_self_restart_sends_sigterm_to_self(self):
-        with (
-            patch("api.routers.system.asyncio.sleep", new_callable=AsyncMock),
-            patch("api.routers.system.os.kill") as mock_kill,
-            patch("api.routers.system.os.getpid", return_value=4321),
-        ):
-            import asyncio as _asyncio
-            _asyncio.run(_import_self_restart()())
-        mock_kill.assert_called_once_with(4321, signal_module.SIGTERM)
-
-
-async def _import_self_restart():
+@pytest.mark.asyncio
+async def test_self_restart_sends_sigterm_to_self():
     from api.routers.system import _self_restart
-    return _self_restart
+
+    with (
+        patch("api.routers.system.asyncio.sleep", new_callable=AsyncMock),
+        patch("api.routers.system.os.kill") as mock_kill,
+        patch("api.routers.system.os.getpid", return_value=4321),
+    ):
+        await _self_restart()
+    mock_kill.assert_called_once_with(4321, signal_module.SIGTERM)
 
 
 class TestStatusContainerNames:
@@ -628,12 +627,16 @@ class TestHeartbeatRestart:
         assert watch_transcripts.send_heartbeat() is False
 
     @patch("watch_transcripts.time.sleep")
-    @patch("watch_transcripts.get_transcript_files", return_value=[])
+    @patch("watch_transcripts.queue_file")
+    @patch("watch_transcripts.get_transcript_files", return_value=["new.srt"])
     @patch("watch_transcripts.get_queued_files", return_value=set())
     @patch("watch_transcripts.send_heartbeat", return_value=True)
-    def test_watch_loop_exits_when_restart_requested(self, _hb, _q, _f, _sleep):
-        # Should return promptly (no infinite loop) because the heartbeat asked to restart.
+    def test_watch_loop_exits_when_restart_requested(self, _hb, _q, _f, mock_queue, mock_sleep):
+        # Returns (no infinite loop) because the heartbeat asked to restart —
+        # and exits BEFORE processing files or sleeping.
         watch_transcripts.watch_loop()
+        mock_queue.assert_not_called()
+        mock_sleep.assert_not_called()
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
