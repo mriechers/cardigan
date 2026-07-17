@@ -117,6 +117,32 @@ from api.services.utils import get_srt_duration, parse_srt
 _GUARD_MIN_RATIO = 0.995
 _GUARD_MAX_RATIO = 1.005
 
+# Trailing characters trimmed before appending the ellipsis so a truncated
+# description doesn't end on a dangling comma/dash.
+_TRUNCATE_TRIM = " ,;:—-"
+
+
+def _truncate_to_limit(value: str, max_len: int) -> str:
+    """Truncate ``value`` to at most ``max_len`` chars at a word boundary + "…".
+
+    Returns ``value`` unchanged when already within ``max_len``. Reserves one
+    char for the ellipsis and backs off to the last whitespace so a word is
+    never cut mid-token (unless the first token alone already exceeds the
+    budget, in which case it hard-cuts that token). The result is always
+    ``<= max_len`` characters.
+    """
+    if len(value) <= max_len:
+        return value
+    budget = max_len - 1  # reserve one char for the ellipsis
+    head = value[:budget]
+    trimmed = head.rstrip()
+    if " " in trimmed:
+        head = trimmed[: trimmed.rfind(" ")]
+    head = head.rstrip(_TRUNCATE_TRIM)
+    if not head:  # a single token longer than the whole budget
+        head = value[:budget].rstrip()
+    return head + "…"
+
 
 def run_post_stage(phase: str, raw_output: str, context: Mapping[str, Any], rules: StyleRules) -> PostStageResult:
     """Normalize (enforce tier) then validate (flag tier) one phase's raw LLM output.
@@ -189,32 +215,49 @@ def run_post_stage(phase: str, raw_output: str, context: Mapping[str, Any], rule
 
     analyst_output = context.get("analyst_output") or ""
     canonical = build_canonical(rules, extract_proper_nouns(analyst_output, rules.surname_stoplist()))
+    program = context.get("program")
+    content_type = context.get("content_type") or "full"
+    limits = rules.limits_for(program, content_type)
+
+    # Enforce tier: down-style the TITLE casing and truncate over-limit
+    # DESCRIPTIONS to their hard character budget. Both are spliced back by
+    # exact span in a single pass over the original document, so the
+    # Recommended value -- the only text the SST write path consumes -- is
+    # always length-compliant.
+    replacements: dict[str, str] = {}
+    fixes: list[AppliedFix] = []
 
     raw_title = fields.title.value
     normalized_title = to_down_style(raw_title, canonical)
-    changed = normalized_title != raw_title
+    if normalized_title != raw_title:
+        replacements["title"] = normalized_title
+        fixes.append(AppliedFix(rule_id="casing.down_style.title", before=raw_title, after=normalized_title))
 
-    fixes: list[AppliedFix] = []
-    if changed:
-        normalized_output = splice_seo_fields(raw_output, fields, {"title": normalized_title})
-        fixes.append(
-            AppliedFix(
-                rule_id="casing.down_style.title",
-                before=raw_title,
-                after=normalized_title,
-            )
-        )
-    else:
-        normalized_output = raw_output
+    for field_name, span in (
+        ("short_description", fields.short_description),
+        ("long_description", fields.long_description),
+    ):
+        if span is None:
+            continue
+        max_len = (limits.get(field_name) or {}).get("max")
+        if not isinstance(max_len, int):
+            continue
+        truncated = _truncate_to_limit(span.value, max_len)
+        if truncated != span.value:
+            replacements[field_name] = truncated
+            fixes.append(AppliedFix(rule_id=f"limits.{field_name}.truncated", before=span.value, after=truncated))
 
-    program = context.get("program")
-    content_type = context.get("content_type") or "full"
+    changed = bool(replacements)
+    normalized_output = splice_seo_fields(raw_output, fields, replacements) if changed else raw_output
 
-    final_values: dict[str, str] = {"title": normalized_title}
+    # Flag tier runs over the post-enforcement values (limits now satisfied for
+    # any field we truncated; a still-over field would only occur if it had no
+    # configured max).
+    final_values: dict[str, str] = {"title": replacements.get("title", raw_title)}
     if fields.short_description is not None:
-        final_values["short_description"] = fields.short_description.value
+        final_values["short_description"] = replacements.get("short_description", fields.short_description.value)
     if fields.long_description is not None:
-        final_values["long_description"] = fields.long_description.value
+        final_values["long_description"] = replacements.get("long_description", fields.long_description.value)
 
     violations = list(check_field_limits(final_values, rules, phase, program=program, content_type=content_type))
     for field_name, value in final_values.items():
