@@ -42,16 +42,58 @@ def _count_dialogue_words_srt(captions: List[SRTCaption]) -> int:
     return sum(len(c.text.split()) for c in captions)
 
 
+# How far past the word target to scan for a natural chunk boundary.
+_TURN_LOOKAHEAD = 25  # captions — prefer ending right before a new speaker turn
+_SENTENCE_LOOKAHEAD = 10  # captions — fallback: sentence-ending punctuation
+
+
+def _starts_new_turn(caption: SRTCaption) -> bool:
+    """True if this caption begins a new speaker turn.
+
+    ``split_interior_speaker_changes`` runs before chunking on SRT input, so
+    every ``>>`` marker is guaranteed caption-leading by the time we split —
+    a leading ``>>`` reliably marks a new turn. Scripted transcripts with no
+    ``>>`` never match; the caller then falls back to sentence boundaries.
+    """
+    return caption.text.lstrip().startswith(">>")
+
+
+def _choose_break_idx(captions: List[SRTCaption], i: int) -> int:
+    """Pick the caption index to end the current chunk on, at/after ``i``.
+
+    Preference order, so a chunk seam never lands mid-speaker-turn (which is
+    what forces the next chunk to re-guess who is speaking and drives the
+    speaker-label breakdown at seams):
+
+    1. End at ``j`` where the *next* caption opens a new speaker turn (``>>``),
+       so the following chunk starts cleanly on a fresh turn.
+    2. Else the first sentence-ending caption (``.?!``) within a shorter window.
+    3. Else a hard break at ``i``.
+    """
+    n = len(captions)
+    turn_hi = min(i + _TURN_LOOKAHEAD, n)
+    for j in range(i, turn_hi):
+        if j + 1 < n and _starts_new_turn(captions[j + 1]):
+            return j
+    sentence_hi = min(i + _SENTENCE_LOOKAHEAD, n)
+    for j in range(i, sentence_hi):
+        text = captions[j].text.strip()
+        if text and text[-1] in ".?!":
+            return j
+    return i
+
+
 def _split_srt(
     content: str,
     target_chunk_words: int,
     overlap_captions: int,
 ) -> Optional[List[TranscriptChunk]]:
-    """Split SRT content into chunks at sentence boundaries.
+    """Split SRT content into chunks at speaker-turn boundaries.
 
-    Walks captions accumulating word count. At the target, looks ahead
-    up to 10 captions for sentence-ending punctuation to find a natural
-    break point.
+    Walks captions accumulating word count. Once past the target it picks a
+    break via ``_choose_break_idx`` — preferring to end just before a new
+    speaker turn (``>>``), falling back to sentence-ending punctuation — so a
+    seam never splits a single speaker's turn across two chunks.
     """
     captions = parse_srt(content)
     if not captions:
@@ -65,7 +107,6 @@ def _split_srt(
     chunks: List[TranscriptChunk] = []
     chunk_start_idx = 0
     accumulated_words = 0
-    LOOKAHEAD = 10
 
     i = 0
     while i < len(captions):
@@ -73,16 +114,8 @@ def _split_srt(
         accumulated_words += caption_words
 
         if accumulated_words >= target_chunk_words and i < len(captions) - 1:
-            # Look ahead for sentence-ending punctuation
-            break_idx = i
-            for j in range(i, min(i + LOOKAHEAD, len(captions))):
-                text = captions[j].text.strip()
-                if text and text[-1] in ".?!":
-                    break_idx = j
-                    break
-            else:
-                # No sentence boundary found in lookahead, break at current
-                break_idx = i
+            # Prefer a speaker-turn boundary; fall back to a sentence boundary.
+            break_idx = _choose_break_idx(captions, i)
 
             # Build this chunk's captions
             chunk_captions = captions[chunk_start_idx : break_idx + 1]
@@ -385,9 +418,9 @@ def merge_formatter_chunks(chunks: List[str]) -> str:
 
         bodies.append(body)
 
-    # Deduplicate overlap at seams
+    # Deduplicate any echoed overlap at seams (structural, turn-aware).
     for i in range(len(bodies) - 1):
-        bodies[i + 1] = _trim_overlap(bodies[i], bodies[i + 1])
+        bodies[i + 1] = _dedup_seam_turns(bodies[i], bodies[i + 1])
 
     # Build final document
     parts = []
@@ -411,45 +444,67 @@ def merge_formatter_chunks(chunks: List[str]) -> str:
     return "\n\n".join(parts)
 
 
-def _trim_overlap(prev_body: str, next_body: str, window: int = 100) -> str:
-    """Remove duplicate text at the seam between two chunks.
+# Max leading turns of a continuation chunk to test for echoed overlap (also the
+# window of trailing previous-chunk turns tested against).
+_MAX_SEAM_ECHO_TURNS = 6
 
-    Compares the last ~window words of prev with the first ~window
-    words of next. If >50% overlap, trims the duplicate from next.
+# A speaker turn starts at a line-leading bold label, e.g. ``**Jane Doe:**``.
+_TURN_SPLIT_RE = re.compile(r"(?m)(?=^\*\*[^*\n]+?:\*\*)")
+_TURN_LABEL_RE = re.compile(r"^\*\*[^*\n]+?:\*\*[ \t]*")
+
+
+def _split_into_turns(body: str) -> List[str]:
+    """Split a formatted transcript body into speaker-turn blocks.
+
+    A turn runs from a line-leading ``**Speaker:**`` label to the next such
+    label. Any text before the first label is kept as a leading block so
+    nothing is dropped, and whitespace inside each block is preserved verbatim.
     """
-    prev_words = prev_body.split()
-    next_words = next_body.split()
+    return [part for part in _TURN_SPLIT_RE.split(body) if part.strip()]
 
-    if len(prev_words) < 10 or len(next_words) < 10:
+
+def _turn_dialogue_key(turn: str) -> str:
+    """Whitespace/label-normalized dialogue of a turn, for echo comparison."""
+    without_label = _TURN_LABEL_RE.sub("", turn.strip(), count=1)
+    return re.sub(r"\s+", " ", without_label).strip().lower()
+
+
+def _dedup_seam_turns(prev_body: str, next_body: str) -> str:
+    """Drop leading turns of ``next_body`` that echo the tail of ``prev_body``.
+
+    Replaces the previous fuzzy word-window trim (which flattened structure and
+    could over-trim real dialogue). It works on whole speaker turns, so it never
+    flattens, never trims mid-label, and never deletes a partial line.
+
+    An echo is modelled precisely: the model re-emitting the input overlap means
+    ``next_body`` OPENS with a contiguous run of turns identical (whitespace-
+    normalized) to the turns that CLOSE ``prev_body`` — a suffix of prev
+    appearing as a prefix of next. Only that seam-adjacent contiguous run is
+    dropped (the largest match, up to ``_MAX_SEAM_ECHO_TURNS``). Anchoring on the
+    exact seam — rather than matching a leading turn against *any* recent turn —
+    avoids misclassifying a short turn that merely repeats one said a few turns
+    earlier (e.g. a "Right." backchannel) as an echo. Because ``_split_srt``
+    partitions the source captions with no content overlap, a seam-adjacent
+    contiguous duplicate is an echo, not new dialogue.
+    """
+    prev_turns = _split_into_turns(prev_body)
+    next_turns = _split_into_turns(next_body)
+    if not prev_turns or not next_turns:
         return next_body
 
-    prev_tail = prev_words[-window:]
-    next_head = next_words[:window]
+    prev_keys = [_turn_dialogue_key(t) for t in prev_turns]
+    next_keys = [_turn_dialogue_key(t) for t in next_turns]
+    max_k = min(len(prev_turns), len(next_turns), _MAX_SEAM_ECHO_TURNS)
 
-    # Find the longest matching suffix of prev_tail that starts next_head
-    best_match_len = 0
-    for start in range(len(prev_tail)):
-        candidate = prev_tail[start:]
-        candidate_len = len(candidate)
-        if candidate_len < 5:
+    drop = 0
+    for k in range(max_k, 0, -1):
+        prev_tail = prev_keys[-k:]
+        if all(prev_tail) and prev_tail == next_keys[:k]:  # non-empty contiguous match
+            drop = k
             break
-        # Check if next_head starts with this candidate
-        match_len = 0
-        for k in range(min(candidate_len, len(next_head))):
-            if candidate[k].lower() == next_head[k].lower():
-                match_len += 1
-            else:
-                break
-        if match_len > best_match_len and match_len >= 5:
-            best_match_len = match_len
 
-    # If >50% of the window overlaps, trim
-    if best_match_len > 0 and best_match_len / min(window, len(next_head)) > 0.5:
-        logger.info(
-            "Trimming overlap at chunk seam",
-            extra={"overlap_words": best_match_len},
-        )
-        trimmed_words = next_words[best_match_len:]
-        return " ".join(trimmed_words)
+    if not drop:
+        return next_body
 
-    return next_body
+    logger.info("Dropped echoed turn(s) at chunk seam", extra={"turns": drop})
+    return "".join(next_turns[drop:]).lstrip("\n")
