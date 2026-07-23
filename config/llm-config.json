@@ -142,7 +142,8 @@
       "enabled": true,
       "min_run": 4,
       "per_caption_floor": 0.5,
-      "pause_on_gap": true
+      "pause_on_gap": true,
+      "blocking_ratio": 0.98
     },
     "speaker_segmentation": {
       "enabled": true
@@ -160,15 +161,15 @@
       "ceiling_hours": 6
     },
     "style_engine": {
-      "enabled": false,
+      "enabled": true,
       "rules_file": "config/house_style.yaml",
       "keep_raw_on_fix": true,
       "phases": {
-        "analyst":   {"pre": false, "post": "off"},
-        "formatter": {"pre": false, "post": "off"},
-        "seo":       {"pre": false, "post": "off"},
-        "validator": {"pre": false, "lint": "off"},
-        "timestamp": {"pre": false, "post": "off"}
+        "analyst":   {"pre": true, "post": "off"},
+        "formatter": {"pre": true, "post": "off"},
+        "seo":       {"pre": true, "post": "off"},
+        "validator": {"pre": true, "lint": "off"},
+        "timestamp": {"pre": true, "post": "off"}
       },
       "qa_gate": {"merge_flags": true, "fail_on_error": true}
     }

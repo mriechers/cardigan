@@ -5,6 +5,7 @@ import { AGENT_INFO } from '../constants/agents'
 import ModelStatsWidget from '../components/ModelStatsWidget'
 import PhaseStatsWidget from '../components/PhaseStatsWidget'
 import { groupAvailableModels } from '../utils/modelGroups'
+import { isRemotePreview } from '../utils/preview'
 
 interface AvailableModel {
   id: string
@@ -432,6 +433,18 @@ export default function Settings() {
       minute: '2-digit',
       hour12: true
     })
+  }
+
+  // Remote preview hides the config surface (nginx blocks the config writes);
+  // show a short note instead of a visibly-broken Settings page.
+  if (isRemotePreview()) {
+    return (
+      <div className="flex items-center justify-center py-24 px-4">
+        <p role="status" className="text-surface-300 text-center text-sm">
+          Configuration unavailable in remote application.
+        </p>
+      </div>
+    )
   }
 
   if (loading) {

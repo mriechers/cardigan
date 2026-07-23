@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Stage 1: Build React app
 FROM node:20-alpine AS build
 
@@ -23,6 +24,196 @@ RUN rm -f /etc/nginx/conf.d/default.conf
 COPY nginx.conf /etc/nginx/nginx.conf.template
 COPY --from=build /app/dist /usr/share/nginx/html
 
-EXPOSE 3000
+# ---------------------------------------------------------------------------
+# Hardened remote-preview vhost templates (dormant by default).
+#
+# These are the bodies that the entrypoint renders into nginx.conf's
+# ${PREVIEW_HTTP_CONF} / ${PREVIEW_SERVER_CONF} placeholders — but ONLY when a
+# non-empty htpasswd secret is present. They are baked into the image so that
+# turning preview mode on/off is purely a matter of the secret's presence; no
+# new packages are added (the secret is a complete htpasswd "user:hash" line
+# and envsubst already ships in nginx:alpine).
+# ---------------------------------------------------------------------------
 
-CMD ["/bin/sh", "-c", "export CARDIGAN_API_KEY=$(cat /run/secrets/cardigan_api_key 2>/dev/null || echo \"${CARDIGAN_API_KEY}\") && envsubst '${CARDIGAN_API_KEY}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && nginx -g 'daemon off;'"]
+# http-scope directives: trust the internal hop and read the real client IP
+# from the Funnel-set X-Forwarded-For, then define the auth rate-limit zone
+# keyed on that real IP. limit_req_zone is only valid at http scope, which is
+# why this is a separate placeholder from the server block below.
+COPY <<'PREVIEW_HTTP' /etc/nginx/preview-http.conf.template
+# Trust the internal hop (Docker gateway / host loopback / Tailscale Funnel
+# ingress — all RFC1918 or loopback) and take the real client IP from the
+# X-Forwarded-For header that the Funnel ingress sets. real_ip_recursive walks
+# past the trusted hops to the first public address: the actual editor. Without
+# this every funnel request would share the ingress source IP and the rate
+# limit below would be global instead of per-attacker.
+set_real_ip_from 127.0.0.1;
+set_real_ip_from 10.0.0.0/8;
+set_real_ip_from 172.16.0.0/12;
+set_real_ip_from 192.168.0.0/16;
+real_ip_header X-Forwarded-For;
+real_ip_recursive on;
+
+# Brute-force throttle for the basic-auth wall (the URL is public via Funnel /
+# Certificate Transparency, so the password is the whole wall). Keyed on the
+# real client IP resolved above.
+limit_req_zone $binary_remote_addr zone=preview_auth:10m rate=30r/s;
+PREVIEW_HTTP
+
+# server-scope block: the hardened vhost itself. Basic auth is the gate;
+# config/backend WRITES and /mcp/ are 403'd; the producer workflow proxies
+# exactly like the LAN vhost (same X-API-Key injection + WS upgrade headers).
+# ${CARDIGAN_API_KEY} is interpolated by the entrypoint's first envsubst pass.
+COPY <<'PREVIEW_SERVER' /etc/nginx/preview-server.conf.template
+server {
+    listen 3001;
+    server_name _;
+
+    # Match the LAN vhost upload ceiling (API enforces 50MB).
+    client_max_body_size 50m;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Per-person HTTP Basic Auth — the wall. Attribution + individual
+    # revocation come from one "user:hash" line per editor in this file.
+    auth_basic "Cardigan Preview";
+    auth_basic_user_file /etc/nginx/.htpasswd;
+
+    # Throttle password guessing against the discoverable URL, keyed on the
+    # real client IP (see real_ip config in the http block). burst absorbs a
+    # normal first page load; sustained abuse from one IP gets 503'd.
+    limit_req zone=preview_auth burst=60 nodelay;
+
+    # Common upstream headers, inherited by the proxied locations below that do
+    # not declare their own proxy_set_header (nginx inheritance is all-or-none
+    # per level). nginx injects the origin API key for anything past basic auth.
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-API-Key "${CARDIGAN_API_KEY}";
+
+    # ---- Config / backend WRITE denials (reads stay open for producers) ----
+
+    # Model-backend registry: registering an arbitrary OpenAI-compatible backend
+    # and routing a phase through it is a transcript-exfiltration path. Deny
+    # every method on the whole subtree.
+    location /api/config/backends {
+        return 403;
+    }
+
+    # Refresh re-pulls model catalogs from the registered backends — a write.
+    location = /api/config/models/refresh {
+        return 403;
+    }
+
+    # GET stays open (Job Detail reads the phase→model map); block writes.
+    location = /api/config/models {
+        limit_except GET { deny all; }
+        proxy_pass http://api:8000;
+    }
+
+    # GET stays open; block phase→backend routing writes.
+    location = /api/config/phase-backends {
+        limit_except GET { deny all; }
+        proxy_pass http://api:8000;
+    }
+
+    # GET stays open (worker status); block worker-config writes.
+    location = /api/config/worker {
+        limit_except GET { deny all; }
+        proxy_pass http://api:8000;
+    }
+
+    # GET stays open (ingest config read); block ingest-config writes.
+    location = /api/ingest/config {
+        limit_except GET { deny all; }
+        proxy_pass http://api:8000;
+    }
+
+    # SST-write MCP tools are never exposed on the funneled surface.
+    location /mcp/ {
+        return 403;
+    }
+
+    # ---- Producer workflow (proxied exactly like the LAN vhost) ----
+
+    # WebSocket upgrade for live job updates. The browser replays cached basic
+    # auth on the handshake, so auth_basic above still gates it. This location
+    # declares proxy_set_header, so it must restate the full header set.
+    location /api/ws/ {
+        proxy_pass http://api:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-API-Key "${CARDIGAN_API_KEY}";
+        proxy_read_timeout 86400;
+    }
+
+    # Everything else under /api/ (queue / jobs / ingest / export / upload plus
+    # config *reads* and estimate-cost) proxies through, inheriting the common
+    # headers declared at server scope.
+    location /api/ {
+        proxy_pass http://api:8000;
+    }
+
+    # SPA. Inject the preview flag into index.html so the frontend hides the
+    # Settings surface. gzip is disabled here so sub_filter can match the HTML
+    # body (nginx will not sub_filter a gzip-compressed response).
+    location / {
+        gzip off;
+        sub_filter '</head>' '<script>window.__CARDIGAN_PREVIEW__=true</script></head>';
+        sub_filter_once on;
+        try_files $uri $uri/ /index.html;
+    }
+}
+PREVIEW_SERVER
+
+# Entrypoint: resolves the origin API key exactly as before, then switches the
+# preview vhost on/off purely by the presence of a non-empty htpasswd secret.
+COPY <<'ENTRYPOINT' /docker-entrypoint-cardigan.sh
+#!/bin/sh
+set -e
+
+# Origin API key resolution — unchanged from the original single-line CMD:
+# the mounted secret wins, else the CARDIGAN_API_KEY env var, else empty.
+export CARDIGAN_API_KEY="$(cat /run/secrets/cardigan_api_key 2>/dev/null || echo "${CARDIGAN_API_KEY}")"
+
+# Preview mode is gated solely on the PRESENCE of a non-empty htpasswd secret
+# (mirrors the "empty API key = auth off" pattern). Mounted secret file wins;
+# CARDIGAN_WEB_HTPASSWD env var is a fallback for non-compose runs. A missing
+# mount or empty value leaves this empty -> preview stays OFF.
+CARDIGAN_WEB_HTPASSWD_VALUE="$(cat /run/secrets/cardigan_web_htpasswd 2>/dev/null || printf '%s' "${CARDIGAN_WEB_HTPASSWD:-}")"
+
+if [ -n "$CARDIGAN_WEB_HTPASSWD_VALUE" ]; then
+    # ON: install the credentials and render the preview http-scope config and
+    # hardened vhost. envsubst runs on the preview templates FIRST so the origin
+    # API key lands inside the proxied locations (envsubst does not recurse into
+    # values it substitutes, so this must happen before the main pass below).
+    printf '%s\n' "$CARDIGAN_WEB_HTPASSWD_VALUE" > /etc/nginx/.htpasswd
+    PREVIEW_HTTP_CONF="$(envsubst '${CARDIGAN_API_KEY}' < /etc/nginx/preview-http.conf.template)"
+    PREVIEW_SERVER_CONF="$(envsubst '${CARDIGAN_API_KEY}' < /etc/nginx/preview-server.conf.template)"
+    export PREVIEW_HTTP_CONF PREVIEW_SERVER_CONF
+else
+    # OFF (default): render the preview placeholders empty. The resulting
+    # nginx.conf is behaviorally identical to the LAN-only image shipped today —
+    # nothing listens on 3001 and no auth is applied.
+    export PREVIEW_HTTP_CONF=""
+    export PREVIEW_SERVER_CONF=""
+fi
+
+envsubst '${CARDIGAN_API_KEY} ${PREVIEW_HTTP_CONF} ${PREVIEW_SERVER_CONF}' \
+    < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
+
+exec nginx -g 'daemon off;'
+ENTRYPOINT
+
+RUN chmod +x /docker-entrypoint-cardigan.sh
+
+# 3000 = existing LAN vhost. 3001 = hardened preview vhost (dormant unless the
+# htpasswd secret is present; only this port is ever targeted by Tailscale Funnel).
+EXPOSE 3000 3001
+
+CMD ["/docker-entrypoint-cardigan.sh"]

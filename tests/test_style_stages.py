@@ -364,21 +364,6 @@ class TestPostStageEndToEndNormalize:
 
 
 class TestPostStageFlagTierNeverRewrites:
-    def test_over_limit_short_description_flagged_not_modified(self):
-        rules = _post_rules(short_max=90)
-        raw_title = "Wisconsin Governor signs new budget bill in Madison"
-        over_limit_short_desc = "x" * 150
-        raw_output = _seo_report(raw_title, short_description=over_limit_short_desc)
-
-        result = run_post_stage("seo", raw_output, {}, rules)
-
-        limit_violations = [v for v in result.check.violations if v.rule_id == "limits.short_description.max"]
-        assert len(limit_violations) == 1
-        assert limit_violations[0].severity == "error"
-
-        reparsed = extract_seo_fields(result.normalized_output)
-        assert reparsed.short_description.value == over_limit_short_desc
-
     def test_forbidden_phrase_in_title_flagged_but_word_kept(self):
         rules = _post_rules()
         raw_title = "Discover Wisconsin's Budget Story"
@@ -414,6 +399,62 @@ class TestPostStageFlagTierNeverRewrites:
         title_violations = [v for v in result.check.violations if v.rule_id == "limits.title.max"]
         assert len(title_violations) == 1
         assert "10" in title_violations[0].message
+
+
+class TestPostStageSeoLengthEnforcement:
+    """seo over-limit descriptions are truncated to fit (enforce tier), so the
+    Recommended value the SST write path consumes is always length-compliant."""
+
+    def test_over_limit_short_description_truncated(self):
+        rules = _post_rules(short_max=90)
+        over = (
+            "Ojibwe dancer and designer Aerius Benton-Banai shares how jingle dress dancing healed her whole community."
+        )
+        assert len(over) > 90
+        raw_output = _seo_report("A down-style title", short_description=over)
+
+        result = run_post_stage("seo", raw_output, {}, rules)
+
+        final = extract_seo_fields(result.normalized_output).short_description.value
+        assert len(final) <= 90
+        assert final.endswith("…")
+        assert final[:-1] in over  # a clean prefix of the original — never reworded
+        assert "limits.short_description.truncated" in [f.rule_id for f in result.check.fixes]
+        assert [v for v in result.check.violations if v.rule_id == "limits.short_description.max"] == []
+        assert result.changed is True
+
+    def test_over_limit_long_description_truncated(self):
+        rules = _post_rules(long_max=120)
+        over = ("word " * 40).strip()  # ~195 chars
+        raw_output = _seo_report("A title", long_description=over)
+
+        result = run_post_stage("seo", raw_output, {}, rules)
+
+        final = extract_seo_fields(result.normalized_output).long_description.value
+        assert len(final) <= 120
+        assert "limits.long_description.truncated" in [f.rule_id for f in result.check.fixes]
+        assert [v for v in result.check.violations if v.rule_id == "limits.long_description.max"] == []
+
+    def test_within_limit_description_untouched(self):
+        rules = _post_rules(short_max=90)
+        ok = "A short, compliant description of the episode."
+        raw_output = _seo_report("A title", short_description=ok)
+
+        result = run_post_stage("seo", raw_output, {}, rules)
+
+        final = extract_seo_fields(result.normalized_output).short_description.value
+        assert final == ok
+        assert [f for f in result.check.fixes if "truncated" in f.rule_id] == []
+
+    def test_single_long_token_hard_cut(self):
+        rules = _post_rules(short_max=20)
+        raw_output = _seo_report("A title", short_description="x" * 150)  # no word boundaries
+
+        result = run_post_stage("seo", raw_output, {}, rules)
+
+        final = extract_seo_fields(result.normalized_output).short_description.value
+        assert len(final) <= 20
+        assert final.endswith("…")
 
 
 # ---------------------------------------------------------------------------
