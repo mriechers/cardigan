@@ -602,7 +602,11 @@ def _check_seam_coverage_gate(context: Mapping[str, Any], phase: str) -> list[Ru
     seam = context.get("seam_coverage")
     if not isinstance(seam, Mapping):
         return []
-    if not seam.get("has_gap", False):
+    # Only flag a gap the worker would actually act on: one corroborated by net
+    # content loss (blocking). A detected-but-non-blocking gap is the garbled-ASR
+    # reconstruction false positive (see seam_coverage.py) -- recording it as a
+    # validator flag would just resurface the noise this pipeline silences.
+    if not seam.get("blocking", False):
         return []
 
     dropped_spans = seam.get("dropped_spans")

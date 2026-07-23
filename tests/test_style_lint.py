@@ -950,6 +950,7 @@ def _seam_coverage(
     has_gap: bool = True,
     dropped_spans: list[dict] | None = None,
     captions_checked: int = 120,
+    blocking: bool | None = None,
 ) -> dict:
     if dropped_spans is None:
         dropped_spans = [
@@ -960,8 +961,12 @@ def _seam_coverage(
                 "sample_text": "the budget conference committee reached agreement late",
             }
         ]
+    if blocking is None:
+        blocking = has_gap  # a real drop (net content loss) blocks by default
     return {
         "has_gap": has_gap,
+        "blocking": blocking,
+        "net_coverage_ratio": 0.9 if blocking else 1.05,
         "dropped_spans": dropped_spans,
         "captions_checked": captions_checked,
     }
@@ -992,6 +997,17 @@ class TestSeamCoverageGateConsumption:
         context = {
             "formatter_output": _formatter_output(),
             "seam_coverage": _seam_coverage(has_gap=False, dropped_spans=[]),
+        }
+        result = run_lint(context, rules)
+        assert _violations_for(result, "formatter", "lint.formatter.seam_gap") == []
+
+    def test_non_blocking_gap_does_not_fire(self):
+        """A detected but non-blocking gap (reconstruction, no net content loss)
+        must NOT surface as a validator flag — matches the worker's pause gate."""
+        rules = _rules()
+        context = {
+            "formatter_output": _formatter_output(),
+            "seam_coverage": _seam_coverage(has_gap=True, blocking=False),
         }
         result = run_lint(context, rules)
         assert _violations_for(result, "formatter", "lint.formatter.seam_gap") == []

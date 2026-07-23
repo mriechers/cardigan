@@ -160,6 +160,41 @@ def test_recurring_topic_words_do_not_mask_a_drop():
     assert result.dropped_spans[0].caption_count == 4
 
 
+def test_gap_with_net_content_loss_is_blocking():
+    """A real dropped span (output shorter than source) blocks the job."""
+    src = _srt(CAPTIONS)
+    kept = [0, 1, 2, 3, 8, 9, 10, 11]  # drop the four middle captions (4,5,6,7)
+    out = _output_from(kept)  # no compensating content -> net loss
+
+    result = find_dropped_spans(src, out, is_srt=True, min_run=4)
+
+    assert result.has_gap is True
+    assert result.net_coverage_ratio < 1.0
+    assert result.blocking is True
+
+
+def test_gap_without_net_loss_is_detected_but_not_blocking():
+    """A gap the trigram check flags but with NO net content loss (the garbled-ASR
+    reconstruction false positive) is recorded but does not block the job."""
+    src = _srt(CAPTIONS)
+    kept = [0, 1, 2, 3, 8, 9, 10, 11]  # same 4-caption trigram gap
+    body = "\n\n".join(f"**Speaker:**\n{CAPTIONS[i]}." for i in kept)
+    # Pad so total content words exceed the source (formatter reconstructing /
+    # expanding rather than dropping) -- distinct filler that carries none of the
+    # dropped captions' trigrams, so detection still fires.
+    padding = " ".join(["reconstructed"] * 120)
+    out = (
+        "<!-- model: test -->\n# Formatted Transcript\n**Project:** Test\n---\n\n"
+        f"{body}\n\n**Speaker:**\n{padding}.\n\n**Status:** ready_for_editing"
+    )
+
+    result = find_dropped_spans(src, out, is_srt=True, min_run=4)
+
+    assert result.has_gap is True  # trigram detection still fires on the gap
+    assert result.net_coverage_ratio >= 1.0
+    assert result.blocking is False  # but no net loss -> non-blocking
+
+
 def test_non_srt_and_empty_input_are_graceful():
     """Non-SRT or empty source returns a no-gap result rather than raising."""
     assert find_dropped_spans("", "", is_srt=True).has_gap is False

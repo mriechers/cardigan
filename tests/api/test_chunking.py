@@ -1,11 +1,15 @@
 """Tests for transcript chunking (split + merge)."""
 
 from api.services.chunking import (
+    _choose_break_idx,
+    _dedup_seam_turns,
+    _split_into_turns,
     _split_plain_text,
     _split_srt,
     merge_formatter_chunks,
     split_transcript,
 )
+from api.services.utils import parse_srt
 
 # ─── Helpers ───────────────────────────────────────────────────────────
 
@@ -41,6 +45,28 @@ def make_plain_text(num_paragraphs: int, words_per_paragraph: int = 100) -> str:
         words = [f"word{j}" for j in range(words_per_paragraph)]
         paragraphs.append(" ".join(words))
     return "\n\n".join(paragraphs)
+
+
+def make_turn_srt(num_captions: int, words_per_caption: int = 30, turn_every: int = 10) -> str:
+    """SRT where every ``turn_every``-th caption (0-based) opens a new turn (``>>``).
+
+    Mirrors a live-caption transcript after ``split_interior_speaker_changes``,
+    where every ``>>`` marker is caption-leading.
+    """
+    lines = []
+    for i in range(1, num_captions + 1):
+        start_ms = (i - 1) * 3000
+        end_ms = i * 3000
+        h1, m1, s1 = start_ms // 3600000, (start_ms % 3600000) // 60000, (start_ms % 60000) // 1000
+        h2, m2, s2 = end_ms // 3600000, (end_ms % 3600000) // 60000, (end_ms % 60000) // 1000
+        text = " ".join(f"word{j}" for j in range(words_per_caption))
+        if (i - 1) % turn_every == 0:  # caption opens a new speaker turn
+            text = ">> " + text
+        lines.append(str(i))
+        lines.append(f"{h1:02d}:{m1:02d}:{s1:02d},000 --> {h2:02d}:{m2:02d}:{s2:02d},000")
+        lines.append(text)
+        lines.append("")
+    return "\n".join(lines)
 
 
 # ─── split_transcript tests ───────────────────────────────────────────
@@ -343,3 +369,103 @@ Second body."""
         assert "Here is the second chunk" not in result
         assert "Dialogue" in result
         assert "More dialogue" in result
+
+
+# ─── turn-boundary split tests ────────────────────────────────────────
+
+
+class TestTurnBoundarySplit:
+    def test_chunks_start_at_turn_boundary(self):
+        """The first continuation chunk begins cleanly on a new speaker turn."""
+        srt = make_turn_srt(40, words_per_caption=30, turn_every=10)
+        chunks = _split_srt(srt, target_chunk_words=500, overlap_captions=0)
+        assert chunks is not None and len(chunks) >= 2
+        first_caption = parse_srt(chunks[1].content)[0]
+        assert first_caption.text.lstrip().startswith(
+            ">>"
+        ), f"continuation chunk starts mid-turn: {first_caption.text!r}"
+
+    def test_choose_break_prefers_turn_boundary(self):
+        """_choose_break_idx ends just before the next >> caption."""
+        caps = parse_srt(make_turn_srt(30, words_per_caption=5, turn_every=6))
+        # Turn-start captions are 0-based indices 0, 6, 12, ... From i=2 the next
+        # turn start is index 6, so the break lands at 5 (its predecessor).
+        idx = _choose_break_idx(caps, 2)
+        assert idx == 5
+        assert caps[idx + 1].text.lstrip().startswith(">>")
+
+    def test_choose_break_falls_back_to_sentence(self):
+        """With no >> markers, fall back to sentence-ending punctuation."""
+        caps = parse_srt(make_srt(30, words_per_caption=5))  # 'end.' every 5th caption
+        idx = _choose_break_idx(caps, 1)
+        assert caps[idx].text.strip().endswith(".")
+
+    def test_scripted_no_markers_still_splits(self):
+        """Transcripts with zero >> markers still chunk (sentence fallback)."""
+        srt = make_srt(400, words_per_caption=10)  # 4000 words, no >>
+        chunks = _split_srt(srt, target_chunk_words=1500, overlap_captions=5)
+        assert chunks is not None and len(chunks) >= 2
+
+
+# ─── turn-aware seam dedup tests ──────────────────────────────────────
+
+
+class TestDedupSeamTurns:
+    def test_split_into_turns(self):
+        body = "leading note\n\n**Alice:**  \nHi there.\n\n**Bob:**  \nYo."
+        turns = _split_into_turns(body)
+        assert turns[0].strip() == "leading note"
+        assert turns[1].startswith("**Alice:**")
+        assert turns[2].startswith("**Bob:**")
+
+    def test_drops_echoed_leading_turn(self):
+        """A leading turn echoing the previous chunk's tail is dropped once."""
+        prev = "**Alice:**  \nHello there, everyone.\n\n**Bob:**  \nGood to be here."
+        nxt = "**Bob:**  \nGood to be here.\n\n**Alice:**  \nLet's begin the discussion."
+        merged = merge_formatter_chunks([prev, nxt])
+        assert merged.count("Good to be here") == 1
+        assert "Let's begin the discussion" in merged
+        assert "**Alice:**" in merged and "**Bob:**" in merged
+
+    def test_preserves_distinct_turns(self):
+        """No echo -> nothing dropped; all dialogue preserved."""
+        prev = "**Alice:**  \nFirst statement here.\n\n**Bob:**  \nSecond statement here."
+        nxt = "**Carol:**  \nThird distinct statement.\n\n**Dave:**  \nFourth distinct statement."
+        merged = merge_formatter_chunks([prev, nxt])
+        for snippet in ("First statement", "Second statement", "Third distinct", "Fourth distinct"):
+            assert snippet in merged
+
+    def test_never_flattens_structure(self):
+        """Kept turns retain label-on-line structure (regression: old trim flattened)."""
+        prev = "**Alice:**  \nEcho line one.\n\n**Bob:**  \nEcho line two."
+        nxt = "**Bob:**  \nEcho line two.\n\n**Carol:**  \nKept line with structure."
+        merged = merge_formatter_chunks([prev, nxt])
+        assert "**Carol:**  \nKept line with structure." in merged
+
+    def test_no_false_dedup_direct(self):
+        """_dedup_seam_turns returns next_body unchanged when no leading echo."""
+        prev = "**Alice:**  \nOne.\n\n**Bob:**  \nTwo."
+        nxt = "**Carol:**  \nThree.\n\n**Dave:**  \nFour."
+        assert _dedup_seam_turns(prev, nxt) == nxt
+
+    def test_drops_multi_turn_contiguous_echo(self):
+        """A 2+ turn contiguous echo (prev's tail re-emitted as next's head) is
+        fully dropped, leaving only the genuinely new content."""
+        prev = "**Alice:**  \nFirst point here.\n\n**Bob:**  \nSecond point here."
+        nxt = "**Alice:**  \nFirst point here.\n\n**Bob:**  \nSecond point here.\n\n" "**Carol:**  \nBrand new content."
+        out = _dedup_seam_turns(prev, nxt)
+        assert out.count("First point here") == 0
+        assert out.count("Second point here") == 0
+        assert "Brand new content" in out
+        assert out.strip().startswith("**Carol:**")
+
+    def test_backchannel_matching_non_seam_turn_is_kept(self):
+        """A leading turn that matches a prev turn NOT at the seam (a "Right."
+        backchannel said a few turns earlier) is kept — the match must anchor at
+        prev's actual tail, so it is not misclassified as an echo."""
+        prev = (
+            "**Alice:**  \nRight.\n\n**Bob:**  \nThe vote finally passed today.\n\n"
+            "**Carol:**  \nA major milestone indeed."
+        )
+        nxt = "**Dave:**  \nRight.\n\n**Erin:**  \nOn to the next agenda item."
+        assert _dedup_seam_turns(prev, nxt) == nxt  # nothing dropped
