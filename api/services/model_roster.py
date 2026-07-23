@@ -152,11 +152,17 @@ def _resolve_backend_endpoint(cfg: dict) -> str:
 
 
 def _models_url(endpoint: str) -> str:
-    """Derive the ``/v1/models`` URL from a chat endpoint or a ``/v1`` base."""
+    """Derive the ``/v1/models`` URL from a chat endpoint, a ``/v1`` base, or an
+    endpoint that already points at ``/models``."""
     stripped = endpoint.rstrip("/")
     if stripped.endswith("/chat/completions"):
         stripped = stripped[: -len("/chat/completions")]
-    return stripped.rstrip("/") + "/models"
+    stripped = stripped.rstrip("/")
+    # Already a models endpoint (e.g. ".../v1/models") — don't append a second
+    # "/models" and produce ".../models/models".
+    if stripped.endswith("/models"):
+        return stripped
+    return stripped + "/models"
 
 
 async def fetch_local_models(config: dict) -> List[dict]:

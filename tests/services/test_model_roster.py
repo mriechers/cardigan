@@ -30,6 +30,19 @@ def _mock_models_response(payload):
     return resp
 
 
+def test_models_url_derivation_is_idempotent():
+    f = model_roster._models_url
+    # chat endpoint -> /v1/models
+    assert f("http://h:8000/v1/chat/completions") == "http://h:8000/v1/models"
+    # /v1 base -> /v1/models
+    assert f("http://h:8000/v1") == "http://h:8000/v1/models"
+    # trailing slashes tolerated
+    assert f("http://h:8000/v1/") == "http://h:8000/v1/models"
+    # already a models endpoint -> unchanged (no ".../models/models")
+    assert f("http://h:8000/v1/models") == "http://h:8000/v1/models"
+    assert f("http://h:8000/v1/models/") == "http://h:8000/v1/models"
+
+
 @pytest.mark.asyncio
 async def test_fetch_local_models_tags_by_server_and_host_unfiltered():
     payload = {
@@ -49,8 +62,8 @@ async def test_fetch_local_models_tags_by_server_and_host_unfiltered():
     # Every served model is kept — no family-pattern filtering.
     assert [m["id"] for m in got] == ["Qwen2.5-7B-Instruct-4bit", "some-unheard-of-model"]
     first = got[0]
-    assert first["provider"] == "oMLX"            # from owned_by, prettified
-    assert first["backend"] == "local-llm"        # routing key
+    assert first["provider"] == "oMLX"  # from owned_by, prettified
+    assert first["backend"] == "local-llm"  # routing key
     assert first["host"] == "studio.riechers.co:8000"
     assert first["pricing_input"] == 0 and first["pricing_output"] == 0
     assert first["context_len"] == 32768
@@ -75,10 +88,21 @@ async def test_get_available_models_merges_cloud_and_local():
         "backends": _discover_config()["backends"],
         "available_models": [],
     }
-    cloud_raw = [{"id": "anthropic/claude-haiku-4.5", "name": "Claude Haiku", "pricing": {"prompt": "0", "completion": "0"}}]
-    local = [{"id": "Qwen2.5-7B-Instruct-4bit", "provider": "oMLX", "backend": "local-llm",
-              "host": "studio.riechers.co:8000", "tier": None, "pricing_input": 0,
-              "pricing_output": 0, "context_len": 32768}]
+    cloud_raw = [
+        {"id": "anthropic/claude-haiku-4.5", "name": "Claude Haiku", "pricing": {"prompt": "0", "completion": "0"}}
+    ]
+    local = [
+        {
+            "id": "Qwen2.5-7B-Instruct-4bit",
+            "provider": "oMLX",
+            "backend": "local-llm",
+            "host": "studio.riechers.co:8000",
+            "tier": None,
+            "pricing_input": 0,
+            "pricing_output": 0,
+            "context_len": 32768,
+        }
+    ]
 
     with patch.object(model_roster, "_load_config", return_value=config):
         with patch.object(model_roster, "fetch_openrouter_models", AsyncMock(return_value=cloud_raw)):
@@ -87,8 +111,8 @@ async def test_get_available_models_merges_cloud_and_local():
 
     model_roster.invalidate_cache()
     ids = [m["id"] for m in got]
-    assert "anthropic/claude-haiku-4.5" in ids   # cloud roster
-    assert "Qwen2.5-7B-Instruct-4bit" in ids     # local merged in alongside
+    assert "anthropic/claude-haiku-4.5" in ids  # cloud roster
+    assert "Qwen2.5-7B-Instruct-4bit" in ids  # local merged in alongside
 
 
 @pytest.mark.asyncio
