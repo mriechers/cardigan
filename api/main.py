@@ -49,6 +49,9 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Cardigan API v4.0")
     await database.init_db()
     logger.info("Database initialized")
+    # Record restart + deploy markers (persisted so monitors can report them).
+    await database.record_startup_markers(__version__)
+    logger.info("Startup markers recorded")
     llm_client = get_llm_client()  # Initialize LLM client
     logger.info("LLM client initialized")
     # Fail-fast at boot if the house-style YAML can't render the phase prompts
@@ -186,6 +189,10 @@ async def health():
         except (json.JSONDecodeError, TypeError):
             pass
 
+    # Lifecycle markers (set at startup; see database.record_startup_markers).
+    restarted_item = await database.get_config("api_restarted_at")
+    deployed_at_item = await database.get_config("version_deployed_at")
+
     return {
         "status": "ok",
         "queue": queue_stats,
@@ -197,6 +204,11 @@ async def health():
             "phase_backends": llm_status.get("phase_backends"),
         },
         "last_run": last_run,
+        "instance": {
+            "version": __version__,
+            "restarted_at": restarted_item.value if restarted_item else None,
+            "version_deployed_at": deployed_at_item.value if deployed_at_item else None,
+        },
     }
 
 

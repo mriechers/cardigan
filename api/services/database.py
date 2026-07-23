@@ -1416,6 +1416,37 @@ def heartbeat_is_fresh(age_seconds: Optional[float]) -> bool:
     return age_seconds is not None and age_seconds < HEARTBEAT_STALE_SECONDS
 
 
+async def record_startup_markers(version: str) -> None:
+    """Record app-lifecycle markers on startup: last restart time and last deploy time.
+
+    - ``api_restarted_at`` is overwritten on every start — this process's boot time.
+    - ``deployed_version`` / ``version_deployed_at`` are updated only when the running
+      version differs from the last recorded one. That distinguishes a fresh push from a
+      same-version restart, and — being in the shared DB — persists across restarts.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    await set_config(
+        "api_restarted_at",
+        now,
+        value_type="string",
+        description="UTC time the API process last started (restart marker)",
+    )
+    prev = await get_config("deployed_version")
+    if prev is None or not prev.value or prev.value != version:
+        await set_config(
+            "deployed_version",
+            version,
+            value_type="string",
+            description="App version currently deployed to this instance",
+        )
+        await set_config(
+            "version_deployed_at",
+            now,
+            value_type="string",
+            description="UTC time the current app version was first seen (deploy marker)",
+        )
+
+
 async def list_config() -> List[ConfigItem]:
     """List all configuration items.
 
