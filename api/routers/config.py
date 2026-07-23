@@ -486,6 +486,10 @@ async def update_backend(name: str, body: BackendPatch):
         raise HTTPException(status_code=404, detail=f"Backend '{name}' not found")
 
     entry = backends[name]
+    # Same absolute-URL guard as create_backend — a PATCH must not be able to point
+    # a backend at a relative/garbage endpoint that create_backend would have rejected.
+    if body.endpoint is not None and not urlparse(body.endpoint).netloc:
+        raise HTTPException(status_code=400, detail="endpoint must be an absolute URL like http://host:8000/v1")
     for field in ("endpoint", "api_key_env", "model", "enabled", "discover"):
         value = getattr(body, field)
         if value is not None:

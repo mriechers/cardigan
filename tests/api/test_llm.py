@@ -36,6 +36,28 @@ def _isolate_local_llm_env(monkeypatch):
         monkeypatch.delenv(var, raising=False)
 
 
+def test_resolve_model_and_endpoint_fall_back_on_empty_env(monkeypatch):
+    """A set-but-empty override (compose's ``${LOCAL_LLM_MODEL:-}`` /
+    ``${LOCAL_LLM_ENDPOINT:-}``) must fall back to the config default, not "".
+    """
+    from api.services.llm import _resolve_endpoint, _resolve_model
+
+    cfg = {
+        "model": "cfg-model",
+        "model_env": "LOCAL_LLM_MODEL",
+        "endpoint": "http://cfg-host:8000/v1",
+        "endpoint_env": "LOCAL_LLM_ENDPOINT",
+    }
+    monkeypatch.setenv("LOCAL_LLM_MODEL", "")
+    monkeypatch.setenv("LOCAL_LLM_ENDPOINT", "")
+    assert _resolve_model(cfg) == "cfg-model"
+    assert _resolve_endpoint(cfg) == "http://cfg-host:8000/v1/chat/completions"
+
+    # A real override still wins.
+    monkeypatch.setenv("LOCAL_LLM_MODEL", "env-model")
+    assert _resolve_model(cfg) == "env-model"
+
+
 @pytest.fixture
 def mock_config(tmp_path):
     """Create a mock config file for testing."""
@@ -359,6 +381,14 @@ class TestSafetyGuards:
 
         # Versioned model should match
         llm_client.check_model_allowed("gpt-4o:extended")
+
+    def test_check_model_allowed_empty_model_fails_closed(self, llm_client):
+        """A backend resolving to no model can't be validated against a configured
+        allowlist — raise ModelNotAllowedError, not AttributeError on None.startswith."""
+        llm_client.model_allowlist = ["gpt-4o"]
+        for bad in (None, ""):
+            with pytest.raises(ModelNotAllowedError):
+                llm_client.check_model_allowed(bad)
 
     def test_check_token_cost_within_limit(self, llm_client):
         """Test token cost check passes for cheap models."""

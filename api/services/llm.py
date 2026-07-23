@@ -323,7 +323,9 @@ def _resolve_endpoint(config: Dict[str, Any]) -> str:
     a bare base and a full endpoint both work.
     """
     env_var = config.get("endpoint_env")
-    endpoint = os.getenv(env_var, config["endpoint"]) if env_var else config["endpoint"]
+    # `or config["endpoint"]` (not os.getenv's default) so a set-but-empty override
+    # — e.g. compose's `${LOCAL_LLM_ENDPOINT:-}` — falls back to config, not "".
+    endpoint = (os.getenv(env_var) or config["endpoint"]) if env_var else config["endpoint"]
     stripped = endpoint.rstrip("/")
     if stripped.endswith("/v1"):
         return stripped + "/chat/completions"
@@ -339,7 +341,9 @@ def _resolve_model(config: Dict[str, Any]) -> Optional[str]:
     """
     env_var = config.get("model_env")
     if env_var:
-        return os.getenv(env_var, config.get("model"))
+        # `or config.get("model")` so a set-but-empty override — e.g. compose's
+        # `${LOCAL_LLM_MODEL:-}` — falls back to the config default, not "".
+        return os.getenv(env_var) or config.get("model")
     return config.get("model")
 
 
@@ -451,6 +455,15 @@ class LLMClient:
 
         if not self.model_allowlist:
             return  # Empty allowlist = all models allowed
+
+        # A backend that resolves to no model (no `model`/`model_env`/fallback) can't
+        # be validated against a configured allowlist — fail closed rather than
+        # AttributeError on `None.startswith(...)`.
+        if not model:
+            raise ModelNotAllowedError(
+                "No model resolved for this backend; cannot validate against the "
+                f"allowlist. Allowed: {', '.join(self.model_allowlist)}"
+            )
 
         # Check exact match or prefix match (for versioned models)
         for allowed in self.model_allowlist:

@@ -86,6 +86,16 @@ def test_patch_unknown_backend_404(api_client, cfg_path):
     assert api_client.patch("/api/config/backends/nope:1", json={"enabled": False}).status_code == 404
 
 
+def test_patch_backend_rejects_invalid_endpoint(api_client, cfg_path):
+    # update_backend must apply create_backend's absolute-URL guard, so a PATCH
+    # can't repoint a backend at a relative/garbage endpoint.
+    api_client.post("/api/config/backends", json={"endpoint": "http://studio.riechers.co:8000/v1"})
+    resp = api_client.patch("/api/config/backends/studio.riechers.co:8000", json={"endpoint": "not-a-url"})
+    assert resp.status_code == 400, resp.text
+    # The bad value must not have been written.
+    assert _backends(cfg_path)["studio.riechers.co:8000"]["endpoint"] == "http://studio.riechers.co:8000/v1"
+
+
 def test_delete_backend(api_client, cfg_path):
     api_client.post("/api/config/backends", json={"endpoint": "http://studio.riechers.co:8000/v1"})
     resp = api_client.delete("/api/config/backends/studio.riechers.co:8000")
