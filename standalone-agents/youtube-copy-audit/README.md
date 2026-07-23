@@ -41,6 +41,15 @@ export CARDIGAN_API_URL="http://cardigan01:8100"
 Optional fallback path: `yt-dlp` on PATH (used only when the captions API has no
 downloadable track).
 
+> **Cross-repo coupling (POC-only).** All three scripts reach into pbswi's *internal*
+> layout at runtime — `$PBSWI_ROOT/.claude/skills/content/youtube-post/scripts/write_ops.py`
+> and `$PBSWI_ROOT/station-analytics/credentials/work/token.json`. This is pinned to
+> pbswi's **current** internal paths: a reorg over there (moving the youtube-post skill
+> or the credentials dir) silently breaks this kit. It fails loud with a helpful message
+> if the path is absent, which is acceptable for a POC. **At graduation**, depend on a
+> stable published entrypoint (e.g. an installed console script) rather than the skill's
+> script path.
+
 ## POC loop
 
 ```bash

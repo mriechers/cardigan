@@ -77,13 +77,18 @@ def main(argv: list[str] | None = None) -> int:
         token_path=token_path,
     )
     print(json.dumps(result, indent=2))
-    if result.get("status") == "dry_run":
+    status = result.get("status")
+    if status == "dry_run":
         print(
             "\nNo API call was made. To commit after human approval:\n"
             f"  python writeback.py {args.op_file} --live --confirm",
             file=sys.stderr,
         )
-    return 0
+    # Known-good outcomes: a preview ("dry_run") or a real write ("committed").
+    # Live failures already raise (identity gate / HTTP errors) and exit non-zero;
+    # branching here also catches any future non-raising error status so callers
+    # and CI can detect a failed write instead of a silent exit 0.
+    return 0 if status in {"dry_run", "committed"} else 1
 
 
 if __name__ == "__main__":
