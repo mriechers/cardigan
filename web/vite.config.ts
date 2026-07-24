@@ -15,7 +15,9 @@ export default defineConfig({
     allowedHosts: ['metadata.neighborhood', 'localhost', 'cardigan.bymarkriechers.com'],
     proxy: {
       '/api': {
-        target: 'http://metadata.neighborhood:8100',
+        // Same-machine dev API. Defaults to localhost (works without the
+        // metadata.neighborhood /etc/hosts alias); override via env if needed.
+        target: process.env.VITE_API_PROXY_TARGET || 'http://localhost:8100',
         changeOrigin: true,
         ws: true,
       },

@@ -1,0 +1,14 @@
+[
+  {
+    "name": "cardigan01",
+    "url": "http://cardigan01:8100",
+    "web_url": "http://cardigan01:3100",
+    "watcher": false
+  },
+  {
+    "name": "dev",
+    "url": "http://localhost:8100",
+    "web_url": "http://localhost:3000",
+    "watcher": false
+  }
+]
