@@ -4,10 +4,13 @@ import StatusBar from './StatusBar'
 import { useKeyboardShortcuts, getKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 import { useFocusTrap } from '../hooks/useFocusTrap'
 import { usePreferences } from '../context/PreferencesContext'
+import { isRemotePreview } from '../utils/preview'
 
 export default function Layout() {
   useKeyboardShortcuts()
   const { preferences } = usePreferences()
+  // Remote preview: the config surface is hidden (nginx blocks the writes).
+  const remotePreview = isRemotePreview()
   const [showHelp, setShowHelp] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const helpModalRef = useFocusTrap(showHelp)
@@ -130,7 +133,9 @@ export default function Layout() {
 
               {/* Utility items */}
               <div className="flex items-center space-x-1">
-                <NavLink to="/settings" className={navLinkClass}>Settings</NavLink>
+                {!remotePreview && (
+                  <NavLink to="/settings" className={navLinkClass}>Settings</NavLink>
+                )}
                 <NavLink to="/help" className={navLinkClass}>Help</NavLink>
                 <button
                   ref={triggerRef}
@@ -174,7 +179,9 @@ export default function Layout() {
               <NavLink to="/queue" className={mobileNavLinkClass}>Queue</NavLink>
               <NavLink to="/projects" className={mobileNavLinkClass}>Projects</NavLink>
               <div className="border-t border-surface-700 my-2" />
-              <NavLink to="/settings" className={mobileNavLinkClass}>Settings</NavLink>
+              {!remotePreview && (
+                <NavLink to="/settings" className={mobileNavLinkClass}>Settings</NavLink>
+              )}
               <NavLink to="/help" className={mobileNavLinkClass}>Help</NavLink>
             </div>
           </div>

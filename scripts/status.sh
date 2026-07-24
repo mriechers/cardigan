@@ -54,26 +54,6 @@ else
     echo "❌ Not running"
 fi
 
-echo ""
-echo "Tunnel:"
-
-# Check cloudflared process
-echo -n "  cloudflared:              "
-if pgrep -f 'cloudflared tunnel' > /dev/null 2>&1; then
-    echo "✅ Running (PID $(pgrep -f 'cloudflared tunnel'))"
-else
-    echo "ℹ️  Not running"
-fi
-
-# Check tunnel endpoint reachability
-echo -n "  cardigan.bymarkriechers.com: "
-HTTP_CODE=$(curl -s --connect-timeout 5 -o /dev/null -w "%{http_code}" https://cardigan.bymarkriechers.com 2>/dev/null)
-if echo "$HTTP_CODE" | grep -qE "^(200|301|302|303|403)$"; then
-    echo "✅ Reachable ($HTTP_CODE)"
-else
-    echo "❌ Not reachable ($HTTP_CODE)"
-fi
-
 # Check health endpoint and connectivity
 echo ""
 echo "Connectivity:"
@@ -130,4 +110,3 @@ echo "URLs:"
 echo "  Dashboard: http://metadata.neighborhood:3000"
 echo "  API:       http://metadata.neighborhood:8000"
 echo "  API Docs:  http://metadata.neighborhood:8000/docs"
-echo "  Tunnel:    https://cardigan.bymarkriechers.com (if enabled)"

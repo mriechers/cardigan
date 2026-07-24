@@ -2,22 +2,6 @@
   "primary_backend": "openrouter",
   "fallback_backend": "openrouter",
   "backends": {
-    "local-ollama": {
-      "type": "ollama",
-      "endpoint": "http://localhost:11434",
-      "model": "qwen2.5:14b",
-      "timeout": 180,
-      "cost_per_project": 0.0,
-      "enabled": false
-    },
-    "remote-ollama": {
-      "type": "ollama",
-      "endpoint": "http://192.168.1.100:11434",
-      "model": "qwen2.5:14b",
-      "timeout": 180,
-      "cost_per_project": 0.0,
-      "enabled": false
-    },
     "openai-mini": {
       "type": "openai",
       "endpoint": "https://api.openai.com/v1/chat/completions",
@@ -99,18 +83,20 @@
       "api_key_env": "OPENROUTER_API_KEY",
       "timeout": 300
     },
-    "local-dougie": {
+    "local-llm": {
       "type": "openai",
-      "endpoint": "http://localhost:27180/v1/chat/completions",
-      "endpoint_env": "DOUGIE_ENDPOINT",
-      "model": "mlx-community/Qwen3.6-35B-A3B-4bit",
+      "endpoint": "http://studio.riechers.co:8000/v1/chat/completions",
+      "endpoint_env": "LOCAL_LLM_ENDPOINT",
+      "model": "PLACEHOLDER-set-via-model-fit-or-LOCAL_LLM_MODEL",
+      "model_env": "LOCAL_LLM_MODEL",
+      "api_key_env": "LOCAL_LLM_API_KEY",
       "strip_reasoning": true,
-      "force_model": true,
+      "discover": true,
       "defer_when_unavailable": true,
       "max_tokens": 8192,
       "timeout": 300,
       "cost_per_project": 0.0,
-      "enabled": false
+      "enabled": true
     }
   },
   "auto_select": {
@@ -156,7 +142,8 @@
       "enabled": true,
       "min_run": 4,
       "per_caption_floor": 0.5,
-      "pause_on_gap": true
+      "pause_on_gap": true,
+      "blocking_ratio": 0.98
     },
     "speaker_segmentation": {
       "enabled": true
@@ -174,15 +161,15 @@
       "ceiling_hours": 6
     },
     "style_engine": {
-      "enabled": false,
+      "enabled": true,
       "rules_file": "config/house_style.yaml",
       "keep_raw_on_fix": true,
       "phases": {
-        "analyst":   {"pre": false, "post": "off"},
-        "formatter": {"pre": false, "post": "off"},
-        "seo":       {"pre": false, "post": "off"},
-        "validator": {"pre": false, "lint": "off"},
-        "timestamp": {"pre": false, "post": "off"}
+        "analyst":   {"pre": true, "post": "off"},
+        "formatter": {"pre": true, "post": "off"},
+        "seo":       {"pre": true, "post": "off"},
+        "validator": {"pre": true, "lint": "off"},
+        "timestamp": {"pre": true, "post": "off"}
       },
       "qa_gate": {"merge_flags": true, "fail_on_error": true}
     }

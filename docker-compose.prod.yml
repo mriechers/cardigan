@@ -19,12 +19,19 @@ services:
       - LANGFUSE_BASE_URL=https://us.cloud.langfuse.com
       - CARDIGAN_VERSION=${CARDIGAN_VERSION:-v4.2}
       - LLM_CONFIG_PATH=/data/config/llm-config.json
+      # local-llm backend (oMLX on the Mac Studio). Re-point at any OpenAI-compatible
+      # server by changing these two — no committed-config edit. Accepts a /v1 base
+      # URL or a full /v1/chat/completions endpoint. LOCAL_LLM_MODEL is REQUIRED
+      # before routing a phase to local-llm (the served model id).
+      - LOCAL_LLM_ENDPOINT=${LOCAL_LLM_ENDPOINT:-http://studio.riechers.co:8000/v1/chat/completions}
+      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-}
     secrets:
       - openrouter_api_key
       - airtable_api_key
       - langfuse_public_key
       - langfuse_secret_key
       - google_drive_credentials
+      - local_llm_api_key
     volumes:
       - db-data:/data/db
       - output-data:/data/output
@@ -50,11 +57,15 @@ services:
       - CARDIGAN_VERSION=${CARDIGAN_VERSION:-v4.2}
       - DIARIZATION_SERVICE_URL=http://diarization:8000
       - LLM_CONFIG_PATH=/data/config/llm-config.json
+      # local-llm backend — see api service for details.
+      - LOCAL_LLM_ENDPOINT=${LOCAL_LLM_ENDPOINT:-http://studio.riechers.co:8000/v1/chat/completions}
+      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-}
     secrets:
       - openrouter_api_key
       - airtable_api_key
       - langfuse_public_key
       - langfuse_secret_key
+      - local_llm_api_key
     volumes:
       - db-data:/data/db
       - output-data:/data/output
@@ -71,8 +82,15 @@ services:
     image: ghcr.io/mriechers/cardigan-web:latest
     ports:
       - "3100:3000"
+      # Hardened remote-preview vhost. Dormant unless the htpasswd secret is
+      # present; this is the only port Tailscale Funnel targets.
+      - "3101:3001"
     environment:
       - CARDIGAN_API_KEY=${CARDIGAN_API_KEY:-}
+    secrets:
+      # Optional — presence of a non-empty file enables the preview vhost.
+      # Absent/empty = dormant, byte-identical to LAN-only today.
+      - cardigan_web_htpasswd
     depends_on:
       - api
     labels:
@@ -127,20 +145,6 @@ services:
       - diarization
     restart: unless-stopped
 
-  tunnel:
-    image: cloudflare/cloudflared:latest
-    command: tunnel --no-autoupdate run
-    environment:
-      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
-    depends_on:
-      api:
-        condition: service_healthy
-      web:
-        condition: service_started
-    profiles:
-      - tunnel
-    restart: unless-stopped
-
   watchtower:
     image: containrrr/watchtower
     volumes:
@@ -168,6 +172,14 @@ secrets:
     file: ./secrets/hf_token
   google_drive_credentials:
     file: ./secrets/google_drive_credentials
+  local_llm_api_key:
+    file: ./secrets/local_llm_api_key
+  # Optional — one "user:hash" line per editor enables the hardened preview
+  # vhost. required:false lets `docker compose up` succeed when the file is
+  # absent (dormant), keeping the default deployment byte-identical to today.
+  cardigan_web_htpasswd:
+    file: ./secrets/cardigan_web_htpasswd
+    required: false
 
 volumes:
   db-data:

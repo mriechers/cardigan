@@ -16,6 +16,14 @@ Word-order trigrams are specific enough that a dropped caption scores ~0 while a
 retained-but-lightly-reflowed caption scores ~1.0 (measured on job 12: retained
 captions 1.00, dropped captions 0.00). The comparison is against a global trigram
 set, so reordering whole turns does not cause false positives.
+
+Blocking vs. detection: trigram detection cannot distinguish a genuine drop from
+a HEAVILY reconstructed caption (e.g. garbled ASR "gouess"→"guess", "yout"→"out")
+— both destroy the source word order and score ~0. So a detected gap only
+*blocks* (pauses the job) when corroborated by **net content loss**: the output
+has fewer content words than the source. A reconstruction adds content (labels,
+cleanup) so its net ratio is ≥ 1.0 → recorded but non-blocking; a real dropped
+span removes content → ratio below ``DEFAULT_BLOCKING_RATIO`` → blocking.
 """
 
 import logging
@@ -23,6 +31,7 @@ import re
 from dataclasses import dataclass, field
 from typing import List, Optional, Set, Tuple
 
+from api.services.completeness import count_content_words, count_source_words
 from api.services.utils import parse_srt
 
 logger = logging.getLogger(__name__)
@@ -35,6 +44,12 @@ DEFAULT_PER_CAPTION_FLOOR = 0.5
 # Only a contiguous run of at least this many missing captions counts as a
 # dropped section. Below this is treated as paraphrase noise, not content loss.
 DEFAULT_MIN_RUN = 4
+
+# A detected gap only *blocks* (pauses the job) when the formatter output has
+# fewer content words than the source × this ratio — corroborating that content
+# was actually lost rather than reconstructed. Reconstruction of garbled captions
+# keeps output ≥ source; a real dropped span pushes it below this.
+DEFAULT_BLOCKING_RATIO = 0.98
 
 # Trigram tokens are alphabetic runs of at least this length.
 DEFAULT_MIN_TOKEN_LEN = 3
@@ -58,10 +73,16 @@ class SeamCoverageResult:
     has_gap: bool
     dropped_spans: List[DroppedSpan] = field(default_factory=list)
     captions_checked: int = 0
+    # Output content words / source content words. < 1.0 means net content loss.
+    net_coverage_ratio: float = 1.0
+    # has_gap AND net content loss — the signal the worker pauses on.
+    blocking: bool = False
 
     def to_dict(self) -> dict:
         return {
             "has_gap": self.has_gap,
+            "blocking": self.blocking,
+            "net_coverage_ratio": round(self.net_coverage_ratio, 4),
             "captions_checked": self.captions_checked,
             "dropped_spans": [
                 {
@@ -131,6 +152,15 @@ def _caption_status(
     return coverage < floor
 
 
+def _net_coverage_ratio(source_transcript: str, formatter_output: str, is_srt: bool) -> float:
+    """Output content words / source content words (reusing the completeness
+    tokenizers so this matches the global gate's notion of 'content')."""
+    src_words = count_source_words(source_transcript, is_srt=is_srt)
+    if src_words <= 0:
+        return 1.0
+    return count_content_words(formatter_output) / src_words
+
+
 def find_dropped_spans(
     source_transcript: str,
     formatter_output: str,
@@ -138,6 +168,7 @@ def find_dropped_spans(
     min_run: int = DEFAULT_MIN_RUN,
     per_caption_floor: float = DEFAULT_PER_CAPTION_FLOOR,
     min_token_len: int = DEFAULT_MIN_TOKEN_LEN,
+    blocking_ratio: float = DEFAULT_BLOCKING_RATIO,
 ) -> SeamCoverageResult:
     """Detect contiguous source spans missing from the formatter output.
 
@@ -188,10 +219,24 @@ def find_dropped_spans(
             )
         i = j
 
+    net_ratio = _net_coverage_ratio(source_transcript, formatter_output, is_srt)
+    has_gap = bool(spans)
+    blocking = has_gap and net_ratio < blocking_ratio
+
     if spans:
         logger.warning(
             "Seam gap detected in formatter output",
-            extra={"dropped_spans": [s.start_timecode for s in spans]},
+            extra={
+                "dropped_spans": [s.start_timecode for s in spans],
+                "net_coverage_ratio": round(net_ratio, 4),
+                "blocking": blocking,
+            },
         )
 
-    return SeamCoverageResult(has_gap=bool(spans), dropped_spans=spans, captions_checked=n)
+    return SeamCoverageResult(
+        has_gap=has_gap,
+        dropped_spans=spans,
+        captions_checked=n,
+        net_coverage_ratio=net_ratio,
+        blocking=blocking,
+    )
