@@ -96,6 +96,44 @@ class DiarizationClient:
             logger.warning(f"Diarization request failed: {e}")
             return None
 
+    async def transcribe(self, file_path: str) -> Optional[Dict[str, Any]]:
+        """Send an audio/video file to the service's /transcribe endpoint.
+
+        Args:
+            file_path: Path to the audio or video file on disk.
+
+        Returns:
+            Parsed JSON dict with keys: duration_seconds, language, segments
+            (each segment carries start/end/text). Returns None on any failure.
+        """
+        path = Path(file_path)
+        if not path.exists():
+            logger.warning(f"Media file not found for transcription: {file_path}")
+            return None
+
+        try:
+            logger.info(f"Sending file to transcription service: {path.name}")
+            with open(path, "rb") as f:
+                resp = await self._client.post(
+                    f"{self.base_url}/transcribe",
+                    files={"file": (path.name, f, "application/octet-stream")},
+                )
+
+            if resp.status_code == 200:
+                result = resp.json()
+                logger.info(f"Transcription complete: {len(result.get('segments', []))} segments")
+                return result
+
+            logger.warning(f"Transcription service returned {resp.status_code}: {resp.text[:200]}")
+            return None
+
+        except httpx.TimeoutException:
+            logger.warning(f"Transcription timed out after {DIARIZE_TIMEOUT_SECONDS}s for {path.name}")
+            return None
+        except (httpx.HTTPError, Exception) as e:
+            logger.warning(f"Transcription request failed: {e}")
+            return None
+
     async def close(self):
         """Close the underlying HTTP client."""
         await self._client.aclose()

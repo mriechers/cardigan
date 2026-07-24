@@ -1,10 +1,11 @@
 """Upload router for Cardigan API.
 
-Provides bulk transcript upload endpoint.
+Provides bulk transcript upload and audio/video → SRT media upload endpoints.
 """
 
 import logging
 import os
+import tempfile
 from pathlib import Path
 from typing import List, Optional
 
@@ -12,10 +13,11 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
 from api.middleware.rate_limit import RATE_EXPENSIVE, limiter
-from api.models.job import JobCreate
+from api.models.job import JobCreate, JobUpdate
 from api.services import database
 from api.services.airtable import AirtableClient
-from api.services.utils import extract_media_id
+from api.services.diarization_client import DiarizationClient
+from api.services.utils import extract_media_id, segments_to_srt
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +26,9 @@ router = APIRouter()
 # Configuration
 TRANSCRIPTS_DIR = Path(os.getenv("TRANSCRIPTS_DIR", "transcripts"))
 ALLOWED_EXTENSIONS = {".txt", ".srt"}
+MEDIA_EXTENSIONS = {".wav", ".mp3", ".m4a", ".flac", ".mp4", ".mkv", ".mov", ".webm"}
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+MAX_MEDIA_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB — media is much larger than text
 MAX_BATCH_SIZE = 20
 
 
@@ -197,3 +201,121 @@ async def upload_transcripts(
             failed_count += 1
 
     return UploadResponse(uploaded=uploaded_count, failed=failed_count, files=results)
+
+
+class MediaUploadResponse(BaseModel):
+    """Response for a single audio/video upload."""
+
+    filename: str
+    success: bool
+    job_id: Optional[int] = None
+    srt_file: Optional[str] = None
+    segments: Optional[int] = None
+    error: Optional[str] = None
+
+
+async def _autolink_sst(job, media_id: Optional[str]):
+    """Best-effort auto-link a job to its Airtable SST record by Media ID."""
+    try:
+        if not media_id:
+            raise ValueError("No valid Media ID extracted")
+        airtable_client = AirtableClient()
+        record = await airtable_client.search_sst_by_media_id(media_id)
+        if record:
+            record_id = record["id"]
+            job = await database.update_job(
+                job.id,
+                JobUpdate(
+                    airtable_record_id=record_id,
+                    airtable_url=airtable_client.get_sst_url(record_id),
+                    media_id=media_id,
+                ),
+            )
+            logger.info(f"Job {job.id}: Linked to SST record {record_id}")
+        else:
+            job = await database.update_job(job.id, JobUpdate(media_id=media_id))
+            logger.warning(f"Job {job.id}: No SST record found for {media_id}")
+    except Exception as e:
+        logger.warning(f"Job {job.id}: Airtable lookup failed - {e}")
+    return job
+
+
+@router.post("/media", response_model=MediaUploadResponse)
+@limiter.limit(RATE_EXPENSIVE)
+async def upload_media(
+    request: Request,
+    file: UploadFile = File(..., description="Audio or video file"),
+) -> MediaUploadResponse:
+    """Transcribe an uploaded audio/video file with WhisperX and queue a job.
+
+    Flow: save upload to a temp file → send it to the transcription service →
+    build an SRT from the returned segments → save the SRT to transcripts/ →
+    create a job (same dedup + Airtable SST auto-link as transcript upload).
+    No caption file required.
+    """
+    filename = file.filename or "upload"
+    file_ext = Path(filename).suffix.lower()
+    if file_ext not in MEDIA_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid media type. Allowed: {', '.join(sorted(MEDIA_EXTENSIONS))}",
+        )
+
+    content = await file.read()
+    if len(content) > MAX_MEDIA_FILE_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large. Maximum size: {MAX_MEDIA_FILE_SIZE / 1024 / 1024 / 1024:.0f} GB",
+        )
+
+    # Derive the SRT filename from the media filename so the Media ID survives.
+    srt_name = Path(filename).stem + ".srt"
+
+    # Cheap duplicate check before the expensive transcription.
+    media_id = extract_media_id(srt_name)
+    existing = await database.find_jobs_by_media_id(media_id) if media_id else []
+    if existing:
+        return MediaUploadResponse(
+            filename=filename,
+            success=False,
+            error=f"Already exists as job {existing[0].id} ({existing[0].status.value})",
+        )
+
+    # Transcribe via the WhisperX service (temp file because the service reads a path).
+    client = DiarizationClient()
+    try:
+        if not await client.is_available():
+            raise HTTPException(status_code=503, detail="Transcription service unavailable")
+
+        with tempfile.NamedTemporaryFile(suffix=file_ext, delete=False) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+        try:
+            result = await client.transcribe(tmp_path)
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+    finally:
+        await client.close()
+
+    if not result or not result.get("segments"):
+        return MediaUploadResponse(filename=filename, success=False, error="Transcription produced no segments")
+
+    # Build + persist the SRT.
+    srt_content = segments_to_srt(result["segments"])
+    TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+    srt_path = TRANSCRIPTS_DIR / srt_name
+    srt_path.write_text(srt_content, encoding="utf-8")
+    logger.info(f"Wrote generated SRT: {srt_path} ({len(result['segments'])} segments)")
+
+    # Queue a job from the generated SRT.
+    project_name = Path(srt_name).stem
+    job = await database.create_job(JobCreate(project_name=project_name, transcript_file=srt_name))
+    job = await _autolink_sst(job, media_id)
+
+    return MediaUploadResponse(
+        filename=filename,
+        success=True,
+        job_id=job.id,
+        srt_file=srt_name,
+        segments=len(result["segments"]),
+    )

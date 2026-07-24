@@ -537,6 +537,31 @@ def generate_srt(captions: List[SRTCaption]) -> str:
     return "\n".join(output_parts)
 
 
+def segments_to_srt(segments: List[dict]) -> str:
+    """Build SRT content from whisperX-style segments.
+
+    Each segment is a dict with ``start``/``end`` in seconds and ``text``.
+    Whitespace-only/empty segments are dropped; bounds are clamped so a cue
+    never has a negative duration. Captions are renumbered sequentially.
+
+    Args:
+        segments: List of {"start": float, "end": float, "text": str} dicts.
+
+    Returns:
+        Complete SRT file content as a string.
+    """
+    captions: List[SRTCaption] = []
+    for seg in segments:
+        text = (seg.get("text") or "").strip()
+        if not text:
+            continue
+        start_ms = max(0, int(round(float(seg.get("start", 0.0)) * 1000)))
+        end_ms = max(start_ms, int(round(float(seg.get("end", 0.0)) * 1000)))
+        captions.append(SRTCaption(index=0, start_ms=start_ms, end_ms=end_ms, text=text))
+
+    return generate_srt(captions)
+
+
 def generate_vtt(captions: List[SRTCaption]) -> str:
     """Generate WebVTT file content from list of captions.
 
