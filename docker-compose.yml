@@ -67,8 +67,15 @@ services:
       dockerfile: Dockerfile.web
     ports:
       - "3100:3000"
+      # Hardened remote-preview vhost. Dormant unless the htpasswd secret is
+      # present; this is the only port Tailscale Funnel targets.
+      - "3101:3001"
     environment:
       - CARDIGAN_API_KEY=${CARDIGAN_API_KEY:-}
+    secrets:
+      # Optional — presence of a non-empty file enables the preview vhost.
+      # Absent/empty = dormant, byte-identical to LAN-only today.
+      - cardigan_web_htpasswd
     depends_on:
       - api
     restart: unless-stopped
@@ -127,20 +134,6 @@ services:
       - diarization
     restart: unless-stopped
 
-  tunnel:
-    image: cloudflare/cloudflared:latest
-    command: tunnel --no-autoupdate run
-    environment:
-      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
-    depends_on:
-      api:
-        condition: service_healthy
-      web:
-        condition: service_started
-    profiles:
-      - tunnel
-    restart: unless-stopped
-
 secrets:
   openrouter_api_key:
     file: ./secrets/openrouter_api_key
@@ -154,6 +147,12 @@ secrets:
     file: ./secrets/hf_token
   google_drive_credentials:
     file: ./secrets/google_drive_credentials
+  # Optional — one "user:hash" line per editor enables the hardened preview
+  # vhost. required:false lets `docker compose up` succeed when the file is
+  # absent (dormant), keeping the default deployment byte-identical to today.
+  cardigan_web_htpasswd:
+    file: ./secrets/cardigan_web_htpasswd
+    required: false
 
 volumes:
   db-data:

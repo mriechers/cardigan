@@ -1,5 +1,10 @@
 # Handoff: deploy local-dougie so it's testable in the LXC-hosted app
 
+> **Superseded (2026-07-02):** dougie was retired in favor of **oMLX**; the backend
+> is now the network-neutral `local-llm` (env `LOCAL_LLM_ENDPOINT` /
+> `LOCAL_LLM_MODEL` / `LOCAL_LLM_API_KEY`). See
+> `planning/2026-07-02-local-llm-omlx-integration.md`. Kept for deploy rationale.
+
 **Date:** 2026-06-10
 **For:** a Cardigan-side agent picking up the local-LLM integration
 **Predecessor:** `2026-06-05-local-llm-tier-handoff.md` (the original analysis + enable path)

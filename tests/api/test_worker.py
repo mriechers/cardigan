@@ -562,7 +562,7 @@ class TestRunPhaseDeferral:
 
         mock_get_llm.return_value = mock_llm_client
         mock_llm_client.chat = AsyncMock(
-            side_effect=BackendUnavailableError("memory pressure 69%", backend="local-dougie", retry_after_s=30)
+            side_effect=BackendUnavailableError("memory pressure 69%", backend="local-llm", retry_after_s=30)
         )
         mock_log_event.return_value = None
         mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
@@ -615,7 +615,7 @@ class TestProcessJobDeferral:
 
         mock_get_llm.return_value = mock_llm_client
         mock_llm_client.chat = AsyncMock(
-            side_effect=BackendUnavailableError("memory pressure 69%", backend="local-dougie", retry_after_s=30)
+            side_effect=BackendUnavailableError("memory pressure 69%", backend="local-llm", retry_after_s=30)
         )
         mock_update_status.return_value = None
         mock_update_phase.return_value = None
@@ -964,6 +964,90 @@ class TestProcessJobSeamGap:
         assert any(
             "SEAM GAP DETECTED" in str(c.kwargs.get("error_message", "")) for c in paused
         ), "paused status should carry the SEAM GAP message"
+
+    def _formatter_output_gap_no_net_loss(self) -> str:
+        """Same dropped block, but padded so total content words exceed the
+        source — a reconstruction/expansion, not a real loss."""
+        kept = [t for i, t in enumerate(self._CAPTIONS) if i not in self._DROPPED]
+        body = "\n\n".join(f"**Speaker:** {t}." for t in kept)
+        padding = " ".join(["reconstructed"] * 60)
+        return (
+            "<!-- model: test -->\n# Formatted Transcript\n**Project:** Test\n---\n\n"
+            f"{body}\n\n**Speaker:** {padding}.\n\n**Status:** ready_for_editing"
+        )
+
+    @pytest.mark.asyncio
+    @patch("api.services.worker.get_llm_client")
+    @patch("api.services.worker.update_job_status")
+    @patch("api.services.worker.update_job_phase")
+    @patch("api.services.worker.update_job_heartbeat")
+    @patch("api.services.worker.log_event")
+    @patch("api.services.worker.start_run_tracking")
+    @patch("api.services.worker.end_run_tracking")
+    @patch("api.services.worker.TRANSCRIPTS_DIR")
+    @patch("api.services.worker.OUTPUT_DIR")
+    @patch("api.services.worker.AGENTS_DIR")
+    async def test_seam_gap_without_net_loss_does_not_pause(
+        self,
+        mock_agents_dir,
+        mock_output_dir,
+        mock_transcripts_dir,
+        mock_end_tracking,
+        mock_start_tracking,
+        mock_log_event,
+        mock_update_heartbeat,
+        mock_update_phase,
+        mock_update_status,
+        mock_get_llm,
+        mock_llm_client,
+        tmp_path,
+    ):
+        """A detected seam gap with NO net content loss (the garbled-ASR
+        reconstruction false positive) is non-blocking: the job must NOT be
+        paused with a SEAM GAP message. This is the exact behavior the blocking
+        guard adds — the unit-level coverage is in test_seam_coverage.py; this
+        asserts it end-to-end at the worker."""
+        mock_get_llm.return_value = mock_llm_client
+
+        response = MagicMock()
+        response.content = self._formatter_output_gap_no_net_loss()
+        response.cost = 0.001
+        response.total_tokens = 500
+        response.model = "test-model"
+        mock_llm_client.chat = AsyncMock(return_value=response)
+
+        mock_update_status.return_value = None
+        mock_update_phase.return_value = None
+        mock_update_heartbeat.return_value = None
+        mock_log_event.return_value = None
+        mock_start_tracking.return_value = MagicMock(total_cost=0, total_tokens=0)
+        mock_end_tracking.return_value = {"total_cost": 0.01, "total_tokens": 2000}
+
+        mock_transcripts_dir.__truediv__ = lambda self, name: tmp_path / name
+        mock_output_dir.__truediv__ = lambda self, name: tmp_path / name
+        mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
+
+        job = {
+            "id": 100,
+            "project_name": "Seam Nonblock",
+            "transcript_file": "seamtest.srt",
+            "status": "in_progress",
+            "priority": 10,
+            "queued_at": datetime.now(timezone.utc).isoformat(),
+            "phases": [],
+        }
+        (tmp_path / job["transcript_file"]).write_text(self._source_srt(), encoding="utf-8")
+
+        worker = JobWorker()
+        await worker.process_job(job)
+
+        seam_pauses = [
+            c
+            for c in mock_update_status.call_args_list
+            if getattr(c.args[1], "value", c.args[1]) == "paused"
+            and "SEAM GAP" in str(c.kwargs.get("error_message", ""))
+        ]
+        assert not seam_pauses, "a corroboration-free seam gap must not pause the job"
 
 
 class TestProcessJobSpeakerSegmentation:

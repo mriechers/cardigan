@@ -10,7 +10,7 @@ The "cheapskate / default / big-brain" preset tiers are **not** a load-bearing
 runtime abstraction. The runtime already does direct per-phase model selection:
 
 - **Model resolution** (`api/services/llm.py`, `generate()`): precedence is
-  `force_model` (e.g. local-dougie) → explicit `model` override → **`phase_models[phase]`**
+  `force_model` (e.g. local-llm) → explicit `model` override → **`phase_models[phase]`**
   → backend `model`/`fallback_model`. So `config/llm-config.json`'s `phase_models`
   (phase → concrete model id) already drives the model.
 - **`phase_backends`** (phase → tier-named backend) now only supplies the
@@ -40,9 +40,10 @@ and the tier-named backends; derive cost from the model, not the tier.
    step that can mis-bill jobs — do it first, with tests, against real
    `session_stats` rows.**
 2. **Collapse backends.** Point every phase at one transport backend
-   (`openrouter` / `openrouter-direct`); keep `local-dougie` (force_model) and
-   the disabled ollama entries. Delete `openrouter-cheapskate` /
-   `openrouter-big-brain` once nothing references them.
+   (`openrouter` / `openrouter-direct`); keep `local-llm` (force_model). Delete
+   `openrouter-cheapskate` / `openrouter-big-brain` once nothing references them.
+   (The dead `local-ollama`/`remote-ollama` entries were removed with the
+   local-llm/oMLX work — 2026-07-02.)
 3. **Config migration + back-compat shim.** A migration that maps any existing
    `phase_backends` value → the equivalent `phase_models` entry on load, so
    deployed `llm-config.json` files (incl. the homelab's) don't break. Keep the

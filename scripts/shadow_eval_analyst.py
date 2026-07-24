@@ -6,18 +6,19 @@ the worker's user-prompt scaffold) against two or more backends on the same
 transcript, then reports cost/tokens/latency and writes each analysis to a file
 for side-by-side comparison.
 
-This is the "don't trust-flip" first experiment for the local-dougie backend:
+This is the "don't trust-flip" first experiment for the local-llm backend:
 compare its analyst output to the incumbent openrouter-cheapskate on a real
 transcript before routing any production phase to it.
 
 Usage:
     python scripts/shadow_eval_analyst.py \
         --transcript transcripts/examples/EXAMPLE_GlassTree_ForClaude.txt \
-        --backends openrouter-cheapskate,local-dougie
+        --backends openrouter-cheapskate,local-llm
 
-Requires the target backends to be reachable (for local-dougie, the MLX server
-must be up and DOUGIE_ENDPOINT/endpoint pointed at it). It does NOT touch the
-jobs DB — LLM event logging and Langfuse tracing are stubbed out for the run.
+Requires the target backends to be reachable (for local-llm, the oMLX server
+must be up and LOCAL_LLM_ENDPOINT/LOCAL_LLM_MODEL/LOCAL_LLM_API_KEY pointed at
+it). It does NOT touch the jobs DB — LLM event logging and Langfuse tracing are
+stubbed out for the run.
 """
 
 import argparse
@@ -74,7 +75,7 @@ async def main() -> int:
     )
     parser.add_argument(
         "--backends",
-        default="openrouter-cheapskate,local-dougie",
+        default="openrouter-cheapskate,local-llm",
         help="Comma-separated backend names from config/llm-config.json.",
     )
     parser.add_argument("--content-type", default="full", choices=["full", "short"])

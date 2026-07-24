@@ -5,6 +5,7 @@ Provides endpoints for viewing and updating LLM routing configuration.
 
 import json
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -126,14 +127,18 @@ async def update_phase_backends(update: PhaseBackendsUpdate):
 
 
 class AvailableModel(BaseModel):
-    """A model available for phase assignment."""
+    """A model available for phase assignment (cloud via OpenRouter or a locally
+    discovered model)."""
 
-    id: str = Field(..., description="OpenRouter model ID (e.g., 'anthropic/claude-sonnet-4-5-20250514')")
+    id: str = Field(..., description="Model ID (e.g. 'anthropic/claude-sonnet-4.6' or 'Qwen2.5-7B-Instruct-4bit')")
     name: str = Field(..., description="Human-readable model name")
-    provider: str = Field(..., description="Model provider (e.g., 'Anthropic', 'Google')")
-    tier: int = Field(..., ge=0, le=2, description="Cost tier (0=economy, 1=standard, 2=premium)")
+    provider: str = Field(..., description="Serving provider (e.g. 'Anthropic', 'Google', 'oMLX')")
+    tier: Optional[int] = Field(None, ge=0, le=2, description="Cost tier (0=economy..2=premium); null for local models")
     pricing_input: Optional[float] = Field(None, description="Cost per 1M input tokens (USD)")
     pricing_output: Optional[float] = Field(None, description="Cost per 1M output tokens (USD)")
+    backend: Optional[str] = Field(None, description="Config backend key that serves this model (local models)")
+    host: Optional[str] = Field(None, description="Host of the serving endpoint (local models), for grouping")
+    context_len: Optional[int] = Field(None, description="Max context length if the server advertises it")
 
 
 class PhaseModelsResponse(BaseModel):
@@ -199,6 +204,14 @@ async def update_phase_models(update: PhaseModelsUpdate):
     config = _load_config()
     valid_phases = {"analyst", "formatter", "seo", "validator", "timestamp", "copy_editor", "chat"}
     models_data = await get_available_models()
+    # Without a roster we can neither validate the model id nor look up its serving
+    # backend, so routing the (backend, model) pair below would silently leave
+    # phase_backends stale — an inconsistent config. Fail loudly instead.
+    if not models_data:
+        raise HTTPException(
+            status_code=503,
+            detail="Model roster is unavailable right now; cannot assign models safely. Try again after it refreshes.",
+        )
     available_model_ids = {m["id"] for m in models_data}
 
     for phase, model_id in update.phase_models.items():
@@ -213,6 +226,27 @@ async def update_phase_models(update: PhaseModelsUpdate):
     phase_models = config.get("phase_models", DEFAULT_PHASE_MODELS)
     phase_models.update(update.phase_models)
     config["phase_models"] = phase_models
+
+    # Route on the (backend, model) pair: keep phase_backends consistent with the
+    # assigned model so the model actually reaches the right server. A local model
+    # carries its serving backend in the roster; assigning it points the phase at
+    # that backend. A cloud model has no roster backend, so only reset the phase
+    # *off* a local backend (back to the primary cloud backend) — an existing cloud
+    # tier (e.g. openrouter-cheapskate) is left untouched.
+    roster_by_id = {m["id"]: m for m in models_data}
+    phase_backends = config.get("phase_backends", {})
+    backends = config.get("backends", {})
+    primary = config.get("primary_backend", "openrouter")
+    for phase, model_id in update.phase_models.items():
+        model_backend = roster_by_id.get(model_id, {}).get("backend")
+        if model_backend:
+            phase_backends[phase] = model_backend
+        else:
+            current = phase_backends.get(phase)
+            if current and backends.get(current, {}).get("type") == "openai":
+                phase_backends[phase] = primary
+    config["phase_backends"] = phase_backends
+
     _save_config(config)
 
     # Reload the live LLM client so changes take effect immediately
@@ -343,3 +377,148 @@ async def get_cost_estimate(body: CostEstimateRequest):
     )
 
     return CostEstimateResponse(**result)
+
+
+# ---------------------------------------------------------------------------
+# Backend-definition CRUD (/config/backends)
+#
+# Lets a user register a local OpenAI-compatible endpoint as a first-class,
+# discoverable backend without hand-editing llm-config.json. Backends are keyed
+# by host so a server self-identifies (no invented names like "local-llm-2").
+# The generic OpenAI client + the model roster already consume whatever is
+# written here, so onboarding a new server is data, not code.
+# ---------------------------------------------------------------------------
+
+
+class BackendCreate(BaseModel):
+    """Request body to register a local OpenAI-compatible backend."""
+
+    endpoint: str = Field(..., description="OpenAI-compatible base URL, e.g. http://host:8000/v1")
+    api_key_env: Optional[str] = Field(None, description="Name of the secret/env var holding the API key")
+    model: Optional[str] = Field(None, description="Optional fallback model id when a phase has no assignment")
+    enabled: bool = Field(True, description="Whether the backend is usable")
+    discover: bool = Field(True, description="Whether to list this server's /v1/models in the roster")
+
+
+class BackendPatch(BaseModel):
+    """Partial update for an existing backend (only provided fields change)."""
+
+    endpoint: Optional[str] = None
+    api_key_env: Optional[str] = None
+    model: Optional[str] = None
+    enabled: Optional[bool] = None
+    discover: Optional[bool] = None
+
+
+class BackendInfo(BaseModel):
+    """Summary of a configured backend."""
+
+    name: str
+    type: str
+    endpoint: Optional[str] = None
+    enabled: bool
+    discover: bool
+
+
+class BackendsListResponse(BaseModel):
+    backends: List[BackendInfo]
+
+
+def _backend_info(name: str, entry: dict) -> BackendInfo:
+    return BackendInfo(
+        name=name,
+        type=entry.get("type", "openai"),
+        endpoint=entry.get("endpoint"),
+        enabled=bool(entry.get("enabled", True)),
+        discover=bool(entry.get("discover", False)),
+    )
+
+
+@router.get("/backends", response_model=BackendsListResponse)
+async def list_backends():
+    """List all configured backends (cloud presets + user-registered local endpoints)."""
+    config = _load_config()
+    backends = config.get("backends", {})
+    return BackendsListResponse(backends=[_backend_info(n, e) for n, e in backends.items()])
+
+
+@router.post("/backends", response_model=BackendInfo, status_code=201)
+async def create_backend(body: BackendCreate):
+    """Register a new local OpenAI-compatible backend, keyed by its host.
+
+    The host is derived from the endpoint (self-identifying), so no name is
+    invented. Cost is $0 and discovery is on by default. Invalidates the roster
+    cache so the new server's models surface on the next refresh.
+    """
+    host = urlparse(body.endpoint).netloc
+    if not host:
+        raise HTTPException(status_code=400, detail="endpoint must be an absolute URL like http://host:8000/v1")
+
+    config = _load_config()
+    backends = config.setdefault("backends", {})
+    if host in backends:
+        raise HTTPException(status_code=409, detail=f"Backend '{host}' already exists")
+
+    entry: Dict[str, Any] = {
+        "type": "openai",
+        "endpoint": body.endpoint,
+        "enabled": body.enabled,
+        "discover": body.discover,
+        "cost_per_project": 0.0,
+    }
+    if body.api_key_env:
+        entry["api_key_env"] = body.api_key_env
+    if body.model:
+        entry["model"] = body.model
+
+    backends[host] = entry
+    _save_config(config)
+    invalidate_cache()
+    return _backend_info(host, entry)
+
+
+@router.patch("/backends/{name}", response_model=BackendInfo)
+async def update_backend(name: str, body: BackendPatch):
+    """Update fields of an existing backend (enable/disable, toggle discovery, edit endpoint)."""
+    config = _load_config()
+    backends = config.get("backends", {})
+    if name not in backends:
+        raise HTTPException(status_code=404, detail=f"Backend '{name}' not found")
+
+    entry = backends[name]
+    # Same absolute-URL guard as create_backend — a PATCH must not be able to point
+    # a backend at a relative/garbage endpoint that create_backend would have rejected.
+    if body.endpoint is not None and not urlparse(body.endpoint).netloc:
+        raise HTTPException(status_code=400, detail="endpoint must be an absolute URL like http://host:8000/v1")
+    for field in ("endpoint", "api_key_env", "model", "enabled", "discover"):
+        value = getattr(body, field)
+        if value is not None:
+            entry[field] = value
+
+    _save_config(config)
+    invalidate_cache()
+    return _backend_info(name, entry)
+
+
+@router.delete("/backends/{name}", status_code=204)
+async def delete_backend(name: str):
+    """Remove a backend. Refuses if it still routes traffic (would orphan a phase)."""
+    config = _load_config()
+    backends = config.get("backends", {})
+    if name not in backends:
+        raise HTTPException(status_code=404, detail=f"Backend '{name}' not found")
+
+    refs = []
+    if config.get("primary_backend") == name:
+        refs.append("primary_backend")
+    if config.get("fallback_backend") == name:
+        refs.append("fallback_backend")
+    used_phases = [p for p, b in config.get("phase_backends", {}).items() if b == name]
+    if used_phases:
+        refs.append(f"phase_backends({', '.join(used_phases)})")
+    if refs:
+        raise HTTPException(status_code=409, detail=f"Backend '{name}' is in use by: {', '.join(refs)}")
+
+    del backends[name]
+    _save_config(config)
+    invalidate_cache()
