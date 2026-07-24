@@ -119,7 +119,9 @@ def test_health_endpoint_exposes_instance_block():
         return {
             "api_restarted_at": _cfg("2026-07-23T00:00:00+00:00"),
             "version_deployed_at": _cfg("2026-07-20T00:00:00+00:00"),
-        }.get(key)  # llm_runtime_status → None (falls back to in-process status)
+        }.get(
+            key
+        )  # llm_runtime_status → None (falls back to in-process status)
 
     mock_client = MagicMock()
     mock_client.get_status.return_value = {
