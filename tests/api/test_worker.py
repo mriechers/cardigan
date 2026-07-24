@@ -562,7 +562,7 @@ class TestRunPhaseDeferral:
 
         mock_get_llm.return_value = mock_llm_client
         mock_llm_client.chat = AsyncMock(
-            side_effect=BackendUnavailableError("memory pressure 69%", backend="local-dougie", retry_after_s=30)
+            side_effect=BackendUnavailableError("memory pressure 69%", backend="local-llm", retry_after_s=30)
         )
         mock_log_event.return_value = None
         mock_agents_dir.__truediv__ = lambda self, name: tmp_path / name
@@ -615,7 +615,7 @@ class TestProcessJobDeferral:
 
         mock_get_llm.return_value = mock_llm_client
         mock_llm_client.chat = AsyncMock(
-            side_effect=BackendUnavailableError("memory pressure 69%", backend="local-dougie", retry_after_s=30)
+            side_effect=BackendUnavailableError("memory pressure 69%", backend="local-llm", retry_after_s=30)
         )
         mock_update_status.return_value = None
         mock_update_phase.return_value = None

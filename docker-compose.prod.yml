@@ -19,12 +19,19 @@ services:
       - LANGFUSE_BASE_URL=https://us.cloud.langfuse.com
       - CARDIGAN_VERSION=${CARDIGAN_VERSION:-v4.2}
       - LLM_CONFIG_PATH=/data/config/llm-config.json
+      # local-llm backend (oMLX on the Mac Studio). Re-point at any OpenAI-compatible
+      # server by changing these two — no committed-config edit. Accepts a /v1 base
+      # URL or a full /v1/chat/completions endpoint. LOCAL_LLM_MODEL is REQUIRED
+      # before routing a phase to local-llm (the served model id).
+      - LOCAL_LLM_ENDPOINT=${LOCAL_LLM_ENDPOINT:-http://studio.riechers.co:8000/v1/chat/completions}
+      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-}
     secrets:
       - openrouter_api_key
       - airtable_api_key
       - langfuse_public_key
       - langfuse_secret_key
       - google_drive_credentials
+      - local_llm_api_key
     volumes:
       - db-data:/data/db
       - output-data:/data/output
@@ -50,11 +57,15 @@ services:
       - CARDIGAN_VERSION=${CARDIGAN_VERSION:-v4.2}
       - DIARIZATION_SERVICE_URL=http://diarization:8000
       - LLM_CONFIG_PATH=/data/config/llm-config.json
+      # local-llm backend — see api service for details.
+      - LOCAL_LLM_ENDPOINT=${LOCAL_LLM_ENDPOINT:-http://studio.riechers.co:8000/v1/chat/completions}
+      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-}
     secrets:
       - openrouter_api_key
       - airtable_api_key
       - langfuse_public_key
       - langfuse_secret_key
+      - local_llm_api_key
     volumes:
       - db-data:/data/db
       - output-data:/data/output
@@ -161,6 +172,8 @@ secrets:
     file: ./secrets/hf_token
   google_drive_credentials:
     file: ./secrets/google_drive_credentials
+  local_llm_api_key:
+    file: ./secrets/local_llm_api_key
   # Optional — one "user:hash" line per editor enables the hardened preview
   # vhost. required:false lets `docker compose up` succeed when the file is
   # absent (dormant), keeping the default deployment byte-identical to today.
