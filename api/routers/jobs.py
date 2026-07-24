@@ -49,6 +49,7 @@ CANCELLABLE_STATES = {
     JobStatus.pending,
     JobStatus.in_progress,
     JobStatus.paused,
+    JobStatus.awaiting_review,
 }
 
 
@@ -307,6 +308,7 @@ TRANSCRIPT_REPLACEABLE_STATES = {
     JobStatus.pending,
     JobStatus.completed,
     JobStatus.cancelled,
+    JobStatus.awaiting_review,
 }
 
 TRANSCRIPTS_DIR = Path(os.getenv("TRANSCRIPTS_DIR", "transcripts"))
@@ -379,32 +381,11 @@ async def replace_transcript(
     old_transcript = job.transcript_file
     old_media_id = job.media_id
 
-    # Reset all phases to pending
+    # Reset all phases to pending (archives completed runs into previous_runs)
     from api.models.job import JobPhase
+    from api.services.utils import reset_phases_for_reprocess
 
-    reset_phases = []
-    for phase in job.phases or []:
-        phase_dict = phase.model_dump()
-        # Archive previous run if it had results
-        if phase_dict.get("model"):
-            prev_run = {
-                "model": phase_dict.get("model"),
-                "cost": phase_dict.get("cost", 0),
-                "tokens": phase_dict.get("tokens", 0),
-                "completed_at": phase_dict.get("completed_at"),
-            }
-            previous_runs = phase_dict.get("previous_runs") or []
-            previous_runs.append(prev_run)
-            phase_dict["previous_runs"] = previous_runs
-
-        phase_dict["status"] = "pending"
-        phase_dict["completed_at"] = None
-        phase_dict["error_message"] = None
-        phase_dict["cost"] = 0
-        phase_dict["tokens"] = 0
-        phase_dict["model"] = None
-        phase_dict["metadata"] = None
-        reset_phases.append(phase_dict)
+    reset_phases = reset_phases_for_reprocess(job.phases)
 
     # Build update
     project_name = Path(file.filename or "").stem

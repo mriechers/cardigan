@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 
 class JobStatus(str, Enum):
-    """Valid job status values matching database CHECK constraint."""
+    """Valid job status values (status column is plain Text, no CHECK constraint)."""
 
     pending = "pending"
     in_progress = "in_progress"
@@ -17,6 +17,7 @@ class JobStatus(str, Enum):
     cancelled = "cancelled"
     paused = "paused"
     investigating = "investigating"  # Manager agent diagnosing failure
+    awaiting_review = "awaiting_review"  # Media job transcribed; editor must approve transcript
 
 
 class PhaseStatus(str, Enum):
@@ -83,6 +84,11 @@ class JobCreate(BaseModel):
     transcript_file: str = Field(..., description="Path to transcript file (relative to transcripts/)")
     project_path: Optional[str] = Field(None, description="Output path (auto-generated if not provided)")
     priority: Optional[int] = Field(default=0, description="Job priority (higher = sooner)")
+    job_type: str = Field(default="transcript", description="'transcript' (classic) or 'media' (audio upload)")
+    media_file: Optional[str] = Field(None, description="Extracted-audio filename relative to MEDIA_DIR (media jobs)")
+    intake: Optional[Dict[str, Any]] = Field(
+        None, description="Upload-form intake for media jobs: speakers, context_terms, language"
+    )
 
 
 class PhaseUpdate(BaseModel):
@@ -126,6 +132,8 @@ class JobUpdate(BaseModel):
         None, description="Structured validation result from validator phase"
     )
     auto_escalated_at: Optional[datetime] = None
+    media_file: Optional[str] = None
+    intake: Optional[Dict[str, Any]] = None
 
 
 class JobOutputs(BaseModel):
@@ -179,6 +187,9 @@ class Job(BaseModel):
         description="Structured validation result from validator phase: {phase_results: {phase: {status, flags}}, overall}",
     )
     auto_escalated_at: Optional[datetime] = None
+    job_type: str = Field(default="transcript", description="'transcript' (classic) or 'media' (audio upload)")
+    media_file: Optional[str] = Field(None, description="Extracted-audio filename relative to MEDIA_DIR")
+    intake: Optional[Dict[str, Any]] = Field(None, description="Upload-form intake for media jobs")
 
     class Config:
         from_attributes = True

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState, useRef, Fragment } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useFocusTrap } from '../hooks/useFocusTrap'
 import ProseContainer from '../components/ProseContainer'
 import { useToast } from '../components/ui/Toast'
 import { Skeleton } from '../components/ui/Skeleton'
 import { formatRelativeTime, formatTimestamp, formatDuration } from '../utils/formatTime'
+import { getStatusLabel } from '../utils/statusColors'
 import ScreengrabSlideout from '../components/ScreengrabSlideout'
 import ScreengrabsBox from '../components/ScreengrabsBox'
 
@@ -570,6 +571,9 @@ export default function JobDetail() {
                 • Queued — waiting to start…
               </span>
             )}
+            {job.status === 'awaiting_review' && (
+              <span className="ml-2 text-violet-400">• Transcript needs review</span>
+            )}
           </p>
         </div>
 
@@ -604,7 +608,7 @@ export default function JobDetail() {
               {actionLoading === 'retry' ? 'Retrying…' : 'Retry'}
             </button>
           )}
-          {['pending', 'paused'].includes(job.status) && (
+          {['pending', 'paused', 'awaiting_review'].includes(job.status) && (
             <button
               onClick={() => handleAction('cancel')}
               className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-md text-sm"
@@ -625,6 +629,24 @@ export default function JobDetail() {
           )}
         </div>
       </div>
+
+      {/* Transcript review banner (audio upload mode) */}
+      {job.status === 'awaiting_review' && (
+        <div className="bg-violet-500/10 border border-violet-500/30 rounded-lg p-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-violet-300">Transcription complete — review needed</h2>
+            <p className="text-sm text-surface-300 mt-1">
+              Correct the transcript and name the speakers before the metadata pipeline runs.
+            </p>
+          </div>
+          <Link
+            to={`/jobs/${job.id}/review`}
+            className="px-4 py-2 bg-pbs-500 hover:bg-pbs-400 text-white rounded-md text-sm font-medium transition-colors"
+          >
+            Review transcript
+          </Link>
+        </div>
+      )}
 
       {/* AirTable Metadata Panel */}
       {(job.airtable_url || job.media_id || sstMetadata) && (
@@ -770,7 +792,7 @@ export default function JobDetail() {
 
       {/* Job Metadata */}
       <div className="flex items-center gap-6 text-sm text-gray-400">
-        <span>Status: <span className="text-white">{job.status}</span></span>
+        <span>Status: <span className="text-white">{getStatusLabel(job.status)}</span></span>
         <span>Priority: <span className="text-white">{job.priority}</span></span>
         <span>Cost: <span className="text-green-400 font-mono">{job.actual_cost ? `$${job.actual_cost.toFixed(4)}` : '-'}</span></span>
         <span>Tokens: <span className="text-white">{job.phases?.reduce((sum, p) => sum + (p.tokens || 0), 0).toLocaleString() ?? '-'}</span></span>

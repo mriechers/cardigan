@@ -4,6 +4,9 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
+# ffmpeg: audio probing/extraction for media jobs (audio upload mode)
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+
 # Install dependencies first for better layer caching
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
@@ -27,7 +30,7 @@ ENV SETUPTOOLS_SCM_PRETEND_VERSION_FOR_EDITORIAL_ASSISTANT=${SETUPTOOLS_SCM_PRET
 RUN pip install -e . --no-deps
 
 # Create writable directories before switching to non-root user
-RUN mkdir -p logs /data/db /data/output /data/transcripts
+RUN mkdir -p logs /data/db /data/output /data/transcripts /data/media
 
 # Run as non-root user for security
 RUN useradd --create-home appuser && chown -R appuser:appuser logs config /data

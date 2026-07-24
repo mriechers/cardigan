@@ -82,6 +82,50 @@ def sanitize_duplicate_filename(filename: str) -> Tuple[str, bool]:
     return filename, was_duplicate
 
 
+def reset_phases_for_reprocess(phases, skip: Tuple[str, ...] = ()) -> List[dict]:
+    """Reset phases to pending for reprocessing, archiving completed runs.
+
+    Shared by transcript replacement and transcript-review approval. Phases
+    named in ``skip`` (e.g. a completed transcription stage) are preserved
+    as-is. A phase that recorded a model gets its run archived into
+    ``previous_runs`` before the reset.
+
+    Args:
+        phases: List of JobPhase models (or dicts) from a Job.
+        skip: Phase names to leave untouched.
+
+    Returns:
+        List of phase dicts ready for JobPhase(**d).
+    """
+    reset = []
+    for phase in phases or []:
+        phase_dict = phase.model_dump() if hasattr(phase, "model_dump") else dict(phase)
+        if phase_dict.get("name") in skip:
+            reset.append(phase_dict)
+            continue
+
+        if phase_dict.get("model"):
+            prev_run = {
+                "model": phase_dict.get("model"),
+                "cost": phase_dict.get("cost", 0),
+                "tokens": phase_dict.get("tokens", 0),
+                "completed_at": phase_dict.get("completed_at"),
+            }
+            previous_runs = phase_dict.get("previous_runs") or []
+            previous_runs.append(prev_run)
+            phase_dict["previous_runs"] = previous_runs
+
+        phase_dict["status"] = "pending"
+        phase_dict["completed_at"] = None
+        phase_dict["error_message"] = None
+        phase_dict["cost"] = 0
+        phase_dict["tokens"] = 0
+        phase_dict["model"] = None
+        phase_dict["metadata"] = None
+        reset.append(phase_dict)
+    return reset
+
+
 def utc_now() -> datetime:
     """Return current UTC time as timezone-aware datetime.
 

@@ -11,6 +11,7 @@ services:
       - OUTPUT_DIR=/data/output
       - CORS_ORIGINS=http://localhost:3100
       - TRANSCRIPTS_DIR=/data/transcripts
+      - MEDIA_DIR=/data/media
       - LANGFUSE_BASE_URL=https://us.cloud.langfuse.com
       - CARDIGAN_VERSION=${CARDIGAN_VERSION:-v4.2}
     secrets:
@@ -23,7 +24,11 @@ services:
       - db-data:/data/db
       - output-data:/data/output
       - ./transcripts:/data/transcripts
+      - ./media:/data/media
       - ./config:/app/config
+      # Glossary writes (editor corrections, whisper prompt terms) must
+      # survive rebuilds and stay consistent across api + worker.
+      - ./knowledge:/app/knowledge
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/system/health')"]
       interval: 30s
@@ -40,6 +45,7 @@ services:
       - DATABASE_PATH=/data/db/dashboard.db
       - OUTPUT_DIR=/data/output
       - TRANSCRIPTS_DIR=/data/transcripts
+      - MEDIA_DIR=/data/media
       - LANGFUSE_BASE_URL=https://us.cloud.langfuse.com
       - CARDIGAN_VERSION=${CARDIGAN_VERSION:-v4.2}
       - DIARIZATION_SERVICE_URL=http://diarization:8000
@@ -55,7 +61,9 @@ services:
       - db-data:/data/db
       - output-data:/data/output
       - ./transcripts:/data/transcripts
+      - ./media:/data/media
       - ./config:/app/config
+      - ./knowledge:/app/knowledge
     depends_on:
       api:
         condition: service_healthy

@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from api.models.events import EventCreate, EventData, EventType
 from api.models.job import JobStatus
+from api.services import glossary as glossary_service
 from api.services.airtable import get_airtable_client
 from api.services.database import (
     claim_next_job,
@@ -60,8 +61,9 @@ logger = get_logger(__name__)
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "OUTPUT"))
 TRANSCRIPTS_DIR = Path(os.getenv("TRANSCRIPTS_DIR", "transcripts"))
 TRANSCRIPTS_ARCHIVE_DIR = TRANSCRIPTS_DIR / "archive"
+MEDIA_DIR = Path(os.getenv("MEDIA_DIR", "media"))
 AGENTS_DIR = Path("prompts")
-KNOWLEDGE_DIR = Path("knowledge")
+KNOWLEDGE_DIR = Path(os.getenv("KNOWLEDGE_DIR", "knowledge"))
 
 
 def _extract_speakers_from_sst(sst_context: Dict[str, Any]) -> Dict[str, Any]:
@@ -699,43 +701,18 @@ Extract any name or spelling corrections that should be added to the glossary. S
         if not new_entries:
             return 0
 
-        # Append to the Editor Corrections section (or end of file)
-        lines = current_glossary.split("\n")
-        insert_idx = None
-        for i, line in enumerate(lines):
-            if line.strip() == "## Editor Corrections":
-                # Find end of table in this section
-                for j in range(i + 1, len(lines)):
-                    if lines[j].startswith("## "):
-                        insert_idx = j
-                        break
-                    if lines[j].startswith("|") and not lines[j].startswith("| Correct"):
-                        insert_idx = j + 1
-                if insert_idx is None:
-                    insert_idx = len(lines)
-                break
-            if line.strip() == "## Name Disambiguation":
-                insert_idx = i
-                break
+        added = glossary_service.add_corrections(new_entries, glossary_path)
 
-        if insert_idx is None:
-            insert_idx = len(lines)
+        if added:
+            logger.info(
+                "Appended glossary entries from editorial feedback",
+                extra={
+                    "job_id": job_id,
+                    "entries": [f"{w} -> {c}" for c, w, _ in new_entries],
+                },
+            )
 
-        new_lines = [f"| {correct} | {wrong} | {context_note} |" for correct, wrong, context_note in new_entries]
-        for offset, new_line in enumerate(new_lines):
-            lines.insert(insert_idx + offset, new_line)
-
-        glossary_path.write_text("\n".join(lines))
-
-        logger.info(
-            "Appended glossary entries from editorial feedback",
-            extra={
-                "job_id": job_id,
-                "entries": [f"{w} -> {c}" for c, w, _ in new_entries],
-            },
-        )
-
-        return len(new_entries)
+        return added
 
     async def process_job(self, job: Dict[str, Any]):
         """Process a single job through all phases."""
@@ -786,6 +763,25 @@ Extract any name or spelling corrections that should be added to the glossary. S
                     actual_cost=job.get("actual_cost", 0),
                 )
                 return
+
+            # Media jobs (audio upload mode): run the transcription pre-stage,
+            # then stop — the job waits in awaiting_review until the editor
+            # approves the corrected transcript, which resets it to pending
+            # with transcript_file set and the LLM phases still pending.
+            if job.get("job_type") == "media":
+                transcription_phase = next((p for p in phases if p.get("name") == "transcription"), None)
+                if not transcription_phase or transcription_phase.get("status") != "completed":
+                    await self._run_transcription_stage(job, project_path, phases)
+                    return
+                if not job.get("transcript_file"):
+                    # Reclaimed (e.g. manual requeue) before the review was
+                    # approved — park it back in the review gate, don't fail.
+                    logger.info(
+                        "Media job has no approved transcript yet; returning to review",
+                        extra={"job_id": job_id},
+                    )
+                    await update_job_status(job_id, JobStatus.awaiting_review)
+                    return
 
             # Load transcript
             transcript_content = self._load_transcript(job)
@@ -1566,6 +1562,240 @@ Extract any name or spelling corrections that should be added to the glossary. S
                 break
             except Exception as e:
                 logger.warning("Heartbeat error", extra={"job_id": job_id, "error": str(e)})
+
+    async def _run_transcription_stage(
+        self, job: Dict[str, Any], project_path: Path, phases: List[Dict[str, Any]]
+    ) -> None:
+        """Run the WhisperX transcription pre-stage for a media job.
+
+        Terminal for this claim in every branch:
+        - service unavailable/busy -> defer_job (requeue with backoff)
+        - transcription error      -> phase failed, job failed
+        - success                  -> transcription_raw.json +
+          transcription_edited.json written to the project dir, phase
+          completed, job -> awaiting_review for the editor.
+        """
+        from api.models.job import JobUpdate
+        from api.services.diarization_client import DiarizationClient
+        from api.services.whisper_prompt import build_initial_prompt
+
+        job_id = job["id"]
+        intake = job.get("intake") or {}
+        if isinstance(intake, str):
+            try:
+                intake = json.loads(intake)
+            except json.JSONDecodeError:
+                intake = {}
+
+        media_file = job.get("media_file") or ""
+        # media_file is client-writable via PATCH /jobs/{id}; contain the
+        # resolved path to MEDIA_DIR so a crafted value can't make the worker
+        # ship an arbitrary readable file to the transcription service.
+        media_path = (MEDIA_DIR / media_file).resolve() if media_file else None
+        if media_path is not None and not media_path.is_relative_to(MEDIA_DIR.resolve()):
+            media_path = None
+        if media_path is None or not media_path.exists():
+            message = f"[transcription] Media file not found: {media_file or '(none)'}"
+            self._mark_transcription_phase(phases, "failed", error_message=message)
+            await update_job_phase(job_id, phases)
+            await update_job_status(job_id, JobStatus.failed, error_message=message)
+            return
+
+        client = DiarizationClient()
+        try:
+            if not await client.is_available():
+                backoff_minutes, ceiling_hours = self._deferral_policy()
+                await defer_job(
+                    job_id,
+                    backoff_minutes=backoff_minutes,
+                    ceiling_hours=ceiling_hours,
+                    detail="diarization service unavailable",
+                )
+                logger.info(
+                    "Media job requeued — diarization service unavailable",
+                    extra={"job_id": job_id, "media_file": media_file},
+                )
+                return
+
+            speakers = [s for s in (intake.get("speakers") or []) if s]
+            context_terms = [t for t in (intake.get("context_terms") or []) if t]
+            try:
+                glossary_terms = glossary_service.get_whisper_terms()
+            except Exception as e:
+                logger.warning(
+                    "Failed to load glossary terms for prompt (continuing)",
+                    extra={"job_id": job_id, "error": str(e)},
+                )
+                glossary_terms = []
+            initial_prompt = build_initial_prompt(speakers, context_terms, glossary_terms)
+
+            await update_job_status(job_id, JobStatus.in_progress, current_phase="transcription")
+            self._mark_transcription_phase(phases, "in_progress")
+            await update_job_phase(job_id, phases)
+
+            logger.info(
+                "Running transcription stage",
+                extra={
+                    "job_id": job_id,
+                    "media_file": media_file,
+                    "speakers": len(speakers),
+                    "prompt_chars": len(initial_prompt),
+                },
+            )
+            outcome = await client.transcribe(
+                str(media_path),
+                initial_prompt=initial_prompt,
+                language=intake.get("language") or "",
+                diarize=True,
+                min_speakers=len(speakers) or None,
+                max_speakers=(len(speakers) + 1) if speakers else None,
+            )
+        finally:
+            await client.close()
+
+        if outcome.status == "busy":
+            backoff_minutes, ceiling_hours = self._deferral_policy()
+            self._mark_transcription_phase(phases, "pending")
+            await update_job_phase(job_id, phases)
+            await defer_job(
+                job_id,
+                backoff_minutes=backoff_minutes,
+                ceiling_hours=ceiling_hours,
+                retry_after_s=outcome.retry_after_s,
+                detail=outcome.detail or "transcription service busy",
+            )
+            logger.info(
+                "Media job requeued — transcription service busy",
+                extra={"job_id": job_id, "retry_after_s": outcome.retry_after_s},
+            )
+            return
+
+        if outcome.status != "ok" or not outcome.result:
+            message = f"[transcription] {outcome.detail or 'Transcription failed'}"
+            self._mark_transcription_phase(phases, "failed", error_message=message)
+            await update_job_phase(job_id, phases)
+            await update_job_status(job_id, JobStatus.failed, error_message=message)
+            logger.error("Transcription stage failed", extra={"job_id": job_id, "detail": outcome.detail})
+            return
+
+        result = outcome.result
+        raw_path = project_path / "transcription_raw.json"
+        raw_path.write_text(json.dumps(result, indent=2))
+
+        # Seed the editable working copy. Undiarized results get a single
+        # speaker bucket; the speaker map is pre-filled from intake order as
+        # a suggestion for the review UI.
+        diarized = bool(result.get("diarized"))
+        segments = []
+        labels_seen = []
+        for seg in result.get("segments", []):
+            label = seg.get("speaker") or "SPEAKER_00"
+            if label not in labels_seen:
+                labels_seen.append(label)
+            segments.append(
+                {
+                    "id": seg.get("id", len(segments)),
+                    "start": seg.get("start", 0.0),
+                    "end": seg.get("end", 0.0),
+                    "speaker": label,
+                    "text": (seg.get("text") or "").strip(),
+                }
+            )
+        speaker_map = {label: (speakers[i] if i < len(speakers) else "") for i, label in enumerate(sorted(labels_seen))}
+        edited = {
+            "segments": segments,
+            "speaker_map": speaker_map,
+            "diarized": diarized,
+            "language": result.get("language"),
+            "duration_seconds": result.get("duration_seconds"),
+        }
+        (project_path / "transcription_edited.json").write_text(json.dumps(edited, indent=2))
+
+        word_count = sum(len(s["text"].split()) for s in segments)
+        duration_seconds = result.get("duration_seconds") or 0.0
+        self._mark_transcription_phase(
+            phases,
+            "completed",
+            metadata={
+                "duration_seconds": duration_seconds,
+                "language": result.get("language"),
+                "diarized": diarized,
+                "speakers_detected": len(labels_seen),
+                "segments": len(segments),
+                "initial_prompt": initial_prompt,
+            },
+            output_path=str(raw_path),
+        )
+        await update_job_phase(job_id, phases)
+        try:
+            await update_job(
+                job_id,
+                JobUpdate(
+                    word_count=word_count,
+                    duration_minutes=round(duration_seconds / 60, 1) if duration_seconds else None,
+                ),
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to persist transcription metrics (non-fatal)",
+                extra={"job_id": job_id, "error": str(e)},
+            )
+        await update_job_status(job_id, JobStatus.awaiting_review)
+        await log_event(
+            EventCreate(
+                job_id=job_id,
+                event_type=EventType.phase_completed,
+                data=EventData(
+                    phase="transcription",
+                    extra={"segments": len(segments), "speakers": len(labels_seen), "diarized": diarized},
+                ),
+            )
+        )
+        logger.info(
+            "Transcription complete — awaiting editor review",
+            extra={"job_id": job_id, "segments": len(segments), "speakers": len(labels_seen)},
+        )
+
+    @staticmethod
+    def _mark_transcription_phase(
+        phases: List[Dict[str, Any]],
+        status: str,
+        error_message: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        output_path: Optional[str] = None,
+    ) -> None:
+        """Update the transcription entry in a phases list in place."""
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for phase in phases:
+            if phase.get("name") == "transcription":
+                phase["status"] = status
+                if status == "in_progress":
+                    phase["started_at"] = now_iso
+                if status == "completed":
+                    phase["completed_at"] = now_iso
+                    phase["cost"] = 0
+                if error_message is not None:
+                    phase["error_message"] = error_message
+                if metadata is not None:
+                    phase["metadata"] = metadata
+                if output_path is not None:
+                    phase["output_path"] = output_path
+                return
+        # Defensive: phases list lacked a transcription entry (hand-edited job)
+        phases.insert(
+            0,
+            {
+                "name": "transcription",
+                "status": status,
+                "started_at": now_iso if status == "in_progress" else None,
+                "completed_at": now_iso if status == "completed" else None,
+                "cost": 0,
+                "tokens": 0,
+                "error_message": error_message,
+                "metadata": metadata,
+                "output_path": output_path,
+            },
+        )
 
     def _all_phases_complete(self, phases: List[Dict[str, Any]], project_path: Path) -> bool:
         """Check if all required phases are complete and output files exist.

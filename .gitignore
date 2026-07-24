@@ -17,6 +17,7 @@ secrets/*
 OUTPUT/
 transcripts/
 transcripts/archive/
+media/
 
 # Judge archive — raw transcripts/outputs MUST NOT be committed.
 # This is a public repo; raw data lives in the private second-brain repo

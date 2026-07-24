@@ -10,6 +10,48 @@ Authoritative spelling and naming reference for all transcript processing agents
 
 ---
 
+## Whisper Prompt Terms
+
+Terms merged into the WhisperX `initial_prompt` for audio transcription jobs.
+This is Cardigan's project layer of the workspace glossary (base:
+`automations/transcripts/glossary.md` in the pbswi workspace); the project
+layer wins on conflict. Only lines beginning with `- ` are injected into
+prompts, lowest priority after speaker names and per-job context terms —
+keep this header prose bullet-free.
+
+- PBS Wisconsin
+- Frederica Freyberg
+- Shawn Johnson
+- Zac Schultz
+- Rich Kremer
+- Anya van Wagtendonk
+- Janet Protasiewicz
+- Brian Hagedorn
+- Michael Gableman
+- Jim Troupis
+- Brad Schimel
+- Jill Karofsky
+- Rebecca Dallet
+- Josh Kaul
+- Eric Toney
+- Sean Duffy
+- Manitowoc
+- Waukesha
+- Sheboygan
+- Oconomowoc
+- Fond du Lac
+- Wauwatosa
+- Menominee
+- Ashwaubenon
+- Wausau
+- Eau Claire
+- La Crosse
+- Kenosha
+- Oshkosh
+- Wisconsin Elections Commission
+- Act 10
+- Tavern League
+
 ## Place Names
 
 | Correct | Common Misspellings |
