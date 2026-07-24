@@ -123,8 +123,16 @@ class RawProbes:
 # ---------------------------------------------------------------------------
 
 
-def _derive_web_url(api_url: str) -> str:
-    """Default web vhost URL: swap the API port (:8100) for the web port (:3100)."""
+def _derive_web_url(api_url: str) -> Optional[str]:
+    """Default web vhost URL: swap the API port (:8100) for the web port (:3100).
+
+    Returns None when there's no ``:8100`` to swap (e.g. a proxied / Tailscale-Funnel
+    host with no explicit port). We can't guess where the SPA lives in that case, so the
+    caller skips the Web probe rather than probing the API URL and reporting a false
+    "Web up" off the API's own response.
+    """
+    if ":8100" not in api_url:
+        return None
     return api_url.replace(":8100", ":3100")
 
 
@@ -144,23 +152,47 @@ def _default_config_path() -> str:
     return os.path.join(_project_root, "config", "instances.json")
 
 
-def load_instances(config_path: Optional[str] = None, urls: Optional[list[str]] = None) -> list[dict]:
-    """Resolve the instance list: --url overrides config, config overrides defaults."""
+def load_instances(
+    config_path: Optional[str] = None,
+    urls: Optional[list[str]] = None,
+    api_key_env: Optional[str] = None,
+) -> list[dict]:
+    """Resolve the instance list: --url overrides config, config overrides defaults.
+
+    Ad-hoc ``--url`` targets are marked ``adhoc`` so they never inherit the global
+    ``CARDIGAN_API_KEY`` (see _resolve_key) — pass ``api_key_env`` (--api-key-env) to
+    auth them explicitly. Malformed config rows (no ``url``) are skipped with a warning
+    rather than aborting the whole run.
+    """
     if urls:
-        return [_normalize({"name": _host_label(u), "url": u}) for u in urls]
+        adhoc = {"adhoc": True, **({"api_key_env": api_key_env} if api_key_env else {})}
+        return [_normalize({"name": _host_label(u), "url": u, **adhoc}) for u in urls]
     path = config_path or _default_config_path()
     if os.path.exists(path):
         with open(path) as f:
             data = json.load(f)
-        return [_normalize(i) for i in data]
+        valid = []
+        for entry in data:
+            if not isinstance(entry, dict) or not entry.get("url"):
+                print(f"monitor: skipping malformed instance entry (no url): {entry!r}", file=sys.stderr)
+                continue
+            entry.setdefault("name", _host_label(entry["url"]))
+            valid.append(_normalize(entry))
+        return valid
     return [_normalize(i) for i in DEFAULT_INSTANCES]
 
 
 def _resolve_key(instance: dict) -> Optional[str]:
-    """Per-instance api_key_env (if set and populated), else global CARDIGAN_API_KEY."""
+    """Per-instance api_key_env (if set and populated), else global CARDIGAN_API_KEY.
+
+    Ad-hoc ``--url`` instances never fall back to the global key — forwarding the
+    production shared key to an operator-typed host would leak it.
+    """
     env_name = instance.get("api_key_env")
     if env_name and os.environ.get(env_name):
         return os.environ[env_name]
+    if instance.get("adhoc"):
+        return None
     return os.environ.get("CARDIGAN_API_KEY")
 
 
@@ -183,7 +215,10 @@ async def _get(client: httpx.AsyncClient, base_url: str, path: str, headers: dic
         return None, resp.status_code, "non-JSON response"
 
 
-async def _reachable(client: httpx.AsyncClient, url: str) -> bool:
+async def _reachable(client: httpx.AsyncClient, url: Optional[str]) -> Optional[bool]:
+    """True/False reachability of ``url``; None when there is no URL to probe."""
+    if not url:
+        return None
     try:
         resp = await client.get(url)
     except httpx.HTTPError:
@@ -215,8 +250,25 @@ async def probe_instance(instance: dict, timeout: float) -> InstanceHealth:
     return classify(instance, raw)
 
 
+def _error_instance(instance: dict, exc: BaseException) -> InstanceHealth:
+    """A DOWN placeholder for an instance whose probe raised unexpectedly, so one bad
+    entry degrades to a single red row instead of aborting the whole fan-out."""
+    url = instance.get("url", "?")
+    name = instance.get("name") or _host_label(url)
+    return InstanceHealth(
+        name=name,
+        url=url,
+        verdict=Health.DOWN,
+        services=[ServiceHealth("API", Health.DOWN, f"probe error: {type(exc).__name__}")],
+        notes=[f"probe raised {type(exc).__name__}: {exc}"],
+    )
+
+
 async def probe_all(instances: list[dict], timeout: float) -> list[InstanceHealth]:
-    return list(await asyncio.gather(*(probe_instance(i, timeout) for i in instances)))
+    results = await asyncio.gather(*(probe_instance(i, timeout) for i in instances), return_exceptions=True)
+    return [
+        _error_instance(inst, res) if isinstance(res, BaseException) else res for inst, res in zip(instances, results)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -397,10 +449,14 @@ def _rich_available() -> bool:
 
 
 def _fleet_verdict(fleet: list[InstanceHealth]) -> str:
+    if not fleet:
+        return "UNKNOWN"
     if all(i.verdict == Health.UP for i in fleet):
         return "HEALTHY"
-    if any(i.verdict == Health.DOWN for i in fleet):
-        return "DEGRADED"
+    # Only call the whole fleet DOWN when nothing is reachable; a mix (e.g. prod up,
+    # local dev off) is DEGRADED rather than a false fleet-wide alarm.
+    if all(i.verdict == Health.DOWN for i in fleet):
+        return "DOWN"
     return "DEGRADED"
 
 
@@ -545,6 +601,11 @@ def main() -> None:
         "--url", action="append", metavar="URL", help="Ad-hoc instance URL (repeatable); overrides config"
     )
     parser.add_argument("--config", metavar="PATH", help="Path to an instances.json (default: config/instances.json)")
+    parser.add_argument(
+        "--api-key-env",
+        metavar="ENV_VAR",
+        help="Env var holding an API key for --url targets (ad-hoc targets don't inherit CARDIGAN_API_KEY)",
+    )
     parser.add_argument("--json", action="store_true", help="Machine-readable JSON output")
     parser.add_argument(
         "--watch",
@@ -558,7 +619,7 @@ def main() -> None:
     parser.add_argument("--plain", action="store_true", help="Plain-text output (no rich dependency)")
     args = parser.parse_args()
 
-    instances = load_instances(args.config, args.url)
+    instances = load_instances(args.config, args.url, args.api_key_env)
 
     if args.watch:
         if not _rich_available():

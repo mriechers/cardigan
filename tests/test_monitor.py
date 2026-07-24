@@ -4,8 +4,10 @@ These exercise ``classify`` with synthetic endpoint payloads — no network, and
 dependency on ``rich`` (which the monitor imports lazily inside its renderers).
 """
 
+import json
 from datetime import datetime, timedelta, timezone
 
+import scripts.monitor as monitor
 from scripts.monitor import Health, InstanceHealth, RawProbes, _fmt_ago, classify
 
 # A healthy-looking instance definition.
@@ -270,3 +272,120 @@ def test_fmt_ago_buckets():
     assert _fmt_ago((now - timedelta(seconds=5)).isoformat()).endswith("s ago")
     assert _fmt_ago((now - timedelta(hours=2)).isoformat()).endswith("h ago")
     assert _fmt_ago((now - timedelta(days=3)).isoformat()).endswith("d ago")
+
+
+# --- Fleet verdict (banner) -------------------------------------------------
+
+
+def _inst(verdict: Health) -> InstanceHealth:
+    return InstanceHealth(name="x", url="http://x:8100", verdict=verdict, services=[])
+
+
+def test_fleet_verdict_all_up_is_healthy():
+    assert monitor._fleet_verdict([_inst(Health.UP), _inst(Health.UP)]) == "HEALTHY"
+
+
+def test_fleet_verdict_all_down_is_down():
+    # Regression: this branch used to also return "DEGRADED" (a fully-down fleet
+    # never read DOWN).
+    assert monitor._fleet_verdict([_inst(Health.DOWN), _inst(Health.DOWN)]) == "DOWN"
+
+
+def test_fleet_verdict_mixed_is_degraded():
+    # Prod up + local dev off is DEGRADED, not a false fleet-wide DOWN alarm.
+    assert monitor._fleet_verdict([_inst(Health.UP), _inst(Health.DOWN)]) == "DEGRADED"
+
+
+def test_fleet_verdict_empty_is_unknown():
+    assert monitor._fleet_verdict([]) == "UNKNOWN"
+
+
+# --- Web URL derivation -----------------------------------------------------
+
+
+def test_derive_web_url_swaps_api_port():
+    assert monitor._derive_web_url("http://cardigan01:8100") == "http://cardigan01:3100"
+
+
+def test_derive_web_url_none_for_portless_host():
+    # A proxied / Funnel host with no :8100 can't be turned into a web URL — the caller
+    # must skip the Web probe rather than hit the API URL and report a false "Web up".
+    assert monitor._derive_web_url("https://cardigan01.tail1234.ts.net") is None
+
+
+def test_web_unknown_when_not_checked_does_not_downgrade():
+    raw = RawProbes(
+        root=ROOT_OK,
+        health=HEALTH_OK,
+        status=_status(worker={"running": True, "heartbeat_age_seconds": 5}),
+        queue=QUEUE_OK,
+        mmingest=UNREACHABLE,
+        web_reachable=None,  # web probe skipped (no derivable URL)
+    )
+    result = classify(INSTANCE, raw)
+    assert _service(result, "Web") == Health.UNKNOWN
+    assert result.verdict == Health.UP  # not-checked web can't be proven down
+
+
+# --- API key resolution -----------------------------------------------------
+
+
+def test_adhoc_url_does_not_inherit_global_key(monkeypatch):
+    monkeypatch.setenv("CARDIGAN_API_KEY", "prod-secret")
+    (inst,) = monitor.load_instances(urls=["http://some-other-host:8100"])
+    assert monitor._resolve_key(inst) is None
+
+
+def test_config_instance_inherits_global_key(monkeypatch):
+    monkeypatch.setenv("CARDIGAN_API_KEY", "prod-secret")
+    inst = monitor._normalize({"name": "c", "url": "http://cardigan01:8100"})
+    assert monitor._resolve_key(inst) == "prod-secret"
+
+
+def test_adhoc_api_key_env_is_used(monkeypatch):
+    monkeypatch.delenv("CARDIGAN_API_KEY", raising=False)
+    monkeypatch.setenv("MY_KEY", "abc123")
+    (inst,) = monitor.load_instances(urls=["http://host:8100"], api_key_env="MY_KEY")
+    assert monitor._resolve_key(inst) == "abc123"
+
+
+# --- Malformed config + probe isolation -------------------------------------
+
+
+def test_load_instances_skips_malformed_config_rows(tmp_path):
+    cfg = tmp_path / "instances.json"
+    cfg.write_text(
+        json.dumps(
+            [
+                {"name": "ok", "url": "http://ok:8100"},
+                {"name": "no-url"},  # missing url — skipped
+                "not-a-dict",  # not even a dict — skipped
+            ]
+        )
+    )
+    result = monitor.load_instances(str(cfg))
+    assert [i["name"] for i in result] == ["ok"]
+
+
+def test_error_instance_is_down_with_note():
+    inst = monitor._error_instance({"name": "bad", "url": "http://bad:8100"}, KeyError("name"))
+    assert inst.verdict == Health.DOWN
+    assert inst.services[0].state == Health.DOWN
+    assert "KeyError" in inst.notes[0]
+
+
+async def test_probe_all_isolates_a_failing_instance(monkeypatch):
+    good = InstanceHealth(name="good", url="http://good:8100", verdict=Health.UP, services=[])
+
+    async def fake_probe(instance, timeout):
+        if instance["name"] == "bad":
+            raise KeyError("boom")
+        return good
+
+    monkeypatch.setattr(monitor, "probe_instance", fake_probe)
+    fleet = await monitor.probe_all(
+        [{"name": "good", "url": "http://good:8100"}, {"name": "bad", "url": "http://bad:8100"}], 1.0
+    )
+    assert fleet[0].verdict == Health.UP  # healthy instance unaffected
+    assert fleet[1].verdict == Health.DOWN  # failing instance degraded, not fatal
+    assert "boom" in fleet[1].notes[0]
