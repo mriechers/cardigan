@@ -1,5 +1,9 @@
 # Design: Defer-and-requeue when a local backend is busy
 
+> **Note (2026-07-02):** written for "dougie"; the defer-and-requeue mechanism is
+> generic and now serves the `local-llm` (oMLX) backend unchanged. See
+> `planning/2026-07-02-local-llm-omlx-integration.md`.
+
 **Date:** 2026-06-12
 **Status:** Approved (brainstormed with Mark)
 **Branch/PR:** new branch, stacked on `feat/local-dougie-backend-seam` (PR #210)

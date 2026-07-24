@@ -1,5 +1,9 @@
 # Handoff: Local LLM as a Cardigan backend tier
 
+> **Superseded (2026-07-02):** the "dougie" server was retired in favor of **oMLX**;
+> the backend is now the network-neutral `local-llm`. See
+> `planning/2026-07-02-local-llm-omlx-integration.md`. Kept for design rationale.
+
 **Date:** 2026-06-05
 **Origin:** the-lodge session (local MLX server setup + `/outsource` skill build)
 **Status:** Analysis + integration sketch — no Cardigan code touched

@@ -38,6 +38,18 @@ the human-readable companion.
   main).
 - nginx `/api/` body limit raised to 3 GB for media uploads
   (LAN/Tailscale only; the Cloudflare tunnel caps bodies ~100 MB).
+### Changed
+- **Local LLM backend is now `local-llm` (oMLX), portable across networks.**
+  Retired the "dougie" server in favor of oMLX (`studio.riechers.co:8000`). The
+  backend re-points at any OpenAI-compatible endpoint via `LOCAL_LLM_ENDPOINT` /
+  `LOCAL_LLM_MODEL` / `LOCAL_LLM_API_KEY` (no committed-config edit) — `_resolve_endpoint`
+  now accepts a `/v1` base URL and a new `model_env` override supplies the served model.
+  Wired into `docker-compose.prod.yml` (api + worker) with a `local_llm_api_key` secret.
+  Default-off for routing until the shadow-eval gate passes; see
+  `planning/2026-07-02-local-llm-omlx-integration.md`.
+
+### Removed
+- Dead `local-ollama` / `remote-ollama` backends (no `ollama` dispatch existed).
 
 ## [4.2.0] — 2026-06-19
 

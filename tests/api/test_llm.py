@@ -26,6 +26,38 @@ from api.services.llm import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_local_llm_env(monkeypatch):
+    """Clear ambient LOCAL_LLM_* env so the local-llm backend tests are
+    deterministic regardless of the developer's shell (the /local-llm skill
+    exports these). Individual tests set them explicitly as needed.
+    """
+    for var in ("LOCAL_LLM_ENDPOINT", "LOCAL_LLM_MODEL", "LOCAL_LLM_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+
+
+def test_resolve_model_and_endpoint_fall_back_on_empty_env(monkeypatch):
+    """A set-but-empty override (compose's ``${LOCAL_LLM_MODEL:-}`` /
+    ``${LOCAL_LLM_ENDPOINT:-}``) must fall back to the config default, not "".
+    """
+    from api.services.llm import _resolve_endpoint, _resolve_model
+
+    cfg = {
+        "model": "cfg-model",
+        "model_env": "LOCAL_LLM_MODEL",
+        "endpoint": "http://cfg-host:8000/v1",
+        "endpoint_env": "LOCAL_LLM_ENDPOINT",
+    }
+    monkeypatch.setenv("LOCAL_LLM_MODEL", "")
+    monkeypatch.setenv("LOCAL_LLM_ENDPOINT", "")
+    assert _resolve_model(cfg) == "cfg-model"
+    assert _resolve_endpoint(cfg) == "http://cfg-host:8000/v1/chat/completions"
+
+    # A real override still wins.
+    monkeypatch.setenv("LOCAL_LLM_MODEL", "env-model")
+    assert _resolve_model(cfg) == "env-model"
+
+
 @pytest.fixture
 def mock_config(tmp_path):
     """Create a mock config file for testing."""
@@ -49,18 +81,19 @@ def mock_config(tmp_path):
                 "endpoint": "https://openrouter.ai/api/v1/chat/completions",
                 "api_key_env": "OPENROUTER_API_KEY",
             },
-            "local-dougie": {
+            "local-llm": {
                 "type": "openai",
-                "endpoint": "http://localhost:27180/v1/chat/completions",
-                "endpoint_env": "DOUGIE_ENDPOINT",
+                "endpoint": "http://studio.riechers.co:8000/v1/chat/completions",
+                "endpoint_env": "LOCAL_LLM_ENDPOINT",
                 "model": "qwen-local",
+                "model_env": "LOCAL_LLM_MODEL",
+                "api_key_env": "LOCAL_LLM_API_KEY",
                 "strip_reasoning": True,
-                "force_model": True,
                 "defer_when_unavailable": True,
                 "max_tokens": 8192,
                 "cost_per_project": 0.0,
                 "timeout": 300,
-                "enabled": False,
+                "enabled": True,
             },
             "openai-plain": {
                 "type": "openai",
@@ -77,7 +110,7 @@ def mock_config(tmp_path):
                 "validator": "openrouter-cheapskate",
             },
         },
-        "phase_models": {"analyst": "anthropic/claude-haiku-4.5"},
+        "phase_models": {"analyst": "anthropic/claude-haiku-4.5", "seo": "Qwen2.5-7B-Instruct-4bit"},
         "safety": {"run_cost_cap": 1.0, "max_cost_per_1k_tokens": 0.05, "model_allowlist": []},
     }
 
@@ -349,6 +382,14 @@ class TestSafetyGuards:
         # Versioned model should match
         llm_client.check_model_allowed("gpt-4o:extended")
 
+    def test_check_model_allowed_empty_model_fails_closed(self, llm_client):
+        """A backend resolving to no model can't be validated against a configured
+        allowlist — raise ModelNotAllowedError, not AttributeError on None.startswith."""
+        llm_client.model_allowlist = ["gpt-4o"]
+        for bad in (None, ""):
+            with pytest.raises(ModelNotAllowedError):
+                llm_client.check_model_allowed(bad)
+
     def test_check_token_cost_within_limit(self, llm_client):
         """Test token cost check passes for cheap models."""
         # Should not raise for cheap model
@@ -537,9 +578,10 @@ class TestStripReasoning:
 
 
 class TestLocalBackendIntegration:
-    """The local-dougie backend seam: response cleaning + forced model id.
+    """The local-llm backend seam: response cleaning, forced model id, env
+    overrides, and Bearer auth.
 
-    Both behaviors are gated on opt-in backend flags so existing backends are
+    Behaviors are gated on opt-in backend flags so existing backends are
     untouched.
     """
 
@@ -561,7 +603,7 @@ class TestLocalBackendIntegration:
 
         with patch.object(httpx.AsyncClient, "post", return_value=mock_response):
             with patch("api.services.llm.log_event"):
-                response = await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-dougie")
+                response = await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-llm")
 
         assert response.content == '{"ok": true}'
 
@@ -579,9 +621,10 @@ class TestLocalBackendIntegration:
         assert response.content == dirty
 
     @pytest.mark.asyncio
-    async def test_force_model_overrides_phase_models(self, llm_client):
-        # phase_models.analyst is a cloud model id the MLX server can't serve;
-        # force_model makes the backend's own model id win.
+    async def test_local_backend_routes_assigned_model(self, llm_client):
+        # Route on the (backend, model) pair: a per-phase model assigned to a
+        # local backend is what gets sent. The backend supplies endpoint+key;
+        # the assignment supplies the served model id. (Was masked by force_model.)
         start_run_tracking(job_id=903)
         mock_response = self._mock_openai_response("hi")
 
@@ -589,15 +632,16 @@ class TestLocalBackendIntegration:
             with patch("api.services.llm.log_event"):
                 response = await llm_client.chat(
                     messages=[{"role": "user", "content": "x"}],
-                    backend="local-dougie",
-                    phase="analyst",
+                    backend="local-llm",
+                    phase="seo",
                 )
 
-        assert response.model == "qwen-local"
+        assert response.model == "Qwen2.5-7B-Instruct-4bit"
 
     @pytest.mark.asyncio
-    async def test_phase_models_wins_without_force_model(self, llm_client):
-        # openai-plain does not set force_model -> phase_models.analyst applies.
+    async def test_openai_backend_routes_assigned_model(self, llm_client):
+        # A cloud/openai backend also routes on the per-phase assignment:
+        # phase_models.analyst is what gets sent.
         start_run_tracking(job_id=904)
         mock_response = self._mock_openai_response("hi")
 
@@ -620,7 +664,7 @@ class TestLocalBackendIntegration:
 
         with patch.object(httpx.AsyncClient, "post", return_value=mock_response):
             with patch("api.services.llm.log_event"):
-                response = await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-dougie")
+                response = await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-llm")
 
         assert response.cost == 0.0
 
@@ -633,7 +677,7 @@ class TestLocalBackendIntegration:
 
         with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
             with patch("api.services.llm.log_event"):
-                await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-dougie")
+                await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-llm")
 
         # call_args_list[0] is the LLM request; a Langfuse trace POST may follow.
         payload = mock_post.call_args_list[0].kwargs["json"]
@@ -658,7 +702,7 @@ class TestLocalBackendIntegration:
 
         with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
             with patch("api.services.llm.log_event"):
-                await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-dougie")
+                await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-llm")
 
         assert mock_post.call_args_list[0].kwargs["timeout"] == 300
 
@@ -684,10 +728,10 @@ class TestLocalBackendIntegration:
 
         with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
             with patch("api.services.llm.log_event"):
-                await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-dougie")
+                await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-llm")
 
         payload = mock_post.call_args_list[0].kwargs["json"]
-        assert payload["max_tokens"] == 8192  # local-dougie config value
+        assert payload["max_tokens"] == 8192  # local-llm config value
 
     @pytest.mark.asyncio
     async def test_explicit_max_tokens_kwarg_wins(self, llm_client):
@@ -698,7 +742,7 @@ class TestLocalBackendIntegration:
             with patch("api.services.llm.log_event"):
                 await llm_client.chat(
                     messages=[{"role": "user", "content": "x"}],
-                    backend="local-dougie",
+                    backend="local-llm",
                     max_tokens=256,
                 )
 
@@ -707,27 +751,98 @@ class TestLocalBackendIntegration:
 
     @pytest.mark.asyncio
     async def test_endpoint_env_overrides_config_endpoint(self, llm_client, monkeypatch):
-        monkeypatch.setenv("DOUGIE_ENDPOINT", "http://studio.lan:27180/v1/chat/completions")
+        monkeypatch.setenv("LOCAL_LLM_ENDPOINT", "http://studio.lan:27180/v1/chat/completions")
         start_run_tracking(job_id=909)
         mock_response = self._mock_openai_response("hi")
 
         with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
             with patch("api.services.llm.log_event"):
-                await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-dougie")
+                await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-llm")
 
         assert mock_post.call_args_list[0].args[0] == "http://studio.lan:27180/v1/chat/completions"
 
     @pytest.mark.asyncio
-    async def test_no_auth_header_when_keyless(self, llm_client):
+    async def test_no_auth_header_when_key_unresolved(self, llm_client):
+        # local-llm declares api_key_env, but if the key can't be resolved the
+        # request stays keyless (no "Bearer None" header that trips proxies).
         start_run_tracking(job_id=910)
         mock_response = self._mock_openai_response("hi")
 
         with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
             with patch("api.services.llm.log_event"):
-                await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-dougie")
+                with patch("api.services.llm.get_secret", return_value=None):
+                    await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-llm")
 
         headers = mock_post.call_args_list[0].kwargs["headers"]
         assert "Authorization" not in headers
+
+    @pytest.mark.asyncio
+    async def test_sends_bearer_when_api_key_resolves(self, llm_client):
+        # oMLX (unlike the old dougie) enforces a Bearer key. When api_key_env
+        # resolves, the Authorization header must carry it.
+        start_run_tracking(job_id=911)
+        mock_response = self._mock_openai_response("hi")
+
+        with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
+            with patch("api.services.llm.log_event"):
+                with patch("api.services.llm.get_secret", return_value="omlx-secret"):
+                    await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-llm")
+
+        headers = mock_post.call_args_list[0].kwargs["headers"]
+        assert headers["Authorization"] == "Bearer omlx-secret"
+
+    @pytest.mark.asyncio
+    async def test_model_env_is_fallback_when_unassigned(self, llm_client, monkeypatch):
+        # A single-model local server may serve a different model on a different
+        # network; model_env supplies it without a config edit. It is the FALLBACK,
+        # used when no explicit or per-phase model is assigned.
+        monkeypatch.setenv("LOCAL_LLM_MODEL", "mlx-community/other-model")
+        start_run_tracking(job_id=912)
+        mock_response = self._mock_openai_response("hi")
+
+        with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
+            with patch("api.services.llm.log_event"):
+                response = await llm_client.chat(
+                    messages=[{"role": "user", "content": "x"}],
+                    backend="local-llm",
+                )
+
+        assert response.model == "mlx-community/other-model"
+        assert mock_post.call_args_list[0].kwargs["json"]["model"] == "mlx-community/other-model"
+
+    @pytest.mark.asyncio
+    async def test_phase_assignment_beats_model_env(self, llm_client, monkeypatch):
+        # Route on the (backend, model) pair: a per-phase assignment wins over the
+        # backend's fallback model_env — the inverse of the removed force_model
+        # behavior. Guards against reintroducing a single-model override.
+        monkeypatch.setenv("LOCAL_LLM_MODEL", "mlx-community/other-model")
+        start_run_tracking(job_id=914)
+        mock_response = self._mock_openai_response("hi")
+
+        with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
+            with patch("api.services.llm.log_event"):
+                response = await llm_client.chat(
+                    messages=[{"role": "user", "content": "x"}],
+                    backend="local-llm",
+                    phase="seo",
+                )
+
+        assert response.model == "Qwen2.5-7B-Instruct-4bit"
+        assert mock_post.call_args_list[0].kwargs["json"]["model"] == "Qwen2.5-7B-Instruct-4bit"
+
+    @pytest.mark.asyncio
+    async def test_v1_base_endpoint_gets_chat_completions_appended(self, llm_client, monkeypatch):
+        # The /local-llm skill and oMLX use a base URL ending in /v1; Cardigan must
+        # append the chat-completions path so a bare base works verbatim.
+        monkeypatch.setenv("LOCAL_LLM_ENDPOINT", "http://studio.riechers.co:8000/v1")
+        start_run_tracking(job_id=913)
+        mock_response = self._mock_openai_response("hi")
+
+        with patch.object(httpx.AsyncClient, "post", return_value=mock_response) as mock_post:
+            with patch("api.services.llm.log_event"):
+                await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-llm")
+
+        assert mock_post.call_args_list[0].args[0] == "http://studio.riechers.co:8000/v1/chat/completions"
 
 
 class TestBackendUnavailable:
@@ -758,10 +873,10 @@ class TestBackendUnavailable:
         with patch.object(httpx.AsyncClient, "post", return_value=resp):
             with patch("api.services.llm.log_event"):
                 with pytest.raises(BackendUnavailableError) as exc:
-                    await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-dougie")
+                    await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-llm")
 
         assert "memory pressure" in exc.value.detail
-        assert exc.value.backend == "local-dougie"
+        assert exc.value.backend == "local-llm"
 
     @pytest.mark.asyncio
     async def test_raises_on_connect_error_for_deferrable_backend(self, llm_client):
@@ -770,7 +885,7 @@ class TestBackendUnavailable:
         with patch.object(httpx.AsyncClient, "post", side_effect=httpx.ConnectError("refused")):
             with patch("api.services.llm.log_event"):
                 with pytest.raises(BackendUnavailableError):
-                    await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-dougie")
+                    await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-llm")
 
     @pytest.mark.asyncio
     async def test_raises_on_read_timeout_for_deferrable_backend(self, llm_client):
@@ -779,7 +894,7 @@ class TestBackendUnavailable:
         with patch.object(httpx.AsyncClient, "post", side_effect=httpx.ReadTimeout("slow")):
             with patch("api.services.llm.log_event"):
                 with pytest.raises(BackendUnavailableError):
-                    await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-dougie")
+                    await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-llm")
 
     @pytest.mark.asyncio
     async def test_503_not_converted_for_non_deferrable_backend(self, llm_client):
@@ -794,14 +909,14 @@ class TestBackendUnavailable:
 
     @pytest.mark.asyncio
     async def test_503_with_retryable_false_is_not_deferred(self, llm_client):
-        # A future dougie envelope marking the error non-retryable must NOT defer.
+        # A busy-signal envelope marking the error non-retryable must NOT defer.
         start_run_tracking(job_id=924)
         resp = self._mock_response(503, {"error": {"retryable": False, "message": "model not found"}})
 
         with patch.object(httpx.AsyncClient, "post", return_value=resp):
             with patch("api.services.llm.log_event"):
                 with pytest.raises(httpx.HTTPStatusError):
-                    await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-dougie")
+                    await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-llm")
 
     @pytest.mark.asyncio
     async def test_reads_retry_after_header(self, llm_client):
@@ -811,6 +926,6 @@ class TestBackendUnavailable:
         with patch.object(httpx.AsyncClient, "post", return_value=resp):
             with patch("api.services.llm.log_event"):
                 with pytest.raises(BackendUnavailableError) as exc:
-                    await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-dougie")
+                    await llm_client.chat(messages=[{"role": "user", "content": "x"}], backend="local-llm")
 
         assert exc.value.retry_after_s == 300

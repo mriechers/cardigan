@@ -81,6 +81,7 @@ def _bootstrap_complete() -> bool:
         "LANGFUSE_PUBLIC_KEY",
         "LANGFUSE_SECRET_KEY",
         "CARDIGAN_API_KEY",
+        "LOCAL_LLM_API_KEY",
     ]
     for key in keys:
         if key not in os.environ:
